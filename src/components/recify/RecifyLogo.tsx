@@ -1,4 +1,4 @@
-import { Receipt } from 'lucide-react';
+import logo from '@/assets/logo.png';
 
 interface RecifyLogoProps {
   size?: 'sm' | 'md' | 'lg';
@@ -6,26 +6,22 @@ interface RecifyLogoProps {
 }
 
 const sizeClasses = {
-  sm: 'text-lg',
-  md: 'text-2xl',
-  lg: 'text-4xl',
-};
-
-const iconSizes = {
-  sm: 16,
-  md: 20,
-  lg: 28,
+  sm: 'h-8',
+  md: 'h-10',
+  lg: 'h-14',
 };
 
 export function RecifyLogo({ size = 'md', showIcon = true }: RecifyLogoProps) {
   return (
     <div className="flex items-center gap-2">
       {showIcon && (
-        <div className="bg-gradient-primary rounded-xl p-1.5 flex items-center justify-center">
-          <Receipt className="text-primary-foreground" size={iconSizes[size]} />
-        </div>
+        <img 
+          src={logo} 
+          alt="Recify Logo" 
+          className={`${sizeClasses[size]} w-auto`}
+        />
       )}
-      <span className={`${sizeClasses[size]} font-bold tracking-tight text-foreground`}>
+      <span className={`${size === 'sm' ? 'text-lg' : size === 'md' ? 'text-2xl' : 'text-4xl'} font-bold tracking-tight text-foreground`}>
         Recify
       </span>
     </div>
