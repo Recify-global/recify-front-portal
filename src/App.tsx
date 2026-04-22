@@ -7,6 +7,7 @@ import AuthPage from "./pages/AuthPage";
 import UploadPage from "./pages/UploadPage";
 import HistoryPage from "./pages/HistoryPage";
 import NotFound from "./pages/NotFound";
+import ProtectedRoute from "./guards/ProtectedRoute";
 
 const queryClient = new QueryClient();
 
@@ -19,8 +20,10 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Navigate to="/auth" replace />} />
           <Route path="/auth" element={<AuthPage />} />
-          <Route path="/app/upload" element={<UploadPage />} />
-          <Route path="/app/history" element={<HistoryPage />} />
+          <Route element={<ProtectedRoute />}>
+            <Route path="/app/upload" element={<UploadPage />} />
+            <Route path="/app/history" element={<HistoryPage />} />
+          </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

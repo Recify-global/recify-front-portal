@@ -1,11 +1,19 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { RecifyLogo } from '@/components/recify/RecifyLogo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Receipt, BarChart3, Shield, Zap, Loader2 } from 'lucide-react';
+import { useAuth } from '@/hooks/use-auth';
+import { ApiRequestError } from '@/api/http';
+import {
+  getStoredCompanyId,
+  getStoredToken,
+  subscribeAuthChanges,
+} from '@/auth/storage';
 
 type AuthMode = 'login' | 'register';
 
@@ -18,20 +26,75 @@ const features = [
 
 export default function AuthPage() {
   const [mode, setMode] = useState<AuthMode>('login');
-  const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [businessName, setBusinessName] = useState('');
+  const [businessType, setBusinessType] = useState<string | undefined>(undefined);
+  const [phone, setPhone] = useState('');
   const navigate = useNavigate();
+  const { login } = useAuth();
 
-  const handleGoogleLogin = () => {
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      navigate('/app/upload');
-    }, 1500);
+  const loading = login.isPending;
+
+  // Si el usuario ya tiene sesión válida (token + companyId) y aterriza en /auth
+  // (refresh, back del navegador, deep link), lo mandamos directo a la app.
+  // Esto también cubre el caso de que otra pestaña haya hecho login mientras tanto.
+  useEffect(() => {
+    const maybeRedirect = () => {
+      if (getStoredToken() && getStoredCompanyId()) {
+        navigate('/app/upload', { replace: true });
+      }
+    };
+    maybeRedirect();
+    return subscribeAuthChanges(maybeRedirect);
+  }, [navigate]);
+
+  const extractMessage = (err: unknown, fallback: string) => {
+    if (err instanceof ApiRequestError) return err.message || fallback;
+    if (err instanceof Error) return err.message || fallback;
+    return fallback;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleGoogleLogin = () => {
+    // Google OAuth aún no existe en el backend. Mantenemos el botón visible
+    // pero evitamos el flujo simulado con setTimeout.
+    toast.info('Iniciar sesión con Google aún no está disponible.');
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    handleGoogleLogin();
+    if (loading) return;
+
+    if (mode === 'register') {
+      // El formulario de registro actual no captura contraseña y el backend
+      // requiere además una empresa asociada. Dejamos el botón funcional en UI
+      // pero no disparamos un flujo falso: se habilitará cuando exista el
+      // endpoint de alta combinada (usuario + empresa). Se mantienen los
+      // campos `name`, `businessName`, `businessType` y `phone` para esa fase.
+      void name;
+      void businessName;
+      void businessType;
+      void phone;
+      toast.info('El registro aún no está disponible. Inicia sesión con una cuenta existente.');
+      return;
+    }
+
+    if (!email || !password) {
+      toast.error('Ingresa tu correo y contraseña.');
+      return;
+    }
+
+    try {
+      const res = await login.mutateAsync({ email, password });
+      if (res.user.companies && res.user.companies.length > 0) {
+        navigate('/app/upload', { replace: true });
+      } else {
+        toast.info('Tu cuenta aún no tiene una empresa asignada. Contacta al administrador.');
+      }
+    } catch (err) {
+      toast.error(extractMessage(err, 'No se pudo iniciar sesión.'));
+    }
   };
 
   return (
@@ -84,6 +147,7 @@ export default function AuthPage() {
           {/* Tabs */}
           <div className="flex bg-secondary rounded-xl p-1 mb-8">
             <button
+              type="button"
               onClick={() => setMode('login')}
               className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-all ${
                 mode === 'login'
@@ -94,6 +158,7 @@ export default function AuthPage() {
               Iniciar sesión
             </button>
             <button
+              type="button"
               onClick={() => setMode('register')}
               className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-all ${
                 mode === 'register'
@@ -107,22 +172,19 @@ export default function AuthPage() {
 
           {/* Google button */}
           <Button
+            type="button"
             onClick={handleGoogleLogin}
             disabled={loading}
             variant="outline"
             className="w-full h-12 rounded-xl text-sm font-medium border-border hover:bg-secondary transition-all"
           >
-            {loading ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <svg className="mr-2 h-5 w-5" viewBox="0 0 24 24">
-                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
-                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
-                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-              </svg>
-            )}
-            {loading ? 'Conectando...' : 'Continuar con Google'}
+            <svg className="mr-2 h-5 w-5" viewBox="0 0 24 24">
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+            </svg>
+            Continuar con Google
           </Button>
 
           <div className="flex items-center gap-3 my-6">
@@ -137,15 +199,25 @@ export default function AuthPage() {
               <>
                 <div className="space-y-2">
                   <Label className="text-sm text-foreground">Nombre completo</Label>
-                  <Input placeholder="María Rodríguez" className="h-11 rounded-xl bg-background border-border" />
+                  <Input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="María Rodríguez"
+                    className="h-11 rounded-xl bg-background border-border"
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label className="text-sm text-foreground">Nombre del negocio</Label>
-                  <Input placeholder="Mi Empresa S.A. de C.V." className="h-11 rounded-xl bg-background border-border" />
+                  <Input
+                    value={businessName}
+                    onChange={(e) => setBusinessName(e.target.value)}
+                    placeholder="Mi Empresa S.A. de C.V."
+                    className="h-11 rounded-xl bg-background border-border"
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label className="text-sm text-foreground">Tipo de negocio</Label>
-                  <Select>
+                  <Select value={businessType} onValueChange={setBusinessType}>
                     <SelectTrigger className="h-11 rounded-xl bg-background border-border">
                       <SelectValue placeholder="Selecciona un tipo" />
                     </SelectTrigger>
@@ -161,18 +233,36 @@ export default function AuthPage() {
             )}
             <div className="space-y-2">
               <Label className="text-sm text-foreground">Correo electrónico</Label>
-              <Input type="email" placeholder="maria@miempresa.com" className="h-11 rounded-xl bg-background border-border" />
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="maria@miempresa.com"
+                className="h-11 rounded-xl bg-background border-border"
+              />
             </div>
             {mode === 'register' && (
               <div className="space-y-2">
                 <Label className="text-sm text-foreground">Teléfono <span className="text-muted-foreground">(opcional)</span></Label>
-                <Input type="tel" placeholder="+52 55 1234 5678" className="h-11 rounded-xl bg-background border-border" />
+                <Input
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="+52 55 1234 5678"
+                  className="h-11 rounded-xl bg-background border-border"
+                />
               </div>
             )}
             {mode === 'login' && (
               <div className="space-y-2">
                 <Label className="text-sm text-foreground">Contraseña</Label>
-                <Input type="password" placeholder="••••••••" className="h-11 rounded-xl bg-background border-border" />
+                <Input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="h-11 rounded-xl bg-background border-border"
+                />
               </div>
             )}
 

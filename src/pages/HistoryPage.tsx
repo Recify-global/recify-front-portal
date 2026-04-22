@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { AppLayout } from '@/components/recify/AppLayout';
 import { MetricCard } from '@/components/recify/MetricCard';
 import { StatusBadge } from '@/components/recify/StatusBadge';
@@ -6,10 +6,10 @@ import { CategoryBadge } from '@/components/recify/CategoryBadge';
 import { ConfidenceIndicator } from '@/components/recify/ConfidenceIndicator';
 import { EmptyState } from '@/components/recify/EmptyState';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { dummyTickets, categorias, estatuses, type Ticket } from '@/data/dummy-tickets';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import {
   useReactTable,
   getCoreRowModel,
@@ -23,12 +23,19 @@ import {
 } from '@tanstack/react-table';
 import {
   Receipt, DollarSign, Tags, AlertCircle, Search, ChevronLeft, ChevronRight,
-  ArrowUpDown, Download, Trash2, Edit3, FileImage, X,
+  ArrowUpDown, Download, Trash2, Edit3, FileImage, X, Loader2,
 } from 'lucide-react';
+import { mapBackendTicket, mapBackendTickets } from '@/mappers/ticket.mapper';
+import { useTicket, useTickets } from '@/hooks/use-tickets';
+import { useAuth } from '@/hooks/use-auth';
+import { deleteTicket } from '@/services/tickets.service';
+import type { UiTicket } from '@/types/ticket';
 
 const formatMXN = (n: number) => `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
 
-const columns: ColumnDef<Ticket>[] = [
+const statusOptions = ['analizado', 'pendiente', 'error'] as const;
+
+const columns: ColumnDef<UiTicket>[] = [
   {
     accessorKey: 'id',
     header: 'ID',
@@ -90,16 +97,36 @@ export default function HistoryPage() {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
-  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  const [selectedTicket, setSelectedTicket] = useState<UiTicket | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const { companyId } = useAuth();
+  const queryClient = useQueryClient();
+
+  const ticketsQuery = useTickets({ page: 1, limit: 100 });
+  const detailQuery = useTicket(selectedTicket?.id);
+
+  const tickets = useMemo(
+    () => mapBackendTickets(ticketsQuery.data?.data),
+    [ticketsQuery.data?.data],
+  );
+
+  const categorias = useMemo(() => {
+    const values = Array.from(new Set(tickets.map((t) => t.categoria))).filter(Boolean);
+    return values.sort((a, b) => a.localeCompare(b, 'es-MX'));
+  }, [tickets]);
 
   const filteredData = useMemo(() => {
-    let data = [...dummyTickets];
+    let data = [...tickets];
     if (categoryFilter !== 'all') data = data.filter(t => t.categoria === categoryFilter);
     if (statusFilter !== 'all') data = data.filter(t => t.estatus === statusFilter);
     return data;
-  }, [categoryFilter, statusFilter]);
+  }, [tickets, categoryFilter, statusFilter]);
+
+  const selectedTicketDetail = useMemo(() => {
+    if (detailQuery.data) return mapBackendTicket(detailQuery.data);
+    return selectedTicket;
+  }, [detailQuery.data, selectedTicket]);
 
   const table = useReactTable({
     data: filteredData,
@@ -115,9 +142,36 @@ export default function HistoryPage() {
     initialState: { pagination: { pageSize: 8 } },
   });
 
-  const totalGasto = dummyTickets.reduce((acc, t) => acc + t.total, 0);
-  const uniqueCategories = new Set(dummyTickets.map(t => t.categoria)).size;
-  const pendientes = dummyTickets.filter(t => t.estatus === 'pendiente').length;
+  const deleteMutation = useMutation({
+    mutationFn: async (ticketId: string) => {
+      if (!companyId) throw new Error('No hay compañía activa.');
+      await deleteTicket(companyId, ticketId);
+    },
+    onSuccess: async () => {
+      toast.success('Ticket eliminado correctamente.');
+      setSelectedTicket(null);
+      await queryClient.invalidateQueries({ queryKey: ['tickets', companyId] });
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : 'No se pudo eliminar el ticket.';
+      toast.error(message);
+    },
+  });
+
+  const handleDelete = () => {
+    if (!selectedTicketDetail?.id || deleteMutation.isPending) return;
+    deleteMutation.mutate(selectedTicketDetail.id);
+  };
+
+  const handlePendingAction = (label: string) => {
+    toast.info(`${label} estará disponible en una siguiente fase.`);
+  };
+
+  const totalGasto = filteredData.reduce((acc, t) => acc + t.total, 0);
+  const uniqueCategories = new Set(filteredData.map(t => t.categoria)).size;
+  const pendientes = filteredData.filter(t => t.estatus === 'pendiente').length;
+  const subtitle = new Intl.DateTimeFormat('es-MX', { month: 'long', year: 'numeric' }).format(new Date());
+  const capitalizedSubtitle = subtitle.charAt(0).toUpperCase() + subtitle.slice(1);
 
   return (
     <AppLayout>
@@ -129,8 +183,8 @@ export default function HistoryPage() {
 
         {/* Metrics */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <MetricCard title="Tickets este mes" value={dummyTickets.length} subtitle="Abril 2025" icon={<Receipt size={20} />} />
-          <MetricCard title="Gasto total" value={formatMXN(totalGasto)} subtitle="Abril 2025" icon={<DollarSign size={20} />} />
+          <MetricCard title="Tickets este mes" value={filteredData.length} subtitle={capitalizedSubtitle} icon={<Receipt size={20} />} />
+          <MetricCard title="Gasto total" value={formatMXN(totalGasto)} subtitle={capitalizedSubtitle} icon={<DollarSign size={20} />} />
           <MetricCard title="Categorías" value={uniqueCategories} subtitle="detectadas" icon={<Tags size={20} />} />
           <MetricCard title="Pendientes" value={pendientes} subtitle="por revisar" icon={<AlertCircle size={20} />} />
         </div>
@@ -168,7 +222,7 @@ export default function HistoryPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos</SelectItem>
-                {estatuses.map(s => <SelectItem key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</SelectItem>)}
+                {statusOptions.map(s => <SelectItem key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -176,7 +230,25 @@ export default function HistoryPage() {
 
         {/* Table */}
         <div className="bg-card rounded-2xl border border-border/50 shadow-elegant overflow-hidden">
-          {table.getRowModel().rows.length === 0 ? (
+          {ticketsQuery.isPending ? (
+            <div className="py-16 flex items-center justify-center">
+              <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                <Loader2 size={16} className="animate-spin" />
+                Cargando tickets...
+              </div>
+            </div>
+          ) : ticketsQuery.isError ? (
+            <EmptyState
+              icon={<AlertCircle size={32} />}
+              title="No pudimos cargar los tickets"
+              description="Ocurrió un error al consultar el backend. Intenta nuevamente."
+              action={
+                <Button variant="outline" className="rounded-xl" onClick={() => ticketsQuery.refetch()}>
+                  Reintentar
+                </Button>
+              }
+            />
+          ) : table.getRowModel().rows.length === 0 ? (
             <EmptyState
               icon={<Receipt size={32} />}
               title="Sin resultados"
@@ -257,30 +329,38 @@ export default function HistoryPage() {
       {/* Detail Sheet */}
       <Sheet open={!!selectedTicket} onOpenChange={() => setSelectedTicket(null)}>
         <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-          {selectedTicket && (
+          {selectedTicketDetail && (
             <div className="space-y-6">
               <SheetHeader>
                 <SheetTitle className="flex items-center gap-2">
-                  <span className="text-foreground">{selectedTicket.id}</span>
-                  <StatusBadge status={selectedTicket.estatus} />
+                  <span className="text-foreground">{selectedTicketDetail.id}</span>
+                  <StatusBadge status={selectedTicketDetail.estatus} />
                 </SheetTitle>
               </SheetHeader>
 
               {/* Ticket preview placeholder */}
               <div className="bg-muted rounded-2xl h-40 flex items-center justify-center">
-                <FileImage size={40} className="text-muted-foreground" />
+                {selectedTicketDetail.imagenUrl ? (
+                  <img
+                    src={selectedTicketDetail.imagenUrl}
+                    alt={`Ticket ${selectedTicketDetail.id}`}
+                    className="w-full h-full object-cover rounded-2xl"
+                  />
+                ) : (
+                  <FileImage size={40} className="text-muted-foreground" />
+                )}
               </div>
 
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   {[
-                    { label: 'Comercio', value: selectedTicket.comercio },
-                    { label: 'Fecha', value: `${selectedTicket.fecha} ${selectedTicket.hora}` },
-                    { label: 'Subtotal', value: formatMXN(selectedTicket.subtotal) },
-                    { label: 'IVA', value: formatMXN(selectedTicket.iva) },
-                    { label: 'Total', value: formatMXN(selectedTicket.total) },
-                    { label: 'Moneda', value: selectedTicket.moneda },
-                    { label: 'Método de pago', value: selectedTicket.metodoPago },
+                    { label: 'Comercio', value: selectedTicketDetail.comercio },
+                    { label: 'Fecha', value: `${selectedTicketDetail.fecha} ${selectedTicketDetail.hora}` },
+                    { label: 'Subtotal', value: formatMXN(selectedTicketDetail.subtotal) },
+                    { label: 'IVA', value: formatMXN(selectedTicketDetail.iva) },
+                    { label: 'Total', value: formatMXN(selectedTicketDetail.total) },
+                    { label: 'Moneda', value: selectedTicketDetail.moneda },
+                    { label: 'Método de pago', value: selectedTicketDetail.metodoPago },
                   ].map(f => (
                     <div key={f.label}>
                       <p className="text-xs text-muted-foreground">{f.label}</p>
@@ -289,32 +369,44 @@ export default function HistoryPage() {
                   ))}
                   <div>
                     <p className="text-xs text-muted-foreground mb-1">Categoría</p>
-                    <CategoryBadge category={selectedTicket.categoria} />
+                    <CategoryBadge category={selectedTicketDetail.categoria} />
                   </div>
                 </div>
 
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Confianza del análisis</p>
-                  <ConfidenceIndicator value={selectedTicket.confianza} />
+                  <ConfidenceIndicator value={selectedTicketDetail.confianza} />
                 </div>
 
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Notas</p>
-                  <p className="text-sm text-foreground">{selectedTicket.notas}</p>
+                  <p className="text-sm text-foreground">{selectedTicketDetail.notas}</p>
                 </div>
               </div>
 
               <div className="flex flex-col gap-2 pt-2">
-                <Button variant="outline" className="rounded-xl">
+                <Button variant="outline" className="rounded-xl" onClick={() => handlePendingAction('Editar')}>
                   <Edit3 size={14} className="mr-2" /> Editar
                 </Button>
-                <Button variant="outline" className="rounded-xl">
+                <Button variant="outline" className="rounded-xl" onClick={() => handlePendingAction('Descargar')}>
                   <Download size={14} className="mr-2" /> Descargar
                 </Button>
-                <Button variant="outline" className="rounded-xl text-destructive hover:text-destructive">
-                  <Trash2 size={14} className="mr-2" /> Eliminar
+                <Button
+                  variant="outline"
+                  className="rounded-xl text-destructive hover:text-destructive"
+                  onClick={handleDelete}
+                  disabled={deleteMutation.isPending}
+                >
+                  {deleteMutation.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
+                  Eliminar
                 </Button>
               </div>
+              {detailQuery.isFetching && (
+                <p className="text-xs text-muted-foreground -mt-2">Cargando detalle actualizado...</p>
+              )}
+              {detailQuery.isError && (
+                <p className="text-xs text-destructive -mt-2">No se pudo cargar el detalle completo del ticket.</p>
+              )}
             </div>
           )}
         </SheetContent>

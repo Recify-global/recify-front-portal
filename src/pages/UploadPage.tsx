@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppLayout } from '@/components/recify/AppLayout';
 import { StatusBadge } from '@/components/recify/StatusBadge';
 import { CategoryBadge } from '@/components/recify/CategoryBadge';
@@ -7,26 +7,110 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { dummyAnalyzedTicket, type Ticket } from '@/data/dummy-tickets';
+import { useAuth } from '@/hooks/use-auth';
+import { usePreprocessTicket, useUploadTicket } from '@/hooks/use-upload-ticket';
+import { mapBackendTicket, mapPreprocessTicket } from '@/mappers/ticket.mapper';
+import type { UiTicket } from '@/types/ticket';
 import { Upload, Camera, FileImage, Loader2, CheckCircle2, Edit3, Save, Plus, Receipt } from 'lucide-react';
+import { toast } from 'sonner';
+import { ApiRequestError } from '@/api/http';
 
 type UploadState = 'idle' | 'uploaded' | 'analyzing' | 'done';
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const MAX_SIZE_BYTES = 10 * 1024 * 1024;
 
 export default function UploadPage() {
   const [state, setState] = useState<UploadState>('idle');
-  const [ticket, setTicket] = useState<Ticket | null>(null);
+  const [ticket, setTicket] = useState<UiTicket | null>(null);
   const [editing, setEditing] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | undefined>(undefined);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { token, companyId } = useAuth();
+  const preprocessMutation = usePreprocessTicket();
+  const uploadMutation = useUploadTicket();
 
-  const handleUpload = () => {
+  const isBusy = preprocessMutation.isPending || uploadMutation.isPending;
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  const formatMXN = useCallback((n: number) => `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`, []);
+
+  const extractError = (err: unknown, fallback: string) => {
+    if (err instanceof ApiRequestError) return err.message || fallback;
+    if (err instanceof Error) return err.message || fallback;
+    return fallback;
+  };
+
+  const validateSession = () => {
+    if (!token) {
+      toast.error('Tu sesión expiró. Inicia sesión de nuevo.');
+      return false;
+    }
+    if (!companyId) {
+      toast.error('No hay una compañía activa para procesar el ticket.');
+      return false;
+    }
+    return true;
+  };
+
+  const validateFile = (file: File | null | undefined) => {
+    if (!file) {
+      toast.error('Selecciona un archivo para continuar.');
+      return false;
+    }
+    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+      toast.error('Formato no permitido. Usa JPG, PNG, WEBP o GIF.');
+      return false;
+    }
+    if (file.size > MAX_SIZE_BYTES) {
+      toast.error('El archivo supera el máximo de 10MB.');
+      return false;
+    }
+    return true;
+  };
+
+  const runPreprocess = async (file: File, imageUrlOverride?: string) => {
+    if (!validateSession()) return;
+    setState('analyzing');
+    try {
+      const response = await preprocessMutation.mutateAsync({ file });
+      const mapped = mapPreprocessTicket(response.ticket, {
+        imageUrl: imageUrlOverride ?? previewUrl,
+        fallbackId: `preview-${Date.now()}`,
+        ocrText: response.ocrText,
+      });
+      setTicket(mapped);
+      setEditing(false);
+      setState('done');
+      toast.success('Ticket analizado correctamente.');
+    } catch (err) {
+      setState('uploaded');
+      toast.error(extractError(err, 'No se pudo analizar el ticket.'));
+    }
+  };
+
+  const handleNewFile = async (file: File | null) => {
+    if (isBusy) return;
+    if (!validateSession()) return;
+    if (!validateFile(file)) return;
+
+    const nextFile = file as File;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    const nextPreview = URL.createObjectURL(nextFile);
+
+    setPreviewUrl(nextPreview);
+    setSelectedFile(nextFile);
+    setTicket(null);
+    setEditing(false);
     setState('uploaded');
-    setTimeout(() => {
-      setState('analyzing');
-      setTimeout(() => {
-        setTicket({ ...dummyAnalyzedTicket });
-        setState('done');
-      }, 2500);
-    }, 800);
+
+    await runPreprocess(nextFile, nextPreview);
   };
 
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -34,22 +118,85 @@ export default function UploadPage() {
     e.stopPropagation();
     if (e.type === 'dragenter' || e.type === 'dragover') setDragActive(true);
     else if (e.type === 'dragleave') setDragActive(false);
-  }, []);
+  }, [isBusy]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (isBusy) return;
     setDragActive(false);
-    handleUpload();
-  }, []);
+    const file = e.dataTransfer.files?.[0] ?? null;
+    void handleNewFile(file);
+  }, [isBusy]);
+
+  const openFilePicker = () => {
+    if (isBusy) return;
+    if (!validateSession()) return;
+    fileInputRef.current?.click();
+  };
+
+  const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    await handleNewFile(file);
+    e.currentTarget.value = '';
+  };
+
+  const handleSave = async () => {
+    if (isBusy) return;
+    if (!validateSession()) return;
+    if (!validateFile(selectedFile)) return;
+    if (editing) {
+      toast.info('Los cambios manuales aún no se sincronizan con el backend en esta fase.');
+    }
+
+    try {
+      const response = await uploadMutation.mutateAsync({ file: selectedFile as File });
+      const mapped = mapBackendTicket(response.ticket);
+      setTicket({
+        ...mapped,
+        imagenUrl: mapped.imagenUrl ?? response.imageUrl ?? previewUrl,
+      });
+      setEditing(false);
+      setState('done');
+      toast.success('Ticket guardado correctamente.');
+    } catch (err) {
+      toast.error(extractError(err, 'No se pudo guardar el ticket.'));
+    }
+  };
+
+  const handleReanalyze = async () => {
+    if (!selectedFile) {
+      toast.error('Primero selecciona una imagen.');
+      return;
+    }
+    await runPreprocess(selectedFile);
+  };
 
   const reset = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
     setState('idle');
     setTicket(null);
     setEditing(false);
+    setSelectedFile(null);
+    setPreviewUrl(undefined);
+    preprocessMutation.reset();
+    uploadMutation.reset();
   };
 
-  const formatMXN = (n: number) => `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
+  const ticketFields = useMemo(() => (
+    ticket
+      ? [
+          { label: 'Comercio', value: ticket.comercio, key: 'comercio' },
+          { label: 'Fecha', value: ticket.fecha, key: 'fecha' },
+          { label: 'Hora', value: ticket.hora, key: 'hora' },
+          { label: 'Subtotal', value: formatMXN(ticket.subtotal), key: 'subtotal' },
+          { label: 'IVA', value: formatMXN(ticket.iva), key: 'iva' },
+          { label: 'Total', value: formatMXN(ticket.total), key: 'total' },
+          { label: 'Moneda', value: ticket.moneda, key: 'moneda' },
+          { label: 'Método de pago', value: ticket.metodoPago, key: 'metodoPago' },
+        ]
+      : []
+  ), [ticket, formatMXN]);
 
   return (
     <AppLayout>
@@ -62,12 +209,19 @@ export default function UploadPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Upload zone */}
           <div className="space-y-4">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              className="hidden"
+              onChange={handleFileInputChange}
+            />
             <div
               onDragEnter={handleDrag}
               onDragLeave={handleDrag}
               onDragOver={handleDrag}
               onDrop={handleDrop}
-              onClick={state === 'idle' ? handleUpload : undefined}
+              onClick={state === 'idle' ? openFilePicker : undefined}
               className={`relative bg-card border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center min-h-[340px] transition-all cursor-pointer ${
                 dragActive
                   ? 'border-primary bg-accent'
@@ -85,14 +239,14 @@ export default function UploadPage() {
                     <p className="font-medium text-foreground">Arrastra tu ticket aquí</p>
                     <p className="text-sm text-muted-foreground mt-1">o haz clic para seleccionar archivo</p>
                   </div>
-                  <p className="text-xs text-muted-foreground">PNG, JPG, PDF hasta 10MB</p>
+                  <p className="text-xs text-muted-foreground">PNG, JPG, WEBP o GIF hasta 10MB</p>
                 </div>
               )}
 
               {state === 'uploaded' && (
                 <div className="text-center space-y-3 animate-fade-in">
                   <FileImage size={48} className="text-primary mx-auto" />
-                  <p className="text-sm font-medium text-foreground">ticket_sanborns.jpg</p>
+                  <p className="text-sm font-medium text-foreground">{selectedFile?.name ?? 'ticket.jpg'}</p>
                   <p className="text-xs text-muted-foreground">Archivo cargado correctamente</p>
                 </div>
               )}
@@ -128,17 +282,18 @@ export default function UploadPage() {
 
             {state === 'idle' && (
               <div className="flex gap-3">
-                <Button variant="outline" className="flex-1 h-11 rounded-xl" onClick={handleUpload}>
+                <Button variant="outline" className="flex-1 h-11 rounded-xl" onClick={openFilePicker} disabled={isBusy}>
                   <Camera size={16} className="mr-2" /> Tomar foto
                 </Button>
-                <Button variant="outline" className="flex-1 h-11 rounded-xl" onClick={handleUpload}>
+                <Button variant="outline" className="flex-1 h-11 rounded-xl" onClick={openFilePicker} disabled={isBusy}>
                   <Upload size={16} className="mr-2" /> Subir archivo
                 </Button>
               </div>
             )}
 
             {state === 'done' && (
-              <Button onClick={() => { setState('analyzing'); setTimeout(() => setState('done'), 2000); }} className="w-full h-11 rounded-xl bg-gradient-primary text-primary-foreground hover:opacity-90">
+              <Button onClick={handleReanalyze} className="w-full h-11 rounded-xl bg-gradient-primary text-primary-foreground hover:opacity-90" disabled={isBusy}>
+                {preprocessMutation.isPending ? <Loader2 size={16} className="mr-2 animate-spin" /> : null}
                 Analizar ticket
               </Button>
             )}
@@ -201,16 +356,7 @@ export default function UploadPage() {
                     </Button>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {[
-                      { label: 'Comercio', value: ticket.comercio, key: 'comercio' },
-                      { label: 'Fecha', value: ticket.fecha, key: 'fecha' },
-                      { label: 'Hora', value: ticket.hora, key: 'hora' },
-                      { label: 'Subtotal', value: formatMXN(ticket.subtotal), key: 'subtotal' },
-                      { label: 'IVA', value: formatMXN(ticket.iva), key: 'iva' },
-                      { label: 'Total', value: formatMXN(ticket.total), key: 'total' },
-                      { label: 'Moneda', value: ticket.moneda, key: 'moneda' },
-                      { label: 'Método de pago', value: ticket.metodoPago, key: 'metodoPago' },
-                    ].map((field) => (
+                    {ticketFields.map((field) => (
                       <div key={field.key} className="space-y-1.5">
                         <Label className="text-xs text-muted-foreground">{field.label}</Label>
                         {editing ? (
@@ -233,10 +379,11 @@ export default function UploadPage() {
 
                 {/* Actions */}
                 <div className="flex flex-col sm:flex-row gap-3">
-                  <Button className="flex-1 h-11 rounded-xl bg-gradient-primary text-primary-foreground hover:opacity-90">
-                    <Save size={16} className="mr-2" /> Guardar ticket
+                  <Button className="flex-1 h-11 rounded-xl bg-gradient-primary text-primary-foreground hover:opacity-90" onClick={handleSave} disabled={isBusy}>
+                    {uploadMutation.isPending ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Save size={16} className="mr-2" />}
+                    Guardar ticket
                   </Button>
-                  <Button variant="outline" className="flex-1 h-11 rounded-xl" onClick={reset}>
+                  <Button variant="outline" className="flex-1 h-11 rounded-xl" onClick={reset} disabled={isBusy}>
                     <Plus size={16} className="mr-2" /> Subir otro
                   </Button>
                 </div>
