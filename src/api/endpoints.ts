@@ -15,4 +15,13 @@ export const endpoints = {
     preprocess: (companyId: string) => `/companies/${companyId}/upload/preprocess`,
     ticket: (companyId: string) => `/companies/${companyId}/upload/ticket`,
   },
+  dashboard: {
+    summary: (companyId: string) => `/companies/${companyId}/dashboard/summary`,
+    byDate: (companyId: string) => `/companies/${companyId}/dashboard/by-date`,
+    byCategory: (companyId: string) => `/companies/${companyId}/dashboard/by-category`,
+    byPaymentMethod: (companyId: string) => `/companies/${companyId}/dashboard/by-payment-method`,
+    dailyReport: (companyId: string) => `/companies/${companyId}/dashboard/daily-report`,
+    dailyReportTicket: (companyId: string, ticketId: string) =>
+      `/companies/${companyId}/dashboard/daily-report/${ticketId}`,
+  },
 } as const;

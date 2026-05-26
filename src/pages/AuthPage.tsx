@@ -33,9 +33,9 @@ export default function AuthPage() {
   const [businessType, setBusinessType] = useState<string | undefined>(undefined);
   const [phone, setPhone] = useState('');
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, register } = useAuth();
 
-  const loading = login.isPending;
+  const loading = login.isPending || register.isPending;
 
   // Si el usuario ya tiene sesión válida (token + companyId) y aterriza en /auth
   // (refresh, back del navegador, deep link), lo mandamos directo a la app.
@@ -67,16 +67,27 @@ export default function AuthPage() {
     if (loading) return;
 
     if (mode === 'register') {
-      // El formulario de registro actual no captura contraseña y el backend
-      // requiere además una empresa asociada. Dejamos el botón funcional en UI
-      // pero no disparamos un flujo falso: se habilitará cuando exista el
-      // endpoint de alta combinada (usuario + empresa). Se mantienen los
-      // campos `name`, `businessName`, `businessType` y `phone` para esa fase.
-      void name;
-      void businessName;
-      void businessType;
-      void phone;
-      toast.info('El registro aún no está disponible. Inicia sesión con una cuenta existente.');
+      if (!name || !email || !password) {
+        toast.error('Completa nombre, correo y contraseña para registrarte.');
+        return;
+      }
+
+      try {
+        const res = await register.mutateAsync({
+          name,
+          email,
+          password,
+          role: 'viewer',
+        });
+        if (res.user.companies && res.user.companies.length > 0) {
+          navigate('/app/upload', { replace: true });
+        } else {
+          toast.success('Cuenta creada. Tu usuario aún no tiene una empresa asignada.');
+          setMode('login');
+        }
+      } catch (err) {
+        toast.error(extractMessage(err, 'No se pudo crear la cuenta.'));
+      }
       return;
     }
 
@@ -253,19 +264,16 @@ export default function AuthPage() {
                 />
               </div>
             )}
-            {mode === 'login' && (
-              <div className="space-y-2">
-                <Label className="text-sm text-foreground">Contraseña</Label>
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="h-11 rounded-xl bg-background border-border"
-                />
-              </div>
-            )}
-
+            <div className="space-y-2">
+              <Label className="text-sm text-foreground">Contraseña</Label>
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="h-11 rounded-xl bg-background border-border"
+              />
+            </div>
             <Button
               type="submit"
               disabled={loading}

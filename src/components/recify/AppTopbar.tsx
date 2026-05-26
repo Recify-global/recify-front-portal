@@ -24,7 +24,6 @@ export function AppTopbar() {
   const { user, logout } = useAuth();
   const displayName = user?.name?.trim() || 'Usuario';
   const initials = computeInitials(user?.name);
-  const subtitle = user?.email || 'Mi Negocio';
 
   return (
     <header className="h-16 border-b border-border/50 bg-card flex items-center justify-between px-4 lg:px-6">
@@ -51,11 +50,17 @@ export function AppTopbar() {
             </Avatar>
             <div className="hidden sm:block text-left">
               <p className="text-sm font-medium text-foreground leading-none">{displayName}</p>
-              <p className="text-xs text-muted-foreground">{subtitle}</p>
             </div>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuLabel>{displayName}</DropdownMenuLabel>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel className="font-normal">
+              <div className="flex flex-col gap-1">
+                <span className="font-medium text-foreground">{displayName}</span>
+                {user?.email ? (
+                  <span className="text-xs text-muted-foreground font-normal">{user.email}</span>
+                ) : null}
+              </div>
+            </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={logout} className="text-destructive focus:text-destructive">
               <LogOut size={14} className="mr-2" />

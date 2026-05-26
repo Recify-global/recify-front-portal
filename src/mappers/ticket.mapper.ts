@@ -51,14 +51,6 @@ function asString(value: unknown): string | null {
   return s.length > 0 ? s : null;
 }
 
-function clampConfidence(value: unknown): number {
-  const n = asNumber(value);
-  if (n === null) return 85;
-  if (n < 0) return 0;
-  if (n > 100) return 100;
-  return Math.round(n);
-}
-
 function normalizePaymentMethod(value: unknown): BackendPaymentMethod {
   const raw = asString(value)?.toLowerCase();
   if (raw === 'card' || raw === 'cash' || raw === 'transfer' || raw === 'other') {
@@ -104,8 +96,6 @@ export function mapBackendTicket(t: BackendTicket): UiTicket {
     asString(t.rawData?.imageUrl) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.previewUrl) ??
     undefined;
-  const confianza =
-    clampConfidence(t.rawData?.confidence ?? (t.rawData as Record<string, unknown> | undefined)?.score);
 
   return {
     id: asString(t._id) ?? 'sin-id',
@@ -119,7 +109,6 @@ export function mapBackendTicket(t: BackendTicket): UiTicket {
     categoria,
     metodoPago: PAYMENT_LABELS[t.paymentMethod] ?? t.paymentMethod,
     estatus: STATUS_MAP[t.status] ?? 'pendiente',
-    confianza,
     notas,
     imagenUrl: imageUrl,
   };

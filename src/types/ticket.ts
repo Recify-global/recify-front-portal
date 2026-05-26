@@ -1,6 +1,7 @@
 export type BackendTicketType = 'ingreso' | 'egreso';
 export type BackendPaymentMethod = 'card' | 'cash' | 'transfer' | 'other';
 export type BackendTicketStatus = 'pending' | 'processed' | 'failed' | 'duplicate';
+export type BackendTicketReviewStatus = 'pendiente' | 'revisado';
 
 export interface BackendTicketRawData {
   vendor?: string | null;
@@ -23,6 +24,7 @@ export interface BackendTicket {
   category?: string;
   paymentMethod: BackendPaymentMethod;
   status: BackendTicketStatus;
+  reviewStatus?: BackendTicketReviewStatus;
   rawData?: BackendTicketRawData;
   created_at: string;
   updated_at: string;
@@ -31,6 +33,9 @@ export interface BackendTicket {
 export interface TicketsListParams {
   type?: BackendTicketType;
   status?: BackendTicketStatus;
+  reviewStatus?: BackendTicketReviewStatus;
+  paymentMethod?: BackendPaymentMethod;
+  sourceId?: string;
   category?: string;
   dateFrom?: string;
   dateTo?: string;
@@ -40,6 +45,7 @@ export interface TicketsListParams {
 
 export interface TicketUpdatePayload {
   status?: BackendTicketStatus;
+  reviewStatus?: BackendTicketReviewStatus;
   category?: string;
   paymentMethod?: BackendPaymentMethod;
 }
@@ -58,7 +64,6 @@ export interface UiTicket {
   categoria: string;
   metodoPago: string;
   estatus: UiTicketStatus;
-  confianza: number;
   notas: string;
   imagenUrl?: string;
 }

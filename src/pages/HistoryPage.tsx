@@ -3,9 +3,11 @@ import { AppLayout } from '@/components/recify/AppLayout';
 import { MetricCard } from '@/components/recify/MetricCard';
 import { StatusBadge } from '@/components/recify/StatusBadge';
 import { CategoryBadge } from '@/components/recify/CategoryBadge';
-import { ConfidenceIndicator } from '@/components/recify/ConfidenceIndicator';
+import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
 import { EmptyState } from '@/components/recify/EmptyState';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -23,42 +25,52 @@ import {
 } from '@tanstack/react-table';
 import {
   Receipt, DollarSign, Tags, AlertCircle, Search, ChevronLeft, ChevronRight,
-  ArrowUpDown, Download, Trash2, Edit3, FileImage, X, Loader2,
+  ArrowUpDown, Trash2, Edit3, X, Loader2, Save, XCircle,
 } from 'lucide-react';
 import { mapBackendTicket, mapBackendTickets } from '@/mappers/ticket.mapper';
-import { useTicket, useTickets } from '@/hooks/use-tickets';
+import { useTicket, useTickets, useUpdateTicket } from '@/hooks/use-tickets';
 import { useAuth } from '@/hooks/use-auth';
 import { deleteTicket } from '@/services/tickets.service';
-import type { UiTicket } from '@/types/ticket';
+import type {
+  BackendPaymentMethod,
+  BackendTicketReviewStatus,
+  BackendTicketStatus,
+  UiTicket,
+} from '@/types/ticket';
 
-const formatMXN = (n: number) => `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
+const formatMXN = (n: number) =>
+  `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
 
 const statusOptions = ['analizado', 'pendiente', 'error'] as const;
 
 const columns: ColumnDef<UiTicket>[] = [
   {
-    accessorKey: 'id',
-    header: 'ID',
-    cell: ({ row }) => <span className="text-xs font-mono text-muted-foreground">{row.getValue('id')}</span>,
-    size: 90,
-  },
-  {
     accessorKey: 'comercio',
     header: ({ column }) => (
-      <button className="flex items-center gap-1 hover:text-foreground transition-colors" onClick={() => column.toggleSorting()}>
+      <button
+        className="flex items-center gap-1 hover:text-foreground transition-colors"
+        onClick={() => column.toggleSorting()}
+      >
         Comercio <ArrowUpDown size={12} />
       </button>
     ),
-    cell: ({ row }) => <span className="font-medium text-foreground text-sm">{row.getValue('comercio')}</span>,
+    cell: ({ row }) => (
+      <span className="font-medium text-foreground text-sm">{row.getValue('comercio')}</span>
+    ),
   },
   {
     accessorKey: 'fecha',
     header: ({ column }) => (
-      <button className="flex items-center gap-1 hover:text-foreground transition-colors" onClick={() => column.toggleSorting()}>
+      <button
+        className="flex items-center gap-1 hover:text-foreground transition-colors"
+        onClick={() => column.toggleSorting()}
+      >
         Fecha <ArrowUpDown size={12} />
       </button>
     ),
-    cell: ({ row }) => <span className="text-sm text-muted-foreground">{row.getValue('fecha')}</span>,
+    cell: ({ row }) => (
+      <span className="text-sm text-muted-foreground">{row.getValue('fecha')}</span>
+    ),
   },
   {
     accessorKey: 'categoria',
@@ -69,16 +81,25 @@ const columns: ColumnDef<UiTicket>[] = [
   {
     accessorKey: 'metodoPago',
     header: 'Método',
-    cell: ({ row }) => <span className="text-sm text-muted-foreground">{row.getValue('metodoPago')}</span>,
+    cell: ({ row }) => (
+      <span className="text-sm text-muted-foreground">{row.getValue('metodoPago')}</span>
+    ),
   },
   {
     accessorKey: 'total',
     header: ({ column }) => (
-      <button className="flex items-center gap-1 hover:text-foreground transition-colors" onClick={() => column.toggleSorting()}>
+      <button
+        className="flex items-center gap-1 hover:text-foreground transition-colors"
+        onClick={() => column.toggleSorting()}
+      >
         Total <ArrowUpDown size={12} />
       </button>
     ),
-    cell: ({ row }) => <span className="font-semibold text-foreground text-sm">{formatMXN(row.getValue('total'))}</span>,
+    cell: ({ row }) => (
+      <span className="font-semibold text-foreground text-sm">
+        {formatMXN(row.getValue('total'))}
+      </span>
+    ),
   },
   {
     accessorKey: 'estatus',
@@ -86,12 +107,36 @@ const columns: ColumnDef<UiTicket>[] = [
     cell: ({ row }) => <StatusBadge status={row.getValue('estatus')} />,
     filterFn: 'equals',
   },
-  {
-    accessorKey: 'confianza',
-    header: 'Confianza',
-    cell: ({ row }) => <ConfidenceIndicator value={row.getValue('confianza')} />,
-  },
 ];
+
+const PAYMENT_OPTIONS: { value: BackendPaymentMethod; label: string }[] = [
+  { value: 'card', label: 'Tarjeta de crédito' },
+  { value: 'cash', label: 'Efectivo' },
+  { value: 'transfer', label: 'Transferencia' },
+  { value: 'other', label: 'Otro' },
+];
+
+const BACKEND_STATUS_OPTIONS: { value: BackendTicketStatus; label: string }[] = [
+  { value: 'processed', label: 'Analizado' },
+  { value: 'pending', label: 'Pendiente' },
+  { value: 'failed', label: 'Error' },
+  { value: 'duplicate', label: 'Duplicado' },
+];
+
+const REVIEW_STATUS_OPTIONS: { value: BackendTicketReviewStatus; label: string }[] = [
+  { value: 'pendiente', label: 'Pendiente de revisión' },
+  { value: 'revisado', label: 'Revisado' },
+];
+
+function labelToPaymentMethod(label: string): BackendPaymentMethod {
+  const match = PAYMENT_OPTIONS.find((o) => o.label === label);
+  return match?.value ?? 'other';
+}
+
+function labelToBackendStatus(label: string): BackendTicketStatus {
+  const match = BACKEND_STATUS_OPTIONS.find((o) => o.label === label);
+  return match?.value ?? 'pending';
+}
 
 export default function HistoryPage() {
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -100,11 +145,18 @@ export default function HistoryPage() {
   const [selectedTicket, setSelectedTicket] = useState<UiTicket | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [editing, setEditing] = useState(false);
+  const [draftCategory, setDraftCategory] = useState('');
+  const [draftPaymentMethod, setDraftPaymentMethod] = useState<BackendPaymentMethod>('other');
+  const [draftStatus, setDraftStatus] = useState<BackendTicketStatus>('pending');
+  const [draftReviewStatus, setDraftReviewStatus] = useState<BackendTicketReviewStatus>('pendiente');
+
   const { companyId } = useAuth();
   const queryClient = useQueryClient();
 
   const ticketsQuery = useTickets({ page: 1, limit: 100 });
   const detailQuery = useTicket(selectedTicket?.id);
+  const updateMutation = useUpdateTicket();
 
   const tickets = useMemo(
     () => mapBackendTickets(ticketsQuery.data?.data),
@@ -118,8 +170,8 @@ export default function HistoryPage() {
 
   const filteredData = useMemo(() => {
     let data = [...tickets];
-    if (categoryFilter !== 'all') data = data.filter(t => t.categoria === categoryFilter);
-    if (statusFilter !== 'all') data = data.filter(t => t.estatus === statusFilter);
+    if (categoryFilter !== 'all') data = data.filter((t) => t.categoria === categoryFilter);
+    if (statusFilter !== 'all') data = data.filter((t) => t.estatus === statusFilter);
     return data;
   }, [tickets, categoryFilter, statusFilter]);
 
@@ -148,7 +200,7 @@ export default function HistoryPage() {
       await deleteTicket(companyId, ticketId);
     },
     onSuccess: async () => {
-      toast.success('Ticket eliminado correctamente.');
+      toast.success('Ticket eliminado.');
       setSelectedTicket(null);
       await queryClient.invalidateQueries({ queryKey: ['tickets', companyId] });
     },
@@ -158,18 +210,58 @@ export default function HistoryPage() {
     },
   });
 
+  const handleOpenSheet = (ticket: UiTicket) => {
+    setSelectedTicket(ticket);
+    setEditing(false);
+    setDraftCategory(ticket.categoria);
+    setDraftPaymentMethod(labelToPaymentMethod(ticket.metodoPago));
+    setDraftStatus(labelToBackendStatus(
+      ticket.estatus === 'analizado' ? 'Analizado' :
+      ticket.estatus === 'error' ? 'Error' : 'Pendiente',
+    ));
+    setDraftReviewStatus('pendiente');
+  };
+
+  const handleCloseSheet = () => {
+    setSelectedTicket(null);
+    setEditing(false);
+  };
+
+  const handleStartEdit = () => {
+    if (!selectedTicketDetail) return;
+    setDraftCategory(selectedTicketDetail.categoria);
+    setDraftPaymentMethod(labelToPaymentMethod(selectedTicketDetail.metodoPago));
+    setEditing(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!selectedTicketDetail?.id) return;
+    try {
+      await updateMutation.mutateAsync({
+        ticketId: selectedTicketDetail.id,
+        payload: {
+          category: draftCategory || undefined,
+          paymentMethod: draftPaymentMethod,
+          status: draftStatus,
+          reviewStatus: draftReviewStatus,
+        },
+      });
+      toast.success('Cambios guardados.');
+      setEditing(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No se pudieron guardar los cambios.';
+      toast.error(message);
+    }
+  };
+
   const handleDelete = () => {
     if (!selectedTicketDetail?.id || deleteMutation.isPending) return;
     deleteMutation.mutate(selectedTicketDetail.id);
   };
 
-  const handlePendingAction = (label: string) => {
-    toast.info(`${label} estará disponible en una siguiente fase.`);
-  };
-
   const totalGasto = filteredData.reduce((acc, t) => acc + t.total, 0);
-  const uniqueCategories = new Set(filteredData.map(t => t.categoria)).size;
-  const pendientes = filteredData.filter(t => t.estatus === 'pendiente').length;
+  const uniqueCategories = new Set(filteredData.map((t) => t.categoria)).size;
+  const pendientes = filteredData.filter((t) => t.estatus === 'pendiente').length;
   const subtitle = new Intl.DateTimeFormat('es-MX', { month: 'long', year: 'numeric' }).format(new Date());
   const capitalizedSubtitle = subtitle.charAt(0).toUpperCase() + subtitle.slice(1);
 
@@ -198,7 +290,7 @@ export default function HistoryPage() {
                 type="text"
                 placeholder="Buscar por comercio, categoría..."
                 value={globalFilter}
-                onChange={e => setGlobalFilter(e.target.value)}
+                onChange={(e) => setGlobalFilter(e.target.value)}
                 className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground"
               />
               {globalFilter && (
@@ -213,7 +305,9 @@ export default function HistoryPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todas las categorías</SelectItem>
-                {categorias.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                {categorias.map((c) => (
+                  <SelectItem key={c} value={c}>{c}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -222,7 +316,9 @@ export default function HistoryPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos</SelectItem>
-                {statusOptions.map(s => <SelectItem key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</SelectItem>)}
+                {statusOptions.map((s) => (
+                  <SelectItem key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -254,7 +350,11 @@ export default function HistoryPage() {
               title="Sin resultados"
               description="No se encontraron tickets con los filtros seleccionados."
               action={
-                <Button variant="outline" className="rounded-xl" onClick={() => { setGlobalFilter(''); setCategoryFilter('all'); setStatusFilter('all'); }}>
+                <Button
+                  variant="outline"
+                  className="rounded-xl"
+                  onClick={() => { setGlobalFilter(''); setCategoryFilter('all'); setStatusFilter('all'); }}
+                >
                   Limpiar filtros
                 </Button>
               }
@@ -264,9 +364,9 @@ export default function HistoryPage() {
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
-                    {table.getHeaderGroups().map(hg => (
+                    {table.getHeaderGroups().map((hg) => (
                       <tr key={hg.id} className="border-b border-border/50">
-                        {hg.headers.map(header => (
+                        {hg.headers.map((header) => (
                           <th key={header.id} className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                             {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
                           </th>
@@ -275,13 +375,13 @@ export default function HistoryPage() {
                     ))}
                   </thead>
                   <tbody>
-                    {table.getRowModel().rows.map(row => (
+                    {table.getRowModel().rows.map((row) => (
                       <tr
                         key={row.id}
-                        onClick={() => setSelectedTicket(row.original)}
+                        onClick={() => handleOpenSheet(row.original)}
                         className="border-b border-border/30 hover:bg-surface-hover cursor-pointer transition-colors"
                       >
-                        {row.getVisibleCells().map(cell => (
+                        {row.getVisibleCells().map((cell) => (
                           <td key={cell.id} className="px-4 py-3">
                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
                           </td>
@@ -327,85 +427,165 @@ export default function HistoryPage() {
       </div>
 
       {/* Detail Sheet */}
-      <Sheet open={!!selectedTicket} onOpenChange={() => setSelectedTicket(null)}>
+      <Sheet open={!!selectedTicket} onOpenChange={handleCloseSheet}>
         <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
           {selectedTicketDetail && (
-            <div className="space-y-6">
+            <div className="space-y-5">
               <SheetHeader>
                 <SheetTitle className="flex items-center gap-2">
-                  <span className="text-foreground">{selectedTicketDetail.id}</span>
+                  <span className="text-foreground">{selectedTicketDetail.comercio}</span>
                   <StatusBadge status={selectedTicketDetail.estatus} />
                 </SheetTitle>
               </SheetHeader>
 
-              {/* Ticket preview placeholder */}
-              <div className="bg-muted rounded-2xl h-40 flex items-center justify-center">
-                {selectedTicketDetail.imagenUrl ? (
-                  <img
-                    src={selectedTicketDetail.imagenUrl}
-                    alt={`Ticket ${selectedTicketDetail.id}`}
-                    className="w-full h-full object-cover rounded-2xl"
-                  />
-                ) : (
-                  <FileImage size={40} className="text-muted-foreground" />
-                )}
+              {/* Imagen del ticket */}
+              <TicketImagePreview
+                imageUrl={selectedTicketDetail.imagenUrl}
+                alt={`Ticket de ${selectedTicketDetail.comercio}`}
+              />
+
+              {/* Datos del ticket */}
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: 'Fecha', value: `${selectedTicketDetail.fecha} ${selectedTicketDetail.hora}` },
+                  { label: 'Subtotal', value: formatMXN(selectedTicketDetail.subtotal) },
+                  { label: 'IVA', value: formatMXN(selectedTicketDetail.iva) },
+                  { label: 'Total', value: formatMXN(selectedTicketDetail.total) },
+                  { label: 'Moneda', value: selectedTicketDetail.moneda },
+                ].map((f) => (
+                  <div key={f.label}>
+                    <p className="text-xs text-muted-foreground">{f.label}</p>
+                    <p className="text-sm font-medium text-foreground">{f.value}</p>
+                  </div>
+                ))}
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Categoría</p>
+                  <CategoryBadge category={selectedTicketDetail.categoria} />
+                </div>
               </div>
 
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  {[
-                    { label: 'Comercio', value: selectedTicketDetail.comercio },
-                    { label: 'Fecha', value: `${selectedTicketDetail.fecha} ${selectedTicketDetail.hora}` },
-                    { label: 'Subtotal', value: formatMXN(selectedTicketDetail.subtotal) },
-                    { label: 'IVA', value: formatMXN(selectedTicketDetail.iva) },
-                    { label: 'Total', value: formatMXN(selectedTicketDetail.total) },
-                    { label: 'Moneda', value: selectedTicketDetail.moneda },
-                    { label: 'Método de pago', value: selectedTicketDetail.metodoPago },
-                  ].map(f => (
-                    <div key={f.label}>
-                      <p className="text-xs text-muted-foreground">{f.label}</p>
-                      <p className="text-sm font-medium text-foreground">{f.value}</p>
-                    </div>
-                  ))}
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Categoría</p>
-                    <CategoryBadge category={selectedTicketDetail.categoria} />
-                  </div>
-                </div>
-
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Confianza del análisis</p>
-                  <ConfidenceIndicator value={selectedTicketDetail.confianza} />
-                </div>
-
+              {selectedTicketDetail.notas && selectedTicketDetail.notas !== 'Sin notas' && (
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Notas</p>
                   <p className="text-sm text-foreground">{selectedTicketDetail.notas}</p>
                 </div>
-              </div>
+              )}
 
-              <div className="flex flex-col gap-2 pt-2">
-                <Button variant="outline" className="rounded-xl" onClick={() => handlePendingAction('Editar')}>
-                  <Edit3 size={14} className="mr-2" /> Editar
-                </Button>
-                <Button variant="outline" className="rounded-xl" onClick={() => handlePendingAction('Descargar')}>
-                  <Download size={14} className="mr-2" /> Descargar
-                </Button>
-                <Button
-                  variant="outline"
-                  className="rounded-xl text-destructive hover:text-destructive"
-                  onClick={handleDelete}
-                  disabled={deleteMutation.isPending}
-                >
-                  {deleteMutation.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
-                  Eliminar
-                </Button>
-              </div>
+              {/* Formulario de edición */}
+              {editing ? (
+                <div className="space-y-3 rounded-xl border border-border/50 bg-secondary/30 p-4">
+                  <p className="text-xs font-medium text-foreground">Editar campos</p>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Categoría</Label>
+                    <Input
+                      value={draftCategory}
+                      onChange={(e) => setDraftCategory(e.target.value)}
+                      className="h-9 rounded-lg text-sm bg-background"
+                      placeholder="Ej: Alimentos"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Método de pago</Label>
+                    <Select
+                      value={draftPaymentMethod}
+                      onValueChange={(v) => setDraftPaymentMethod(v as BackendPaymentMethod)}
+                    >
+                      <SelectTrigger className="h-9 rounded-lg text-sm bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAYMENT_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Estatus</Label>
+                    <Select
+                      value={draftStatus}
+                      onValueChange={(v) => setDraftStatus(v as BackendTicketStatus)}
+                    >
+                      <SelectTrigger className="h-9 rounded-lg text-sm bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {BACKEND_STATUS_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Revisión</Label>
+                    <Select
+                      value={draftReviewStatus}
+                      onValueChange={(v) => setDraftReviewStatus(v as BackendTicketReviewStatus)}
+                    >
+                      <SelectTrigger className="h-9 rounded-lg text-sm bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {REVIEW_STATUS_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
+                    <Button
+                      className="flex-1 h-9 rounded-xl bg-gradient-primary text-primary-foreground hover:opacity-90"
+                      onClick={handleSaveEdit}
+                      disabled={updateMutation.isPending}
+                    >
+                      {updateMutation.isPending
+                        ? <Loader2 size={14} className="mr-2 animate-spin" />
+                        : <Save size={14} className="mr-2" />}
+                      Guardar
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="h-9 rounded-xl"
+                      onClick={() => setEditing(false)}
+                      disabled={updateMutation.isPending}
+                    >
+                      <XCircle size={14} className="mr-2" /> Cancelar
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <Button
+                    variant="outline"
+                    className="rounded-xl"
+                    onClick={handleStartEdit}
+                  >
+                    <Edit3 size={14} className="mr-2" /> Editar
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="rounded-xl text-destructive hover:text-destructive"
+                    onClick={handleDelete}
+                    disabled={deleteMutation.isPending}
+                  >
+                    {deleteMutation.isPending
+                      ? <Loader2 size={14} className="mr-2 animate-spin" />
+                      : <Trash2 size={14} className="mr-2" />}
+                    Eliminar
+                  </Button>
+                </div>
+              )}
+
               {detailQuery.isFetching && (
-                <p className="text-xs text-muted-foreground -mt-2">Cargando detalle actualizado...</p>
+                <p className="text-xs text-muted-foreground">Actualizando...</p>
               )}
               {detailQuery.isError && (
-                <p className="text-xs text-destructive -mt-2">No se pudo cargar el detalle completo del ticket.</p>
+                <p className="text-xs text-destructive">No se pudo cargar el detalle completo.</p>
               )}
             </div>
           )}
