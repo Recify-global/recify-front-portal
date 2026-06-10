@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AppLayout } from '@/components/recify/AppLayout';
 import { MetricCard } from '@/components/recify/MetricCard';
 import { StatusBadge } from '@/components/recify/StatusBadge';
 import { CategoryBadge } from '@/components/recify/CategoryBadge';
 import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
+import { TicketNotes } from '@/components/recify/TicketNotes';
 import { EmptyState } from '@/components/recify/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,14 +28,24 @@ import {
   Receipt, DollarSign, Tags, AlertCircle, Search, ChevronLeft, ChevronRight,
   ArrowUpDown, Trash2, Edit3, X, Loader2, Save, XCircle,
 } from 'lucide-react';
+import { ApiRequestError } from '@/api/http';
 import { mapBackendTicket, mapBackendTickets } from '@/mappers/ticket.mapper';
-import { useTicket, useTickets, useUpdateTicket } from '@/hooks/use-tickets';
+import { useTicket, useTickets, useUpdateDashboardTicket } from '@/hooks/use-tickets';
 import { useAuth } from '@/hooks/use-auth';
 import { deleteTicket } from '@/services/tickets.service';
+import {
+  buildTicketUpdatePayload,
+  createDraftFromTicket,
+  getTicketEditValidationMessage,
+  hasTicketEditChanges,
+  normalizeTicketEditDraft,
+  type TicketEditDraft,
+} from '@/utils/ticket-edit';
 import type {
   BackendPaymentMethod,
   BackendTicketReviewStatus,
   BackendTicketStatus,
+  BackendTicketType,
   UiTicket,
 } from '@/types/ticket';
 
@@ -128,14 +139,15 @@ const REVIEW_STATUS_OPTIONS: { value: BackendTicketReviewStatus; label: string }
   { value: 'revisado', label: 'Revisado' },
 ];
 
-function labelToPaymentMethod(label: string): BackendPaymentMethod {
-  const match = PAYMENT_OPTIONS.find((o) => o.label === label);
-  return match?.value ?? 'other';
-}
+const TYPE_OPTIONS: { value: BackendTicketType; label: string }[] = [
+  { value: 'ingreso', label: 'Ingreso' },
+  { value: 'egreso', label: 'Egreso' },
+];
 
-function labelToBackendStatus(label: string): BackendTicketStatus {
-  const match = BACKEND_STATUS_OPTIONS.find((o) => o.label === label);
-  return match?.value ?? 'pending';
+function extractMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiRequestError) return err.message || fallback;
+  if (err instanceof Error) return err.message || fallback;
+  return fallback;
 }
 
 export default function HistoryPage() {
@@ -145,18 +157,19 @@ export default function HistoryPage() {
   const [selectedTicket, setSelectedTicket] = useState<UiTicket | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [editing, setEditing] = useState(false);
-  const [draftCategory, setDraftCategory] = useState('');
-  const [draftPaymentMethod, setDraftPaymentMethod] = useState<BackendPaymentMethod>('other');
-  const [draftStatus, setDraftStatus] = useState<BackendTicketStatus>('pending');
-  const [draftReviewStatus, setDraftReviewStatus] = useState<BackendTicketReviewStatus>('pendiente');
+  const [lastKnownImageUrl, setLastKnownImageUrl] = useState<string | null>(null);
+  const [baselineDraft, setBaselineDraft] = useState<TicketEditDraft | null>(null);
+  const [draft, setDraft] = useState<TicketEditDraft | null>(null);
 
   const { companyId } = useAuth();
   const queryClient = useQueryClient();
 
   const ticketsQuery = useTickets({ page: 1, limit: 100 });
   const detailQuery = useTicket(selectedTicket?.id);
-  const updateMutation = useUpdateTicket();
+  const updateMutation = useUpdateDashboardTicket();
+  const backendTicket = detailQuery.data;
+  const editing = draft !== null;
+  const canEdit = Boolean(backendTicket) && !detailQuery.isLoading;
 
   const tickets = useMemo(
     () => mapBackendTickets(ticketsQuery.data?.data),
@@ -176,9 +189,32 @@ export default function HistoryPage() {
   }, [tickets, categoryFilter, statusFilter]);
 
   const selectedTicketDetail = useMemo(() => {
-    if (detailQuery.data) return mapBackendTicket(detailQuery.data);
-    return selectedTicket;
-  }, [detailQuery.data, selectedTicket]);
+    if (detailQuery.data) {
+      const mapped = mapBackendTicket(detailQuery.data);
+      return {
+        ...mapped,
+        imagenUrl: mapped.imagenUrl ?? lastKnownImageUrl ?? selectedTicket?.imagenUrl,
+      };
+    }
+    if (!selectedTicket) return null;
+    return {
+      ...selectedTicket,
+      imagenUrl: selectedTicket.imagenUrl ?? lastKnownImageUrl ?? undefined,
+    };
+  }, [detailQuery.data, lastKnownImageUrl, selectedTicket]);
+
+  const editValidationMessage = useMemo(() => getTicketEditValidationMessage(draft), [draft]);
+  const hasEditChanges = useMemo(
+    () => hasTicketEditChanges(baselineDraft, draft),
+    [baselineDraft, draft],
+  );
+  const canSaveEdit = Boolean(draft && baselineDraft && hasEditChanges && !editValidationMessage);
+
+  useEffect(() => {
+    if (selectedTicketDetail?.imagenUrl) {
+      setLastKnownImageUrl(selectedTicketDetail.imagenUrl);
+    }
+  }, [selectedTicketDetail?.imagenUrl]);
 
   const table = useReactTable({
     data: filteredData,
@@ -212,46 +248,59 @@ export default function HistoryPage() {
 
   const handleOpenSheet = (ticket: UiTicket) => {
     setSelectedTicket(ticket);
-    setEditing(false);
-    setDraftCategory(ticket.categoria);
-    setDraftPaymentMethod(labelToPaymentMethod(ticket.metodoPago));
-    setDraftStatus(labelToBackendStatus(
-      ticket.estatus === 'analizado' ? 'Analizado' :
-      ticket.estatus === 'error' ? 'Error' : 'Pendiente',
-    ));
-    setDraftReviewStatus('pendiente');
+    setLastKnownImageUrl(ticket.imagenUrl ?? null);
+    setBaselineDraft(null);
+    setDraft(null);
   };
 
   const handleCloseSheet = () => {
     setSelectedTicket(null);
-    setEditing(false);
+    setLastKnownImageUrl(null);
+    setBaselineDraft(null);
+    setDraft(null);
   };
 
   const handleStartEdit = () => {
-    if (!selectedTicketDetail) return;
-    setDraftCategory(selectedTicketDetail.categoria);
-    setDraftPaymentMethod(labelToPaymentMethod(selectedTicketDetail.metodoPago));
-    setEditing(true);
+    if (!backendTicket) return;
+    const nextDraft = createDraftFromTicket(backendTicket);
+    setBaselineDraft(nextDraft);
+    setDraft(nextDraft);
+  };
+
+  const handleCancelEdit = () => {
+    setBaselineDraft(null);
+    setDraft(null);
   };
 
   const handleSaveEdit = async () => {
-    if (!selectedTicketDetail?.id) return;
+    if (!selectedTicketDetail?.id || !baselineDraft || !draft || updateMutation.isPending) return;
+
+    const result = buildTicketUpdatePayload(baselineDraft, draft);
+    if (!result.ok) {
+      if (result.reason === 'no-changes') {
+        toast.info('No hay cambios para guardar.');
+        return;
+      }
+      toast.error(result.message);
+      return;
+    }
+
     try {
       await updateMutation.mutateAsync({
         ticketId: selectedTicketDetail.id,
-        payload: {
-          category: draftCategory || undefined,
-          paymentMethod: draftPaymentMethod,
-          status: draftStatus,
-          reviewStatus: draftReviewStatus,
-        },
+        payload: result.payload,
       });
       toast.success('Cambios guardados.');
-      setEditing(false);
+      const normalizedDraft = normalizeTicketEditDraft(draft);
+      setBaselineDraft(normalizedDraft);
+      setDraft(normalizedDraft);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'No se pudieron guardar los cambios.';
-      toast.error(message);
+      toast.error(extractMessage(err, 'No se pudieron guardar los cambios.'));
     }
+  };
+
+  const updateDraft = <K extends keyof TicketEditDraft>(key: K, value: TicketEditDraft[K]) => {
+    setDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
   };
 
   const handleDelete = () => {
@@ -427,15 +476,27 @@ export default function HistoryPage() {
       </div>
 
       {/* Detail Sheet */}
-      <Sheet open={!!selectedTicket} onOpenChange={handleCloseSheet}>
+      <Sheet open={!!selectedTicket} onOpenChange={(open) => { if (!open) handleCloseSheet(); }}>
         <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
           {selectedTicketDetail && (
             <div className="space-y-5">
               <SheetHeader>
-                <SheetTitle className="flex items-center gap-2">
-                  <span className="text-foreground">{selectedTicketDetail.comercio}</span>
-                  <StatusBadge status={selectedTicketDetail.estatus} />
-                </SheetTitle>
+                <div className="flex items-start justify-between gap-3">
+                  <SheetTitle className="flex items-center gap-2">
+                    <span className="text-foreground">{selectedTicketDetail.comercio}</span>
+                    <StatusBadge status={selectedTicketDetail.estatus} />
+                  </SheetTitle>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 shrink-0 rounded-lg"
+                    onClick={handleStartEdit}
+                    disabled={!selectedTicket || updateMutation.isPending}
+                    aria-label="Editar ticket"
+                  >
+                    <Edit3 size={14} className="mr-1.5" /> Editar
+                  </Button>
+                </div>
               </SheetHeader>
 
               {/* Imagen del ticket */}
@@ -464,33 +525,71 @@ export default function HistoryPage() {
                 </div>
               </div>
 
-              {selectedTicketDetail.notas && selectedTicketDetail.notas !== 'Sin notas' && (
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Notas</p>
-                  <p className="text-sm text-foreground">{selectedTicketDetail.notas}</p>
-                </div>
-              )}
+              <TicketNotes
+                title="Notas"
+                sources={[detailQuery.data, selectedTicketDetail]}
+              />
 
               {/* Formulario de edición */}
-              {editing ? (
+              {editing && draft ? (
                 <div className="space-y-3 rounded-xl border border-border/50 bg-secondary/30 p-4">
-                  <p className="text-xs font-medium text-foreground">Editar campos</p>
+                  <p className="text-xs font-medium text-foreground">Editar ticket</p>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Tipo</Label>
+                    <Select
+                      value={draft.type}
+                      onValueChange={(v) => updateDraft('type', v as BackendTicketType)}
+                    >
+                      <SelectTrigger className="h-9 rounded-lg text-sm bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TYPE_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Fecha</Label>
+                    <Input
+                      type="date"
+                      value={draft.date}
+                      onChange={(e) => updateDraft('date', e.target.value)}
+                      className="h-9 rounded-lg text-sm bg-background"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Monto total</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={draft.amount}
+                      onChange={(e) => updateDraft('amount', e.target.value)}
+                      className="h-9 rounded-lg text-sm bg-background"
+                      placeholder="0.00"
+                    />
+                  </div>
 
                   <div className="space-y-1.5">
                     <Label className="text-xs text-muted-foreground">Categoría</Label>
                     <Input
-                      value={draftCategory}
-                      onChange={(e) => setDraftCategory(e.target.value)}
+                      value={draft.category}
+                      onChange={(e) => updateDraft('category', e.target.value)}
                       className="h-9 rounded-lg text-sm bg-background"
-                      placeholder="Ej: Alimentos"
+                      placeholder="Ej: Restaurantes y Alimentos"
                     />
                   </div>
 
                   <div className="space-y-1.5">
                     <Label className="text-xs text-muted-foreground">Método de pago</Label>
                     <Select
-                      value={draftPaymentMethod}
-                      onValueChange={(v) => setDraftPaymentMethod(v as BackendPaymentMethod)}
+                      value={draft.paymentMethod}
+                      onValueChange={(v) => updateDraft('paymentMethod', v as BackendPaymentMethod)}
                     >
                       <SelectTrigger className="h-9 rounded-lg text-sm bg-background">
                         <SelectValue />
@@ -506,8 +605,8 @@ export default function HistoryPage() {
                   <div className="space-y-1.5">
                     <Label className="text-xs text-muted-foreground">Estatus</Label>
                     <Select
-                      value={draftStatus}
-                      onValueChange={(v) => setDraftStatus(v as BackendTicketStatus)}
+                      value={draft.status}
+                      onValueChange={(v) => updateDraft('status', v as BackendTicketStatus)}
                     >
                       <SelectTrigger className="h-9 rounded-lg text-sm bg-background">
                         <SelectValue />
@@ -523,8 +622,8 @@ export default function HistoryPage() {
                   <div className="space-y-1.5">
                     <Label className="text-xs text-muted-foreground">Revisión</Label>
                     <Select
-                      value={draftReviewStatus}
-                      onValueChange={(v) => setDraftReviewStatus(v as BackendTicketReviewStatus)}
+                      value={draft.reviewStatus}
+                      onValueChange={(v) => updateDraft('reviewStatus', v as BackendTicketReviewStatus)}
                     >
                       <SelectTrigger className="h-9 rounded-lg text-sm bg-background">
                         <SelectValue />
@@ -539,24 +638,27 @@ export default function HistoryPage() {
 
                   <div className="flex gap-2 pt-1">
                     <Button
-                      className="flex-1 h-9 rounded-xl bg-gradient-primary text-primary-foreground hover:opacity-90"
+                      className="flex-1 h-9 rounded-xl bg-gradient-primary text-primary-foreground transition-all hover:shadow-md hover:ring-2 hover:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none disabled:hover:ring-0"
                       onClick={handleSaveEdit}
-                      disabled={updateMutation.isPending}
+                      disabled={updateMutation.isPending || !canSaveEdit}
                     >
                       {updateMutation.isPending
                         ? <Loader2 size={14} className="mr-2 animate-spin" />
                         : <Save size={14} className="mr-2" />}
-                      Guardar
+                      {updateMutation.isPending ? 'Guardando...' : canSaveEdit ? 'Guardar cambios' : 'Sin cambios'}
                     </Button>
                     <Button
                       variant="outline"
                       className="h-9 rounded-xl"
-                      onClick={() => setEditing(false)}
+                      onClick={handleCancelEdit}
                       disabled={updateMutation.isPending}
                     >
                       <XCircle size={14} className="mr-2" /> Cancelar
                     </Button>
                   </div>
+                  {editValidationMessage ? (
+                    <p className="text-xs text-destructive">{editValidationMessage}</p>
+                  ) : null}
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
@@ -564,14 +666,21 @@ export default function HistoryPage() {
                     variant="outline"
                     className="rounded-xl"
                     onClick={handleStartEdit}
+                    disabled={!canEdit || updateMutation.isPending}
                   >
                     <Edit3 size={14} className="mr-2" /> Editar
                   </Button>
+                  {!canEdit && detailQuery.isLoading && (
+                    <p className="text-xs text-muted-foreground">Cargando datos para editar...</p>
+                  )}
+                  {!canEdit && detailQuery.isError && (
+                    <p className="text-xs text-muted-foreground">No se pudo cargar el ticket para editar.</p>
+                  )}
                   <Button
                     variant="outline"
                     className="rounded-xl text-destructive hover:text-destructive"
                     onClick={handleDelete}
-                    disabled={deleteMutation.isPending}
+                    disabled={deleteMutation.isPending || editing}
                   >
                     {deleteMutation.isPending
                       ? <Loader2 size={14} className="mr-2 animate-spin" />

@@ -3,13 +3,34 @@ import { AppLayout } from '@/components/recify/AppLayout';
 import { StatusBadge } from '@/components/recify/StatusBadge';
 import { CategoryBadge } from '@/components/recify/CategoryBadge';
 import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
+import { TicketNotes } from '@/components/recify/TicketNotes';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/hooks/use-auth';
 import { usePreprocessTicket, useUploadTicket } from '@/hooks/use-upload-ticket';
+import { useUpdateDashboardTicket } from '@/hooks/use-tickets';
 import { mapBackendTicket, mapPreprocessTicket } from '@/mappers/ticket.mapper';
-import type { UiTicket } from '@/types/ticket';
-import { Upload, Camera, FileImage, Loader2, CheckCircle2, Save, Plus, Receipt } from 'lucide-react';
+import {
+  applyDraftToUiTicket,
+  buildTicketUpdatePayload,
+  createDraftFromAnalyzedTicket,
+  createDraftFromTicket,
+  getTicketEditValidationMessage,
+  hasTicketEditChanges,
+  normalizeTicketEditDraft,
+  type TicketEditDraft,
+} from '@/utils/ticket-edit';
+import type {
+  BackendPaymentMethod,
+  BackendTicketReviewStatus,
+  BackendTicketStatus,
+  BackendTicketType,
+  UiTicket,
+} from '@/types/ticket';
+import { Upload, Camera, FileImage, Loader2, CheckCircle2, Edit3, Save, Plus, Receipt, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { ApiRequestError } from '@/api/http';
 
@@ -17,9 +38,36 @@ type UploadState = 'idle' | 'uploaded' | 'analyzing' | 'done';
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const MAX_SIZE_BYTES = 10 * 1024 * 1024;
 
+const PAYMENT_OPTIONS: { value: BackendPaymentMethod; label: string }[] = [
+  { value: 'card', label: 'Tarjeta de crédito' },
+  { value: 'cash', label: 'Efectivo' },
+  { value: 'transfer', label: 'Transferencia' },
+  { value: 'other', label: 'Otro' },
+];
+
+const STATUS_OPTIONS: { value: BackendTicketStatus; label: string }[] = [
+  { value: 'processed', label: 'Analizado' },
+  { value: 'pending', label: 'Pendiente' },
+  { value: 'failed', label: 'Error' },
+  { value: 'duplicate', label: 'Duplicado' },
+];
+
+const REVIEW_STATUS_OPTIONS: { value: BackendTicketReviewStatus; label: string }[] = [
+  { value: 'pendiente', label: 'Pendiente de revisión' },
+  { value: 'revisado', label: 'Revisado' },
+];
+
+const TYPE_OPTIONS: { value: BackendTicketType; label: string }[] = [
+  { value: 'ingreso', label: 'Ingreso' },
+  { value: 'egreso', label: 'Egreso' },
+];
+
 export default function UploadPage() {
   const [state, setState] = useState<UploadState>('idle');
   const [ticket, setTicket] = useState<UiTicket | null>(null);
+  const [analysisRaw, setAnalysisRaw] = useState<unknown>(null);
+  const [editBaseline, setEditBaseline] = useState<TicketEditDraft | null>(null);
+  const [draft, setDraft] = useState<TicketEditDraft | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | undefined>(undefined);
@@ -27,8 +75,13 @@ export default function UploadPage() {
   const { token, companyId } = useAuth();
   const preprocessMutation = usePreprocessTicket();
   const uploadMutation = useUploadTicket();
+  const updateMutation = useUpdateDashboardTicket();
 
-  const isBusy = preprocessMutation.isPending || uploadMutation.isPending;
+  const isBusy = preprocessMutation.isPending || uploadMutation.isPending || updateMutation.isPending;
+  const editValidationMessage = useMemo(() => getTicketEditValidationMessage(draft), [draft]);
+  const hasEditChanges = useMemo(() => hasTicketEditChanges(editBaseline, draft), [editBaseline, draft]);
+  const canSaveEdit = Boolean(draft && editBaseline && hasEditChanges && !editValidationMessage);
+  const editing = Boolean(draft);
 
   useEffect(() => {
     return () => {
@@ -85,7 +138,11 @@ export default function UploadPage() {
         fallbackId: `preview-${Date.now()}`,
         ocrText: response.ocrText,
       });
+      const nextBaseline = createDraftFromAnalyzedTicket(response.ticket, mapped);
       setTicket(mapped);
+      setAnalysisRaw(response.ticket);
+      setEditBaseline(nextBaseline);
+      setDraft(null);
       setState('done');
       toast.success('Ticket analizado correctamente.');
     } catch (err) {
@@ -106,6 +163,9 @@ export default function UploadPage() {
     setPreviewUrl(nextPreview);
     setSelectedFile(nextFile);
     setTicket(null);
+    setAnalysisRaw(null);
+    setEditBaseline(null);
+    setDraft(null);
     setState('uploaded');
 
     await runPreprocess(nextFile, nextPreview);
@@ -153,11 +213,30 @@ export default function UploadPage() {
 
     try {
       const response = await uploadMutation.mutateAsync({ file: selectedFile as File });
-      const mapped = mapBackendTicket(response.ticket);
-      setTicket({
+      let persistedTicket = response.ticket;
+      let mapped = mapBackendTicket(persistedTicket);
+      const intendedDraft = editBaseline;
+
+      if (intendedDraft) {
+        const result = buildTicketUpdatePayload(createDraftFromTicket(persistedTicket), intendedDraft);
+        if (result.ok) {
+          persistedTicket = await updateMutation.mutateAsync({
+            ticketId: persistedTicket._id,
+            payload: result.payload,
+          });
+          mapped = mapBackendTicket(persistedTicket);
+        }
+      }
+
+      const nextTicket = {
         ...mapped,
         imagenUrl: mapped.imagenUrl ?? response.imageUrl ?? previewUrl,
-      });
+      };
+      setTicket(nextTicket);
+      setAnalysisRaw(persistedTicket);
+      const nextBaseline = createDraftFromTicket(persistedTicket);
+      setEditBaseline(nextBaseline);
+      setDraft(null);
       setState('done');
       toast.success('Ticket guardado correctamente.');
     } catch (err) {
@@ -177,6 +256,9 @@ export default function UploadPage() {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setState('idle');
     setTicket(null);
+    setAnalysisRaw(null);
+    setEditBaseline(null);
+    setDraft(null);
     setSelectedFile(null);
     setPreviewUrl(undefined);
     preprocessMutation.reset();
@@ -199,6 +281,39 @@ export default function UploadPage() {
         : [],
     [ticket, formatMXN],
   );
+
+  const handleStartEdit = () => {
+    if (!ticket || !editBaseline) return;
+    setDraft(editBaseline);
+  };
+
+  const handleCancelEdit = () => {
+    setDraft(null);
+  };
+
+  const updateDraft = <K extends keyof TicketEditDraft>(key: K, value: TicketEditDraft[K]) => {
+    setDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
+  };
+
+  const handleApplyEdit = () => {
+    if (!ticket || !editBaseline || !draft) return;
+
+    const result = buildTicketUpdatePayload(editBaseline, draft);
+    if (!result.ok) {
+      if (result.reason === 'no-changes') {
+        toast.info('No hay cambios para guardar.');
+        return;
+      }
+      toast.error(result.message);
+      return;
+    }
+
+    const normalizedDraft = normalizeTicketEditDraft(draft);
+    setTicket(applyDraftToUiTicket(ticket, normalizedDraft));
+    setEditBaseline(normalizedDraft);
+    setDraft(normalizedDraft);
+    toast.success('Cambios aplicados al análisis.');
+  };
 
   return (
     <AppLayout>
@@ -389,20 +504,156 @@ export default function UploadPage() {
 
                 {/* Detail fields */}
                 <div className="bg-card rounded-2xl border border-border/50 p-5 shadow-elegant animate-slide-in-right">
-                  <h3 className="font-semibold text-foreground mb-4">Información extraída</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {ticketFields.map((field) => (
-                      <div key={field.key} className="space-y-0.5">
-                        <p className="text-xs text-muted-foreground">{field.label}</p>
-                        <p className="text-sm font-medium text-foreground">{field.value}</p>
-                      </div>
-                    ))}
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <h3 className="font-semibold text-foreground">Información extraída</h3>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 shrink-0 rounded-lg"
+                      onClick={handleStartEdit}
+                      disabled={!editBaseline || isBusy}
+                      aria-label="Editar análisis del ticket"
+                    >
+                      <Edit3 size={14} className="mr-1.5" /> Editar
+                    </Button>
                   </div>
-                  {ticket.notas && ticket.notas !== 'Sin notas' && (
-                    <div className="mt-3 pt-3 border-t border-border/50">
-                      <p className="text-xs text-muted-foreground mb-1">Notas</p>
-                      <p className="text-sm text-muted-foreground">{ticket.notas}</p>
+
+                  {editing && draft ? (
+                    <div className="space-y-3 rounded-xl border border-border/50 bg-secondary/30 p-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Tipo</Label>
+                          <Select value={draft.type} onValueChange={(v) => updateDraft('type', v as BackendTicketType)}>
+                            <SelectTrigger className="h-9 rounded-lg text-sm bg-background">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {TYPE_OPTIONS.map((o) => (
+                                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Fecha</Label>
+                          <Input
+                            type="date"
+                            value={draft.date}
+                            onChange={(e) => updateDraft('date', e.target.value)}
+                            className="h-9 rounded-lg text-sm bg-background"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Monto total</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={draft.amount}
+                            onChange={(e) => updateDraft('amount', e.target.value)}
+                            className="h-9 rounded-lg text-sm bg-background"
+                            placeholder="0.00"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Categoría</Label>
+                          <Input
+                            value={draft.category}
+                            onChange={(e) => updateDraft('category', e.target.value)}
+                            className="h-9 rounded-lg text-sm bg-background"
+                            placeholder="Ej: Restaurantes y Alimentos"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Método de pago</Label>
+                          <Select
+                            value={draft.paymentMethod}
+                            onValueChange={(v) => updateDraft('paymentMethod', v as BackendPaymentMethod)}
+                          >
+                            <SelectTrigger className="h-9 rounded-lg text-sm bg-background">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {PAYMENT_OPTIONS.map((o) => (
+                                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Estatus</Label>
+                          <Select value={draft.status} onValueChange={(v) => updateDraft('status', v as BackendTicketStatus)}>
+                            <SelectTrigger className="h-9 rounded-lg text-sm bg-background">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {STATUS_OPTIONS.map((o) => (
+                                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-1.5 sm:col-span-2">
+                          <Label className="text-xs text-muted-foreground">Revisión</Label>
+                          <Select
+                            value={draft.reviewStatus}
+                            onValueChange={(v) => updateDraft('reviewStatus', v as BackendTicketReviewStatus)}
+                          >
+                            <SelectTrigger className="h-9 rounded-lg text-sm bg-background">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {REVIEW_STATUS_OPTIONS.map((o) => (
+                                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                        <Button
+                          className="flex-1 h-10 rounded-xl bg-gradient-primary text-primary-foreground transition-all hover:shadow-md hover:ring-2 hover:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none disabled:hover:ring-0"
+                          onClick={handleApplyEdit}
+                          disabled={isBusy || !canSaveEdit}
+                        >
+                          {isBusy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
+                          {isBusy ? 'Guardando...' : canSaveEdit ? 'Guardar cambios' : 'Sin cambios'}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="h-10 rounded-xl"
+                          onClick={handleCancelEdit}
+                          disabled={isBusy}
+                        >
+                          <XCircle size={14} className="mr-2" /> Cancelar
+                        </Button>
+                      </div>
+
+                      {editValidationMessage ? (
+                        <p className="text-xs text-destructive">{editValidationMessage}</p>
+                      ) : null}
                     </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {ticketFields.map((field) => (
+                          <div key={field.key} className="space-y-0.5">
+                            <p className="text-xs text-muted-foreground">{field.label}</p>
+                            <p className="text-sm font-medium text-foreground">{field.value}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-border/50">
+                        <TicketNotes title="Notas" sources={[analysisRaw, ticket]} />
+                      </div>
+                    </>
                   )}
                 </div>
 
@@ -411,7 +662,7 @@ export default function UploadPage() {
                   <Button
                     className="flex-1 h-11 rounded-xl bg-gradient-primary text-primary-foreground hover:opacity-90"
                     onClick={handleSave}
-                    disabled={isBusy}
+                    disabled={isBusy || editing}
                   >
                     {uploadMutation.isPending ? (
                       <Loader2 size={16} className="mr-2 animate-spin" />

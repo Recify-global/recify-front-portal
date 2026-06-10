@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { updateDashboardDailyReportTicket } from '@/services/dashboard.service';
 import {
   getTicket,
   listTickets,
-  updateTicket,
 } from '@/services/tickets.service';
-import type { TicketUpdatePayload, TicketsListParams } from '@/types/ticket';
+import type { DashboardDailyReportTicketUpdate } from '@/types/dashboard';
+import type { TicketsListParams } from '@/types/ticket';
 import { useAuth } from './use-auth';
 
 export function useTickets(params: TicketsListParams = {}) {
@@ -25,14 +26,21 @@ export function useTicket(id: string | null | undefined) {
   });
 }
 
-export function useUpdateTicket() {
+/** Edición manual vía PATCH /dashboard/daily-report/:ticketId (contrato más completo). */
+export function useUpdateDashboardTicket() {
   const { companyId } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ ticketId, payload }: { ticketId: string; payload: TicketUpdatePayload }) => {
+    mutationFn: ({
+      ticketId,
+      payload,
+    }: {
+      ticketId: string;
+      payload: DashboardDailyReportTicketUpdate;
+    }) => {
       if (!companyId) return Promise.reject(new Error('No hay compañía activa.'));
-      return updateTicket(companyId, ticketId, payload);
+      return updateDashboardDailyReportTicket(companyId, ticketId, payload);
     },
     onSuccess: async (_data, { ticketId }) => {
       await Promise.all([

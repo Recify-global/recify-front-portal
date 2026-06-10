@@ -4,6 +4,7 @@ import type {
   BackendTicketStatus,
   UiTicket,
 } from '@/types/ticket';
+import { formatTicketNotes, getTicketImageUrl } from '@/utils/ticket-display';
 
 const PAYMENT_LABELS: Record<BackendPaymentMethod, string> = {
   card: 'Tarjeta de crédito',
@@ -87,15 +88,8 @@ export function mapBackendTicket(t: BackendTicket): UiTicket {
     asString((t.rawData as Record<string, unknown> | undefined)?.currency) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.moneda) ??
     'MXN';
-  const notas =
-    asString((t.rawData as Record<string, unknown> | undefined)?.notes) ??
-    asString((t.rawData as Record<string, unknown> | undefined)?.description) ??
-    asString((t.rawData as Record<string, unknown> | undefined)?.ocrText) ??
-    'Sin notas';
-  const imageUrl =
-    asString(t.rawData?.imageUrl) ??
-    asString((t.rawData as Record<string, unknown> | undefined)?.previewUrl) ??
-    undefined;
+  const notas = formatTicketNotes(t);
+  const imageUrl = getTicketImageUrl(t) ?? undefined;
 
   return {
     id: asString(t._id) ?? 'sin-id',
