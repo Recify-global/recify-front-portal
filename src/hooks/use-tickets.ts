@@ -38,6 +38,7 @@ export function useUpdateTicket() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['tickets', companyId] }),
         queryClient.invalidateQueries({ queryKey: ['ticket', companyId, ticketId] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard', 'daily-report', companyId] }),
       ]);
     },
   });

@@ -3,13 +3,16 @@ import { AppLayout } from '@/components/recify/AppLayout';
 import { StatusBadge } from '@/components/recify/StatusBadge';
 import { CategoryBadge } from '@/components/recify/CategoryBadge';
 import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
+import { CameraCaptureDialog } from '@/components/recify/CameraCaptureDialog';
+import { BatchUploadDialog } from '@/components/recify/BatchUploadDialog';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/hooks/use-auth';
 import { usePreprocessTicket, useUploadTicket } from '@/hooks/use-upload-ticket';
 import { mapBackendTicket, mapPreprocessTicket } from '@/mappers/ticket.mapper';
 import type { UiTicket } from '@/types/ticket';
-import { Upload, Camera, FileImage, Loader2, CheckCircle2, Save, Plus, Receipt } from 'lucide-react';
+import { Upload, Camera, FileImage, Loader2, CheckCircle2, Save, Plus, Receipt, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import { ApiRequestError } from '@/api/http';
 
@@ -23,7 +26,10 @@ export default function UploadPage() {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | undefined>(undefined);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const queryClient = useQueryClient();
   const { token, companyId } = useAuth();
   const preprocessMutation = usePreprocessTicket();
   const uploadMutation = useUploadTicket();
@@ -138,6 +144,16 @@ export default function UploadPage() {
     if (isBusy) return;
     if (!validateSession()) return;
     fileInputRef.current?.click();
+  };
+
+  const openCamera = () => {
+    if (isBusy) return;
+    if (!validateSession()) return;
+    setCameraOpen(true);
+  };
+
+  const handleCameraCapture = (file: File) => {
+    void handleNewFile(file);
   };
 
   const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -303,25 +319,57 @@ export default function UploadPage() {
             </div>
 
             {state === 'idle' && (
-              <div className="flex gap-3">
+              <div className="space-y-2">
+                <div className="flex gap-3">
+                  <Button
+                    variant="outline"
+                    className="flex-1 h-11 rounded-xl"
+                    onClick={openCamera}
+                    disabled={isBusy}
+                  >
+                    <Camera size={16} className="mr-2" /> Tomar foto
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1 h-11 rounded-xl"
+                    onClick={openFilePicker}
+                    disabled={isBusy}
+                  >
+                    <Upload size={16} className="mr-2" /> Subir archivo
+                  </Button>
+                </div>
                 <Button
-                  variant="outline"
-                  className="flex-1 h-11 rounded-xl"
-                  onClick={openFilePicker}
+                  variant="secondary"
+                  className="w-full h-11 rounded-xl"
+                  onClick={() => {
+                    if (!validateSession()) return;
+                    setBatchOpen(true);
+                  }}
                   disabled={isBusy}
                 >
-                  <Camera size={16} className="mr-2" /> Tomar foto
-                </Button>
-                <Button
-                  variant="outline"
-                  className="flex-1 h-11 rounded-xl"
-                  onClick={openFilePicker}
-                  disabled={isBusy}
-                >
-                  <Upload size={16} className="mr-2" /> Subir archivo
+                  <Layers size={16} className="mr-2" /> Subir varios tickets a la vez
                 </Button>
               </div>
             )}
+
+            <CameraCaptureDialog
+              open={cameraOpen}
+              onOpenChange={setCameraOpen}
+              onCapture={handleCameraCapture}
+            />
+
+            <BatchUploadDialog
+              open={batchOpen}
+              onOpenChange={setBatchOpen}
+              onSaved={() => {
+                if (companyId) {
+                  void queryClient.invalidateQueries({
+                    queryKey: ['dashboard', 'daily-report', companyId],
+                  });
+                  void queryClient.invalidateQueries({ queryKey: ['tickets', companyId] });
+                }
+              }}
+            />
 
             {state === 'done' && (
               <Button

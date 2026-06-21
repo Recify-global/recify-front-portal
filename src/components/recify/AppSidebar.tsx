@@ -1,6 +1,6 @@
 import { Upload, History, LayoutDashboard, Settings, HelpCircle } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
-import { NavLink } from '@/components/NavLink';
+import { NavLink } from '@/components/ui/nav-link';
 import { RecifyLogo } from './RecifyLogo';
 import {
   Sidebar,

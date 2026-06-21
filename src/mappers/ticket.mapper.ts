@@ -67,9 +67,8 @@ function normalizeStatus(value: unknown): BackendTicketStatus {
   return 'processed';
 }
 
-// Convierte la forma del backend a la forma visual usada hoy por el UI
-// (basada en `src/data/dummy-tickets.ts`). Se mantiene separado de los servicios
-// para no acoplar la API a los componentes.
+// Convierte la forma del backend a la forma visual usada por el UI.
+// Se mantiene separado de los servicios para no acoplar la API a los componentes.
 export function mapBackendTicket(t: BackendTicket): UiTicket {
   const { fecha, hora } = splitDate(asString(t.date) ?? '');
   const total = Math.max(0, asNumber(t.amount) ?? 0);
