@@ -77,11 +77,16 @@ export function mapBackendTicket(t: BackendTicket): UiTicket {
   const subtotal = subtotalFromApi ?? (taxFromApi !== null ? Math.max(0, total - taxFromApi) : total);
   const iva = taxFromApi ?? Math.max(0, total - subtotal);
   const categoria = asString(t.category) ?? CATEGORY_BY_TYPE[t.type] ?? 'Sin categoría';
+  // Si el backend no expone el vendor/comercio (ej. tickets sin OCR o respuestas
+  // ligeras de daily-report), mostramos un placeholder claro en vez de la
+  // categoría: evita confundir al usuario haciendo creer que la categoría es
+  // el nombre del establecimiento.
   const comercio =
     asString(t.rawData?.vendor) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.merchantName) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.merchant) ??
-    categoria;
+    asString((t.rawData as Record<string, unknown> | undefined)?.comercio) ??
+    'Sin comercio';
   const moneda =
     asString((t.rawData as Record<string, unknown> | undefined)?.currency) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.moneda) ??

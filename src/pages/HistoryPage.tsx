@@ -10,6 +10,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -108,6 +118,7 @@ export default function HistoryPage() {
   const [draftStatus, setDraftStatus] = useState<BackendTicketStatus>('pending');
   const [draftReviewStatus, setDraftReviewStatus] = useState<BackendTicketReviewStatus>('pendiente');
 
+  const [ticketToDelete, setTicketToDelete] = useState<UiTicket | null>(null);
   const [periodValue, setPeriodValue] = useState<PeriodValue>('last_30_days');
   const [customRange, setCustomRange] = useState<{ from?: Date; to?: Date }>({});
   const [periodSelection, setPeriodSelection] = useState<PeriodSelection>(() =>
@@ -155,6 +166,22 @@ export default function HistoryPage() {
     },
     [inlineUpdateMutation],
   );
+
+  const deleteMutation = useMutation({
+    mutationFn: async (ticketId: string) => {
+      if (!companyId) throw new Error('No hay compañía activa.');
+      await deleteTicket(companyId, ticketId);
+    },
+    onSuccess: async () => {
+      toast.success('Ticket eliminado.');
+      setSelectedTicket(null);
+      await queryClient.invalidateQueries({ queryKey: ['dashboard', 'daily-report', companyId] });
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : 'No se pudo eliminar el ticket.';
+      toast.error(message);
+    },
+  });
 
   const tickets = useMemo(
     () => mapBackendTickets(ticketsQuery.data?.tickets),
@@ -305,6 +332,26 @@ export default function HistoryPage() {
         },
         filterFn: 'equals',
       },
+      {
+        id: 'actions',
+        header: () => <span className="sr-only">Acciones</span>,
+        enableSorting: false,
+        cell: ({ row }) => {
+          const t = row.original;
+          return (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              onClick={() => setTicketToDelete(t)}
+              aria-label={`Eliminar ticket de ${t.comercio}`}
+              title="Eliminar ticket"
+            >
+              <Trash2 size={16} />
+            </Button>
+          );
+        },
+      },
     ],
     [patchTicket],
   );
@@ -321,22 +368,6 @@ export default function HistoryPage() {
     getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     initialState: { pagination: { pageSize: 8 } },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (ticketId: string) => {
-      if (!companyId) throw new Error('No hay compañía activa.');
-      await deleteTicket(companyId, ticketId);
-    },
-    onSuccess: async () => {
-      toast.success('Ticket eliminado.');
-      setSelectedTicket(null);
-      await queryClient.invalidateQueries({ queryKey: ['dashboard', 'daily-report', companyId] });
-    },
-    onError: (error) => {
-      const message = error instanceof Error ? error.message : 'No se pudo eliminar el ticket.';
-      toast.error(message);
-    },
   });
 
   const handleOpenSheet = (ticket: UiTicket) => {
@@ -725,6 +756,46 @@ export default function HistoryPage() {
           )}
         </SheetContent>
       </Sheet>
+
+      <AlertDialog
+        open={ticketToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setTicketToDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar este ticket?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción no se puede deshacer. Se eliminará permanentemente el ticket de{' '}
+              <strong>{ticketToDelete?.comercio ?? 'Sin comercio'}</strong> por{' '}
+              <strong>{ticketToDelete ? formatMXN(ticketToDelete.total) : ''}</strong>.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleteMutation.isPending}
+              onClick={async (e) => {
+                e.preventDefault();
+                if (!ticketToDelete?.id) return;
+                try {
+                  await deleteMutation.mutateAsync(ticketToDelete.id);
+                  setTicketToDelete(null);
+                } catch {
+                  /* el toast del onError ya informa */
+                }
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending ? (
+                <Loader2 size={16} className="mr-2 animate-spin" />
+              ) : null}
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppLayout>
   );
 }
