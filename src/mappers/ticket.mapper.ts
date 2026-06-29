@@ -96,7 +96,12 @@ export function mapBackendTicket(t: BackendTicket): UiTicket {
     asString((t.rawData as Record<string, unknown> | undefined)?.description) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.ocrText) ??
     'Sin notas';
+  // Tolerante a varias formas de exponer la URL de la imagen:
+  // - top-level `imageUrl` (si el backend serializa el campo fuera de rawData)
+  // - `rawData.imageUrl` (donde se guarda originalmente en upload.controller)
+  // - `rawData.previewUrl` (fallback histórico)
   const imageUrl =
+    asString((t as unknown as { imageUrl?: unknown }).imageUrl) ??
     asString(t.rawData?.imageUrl) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.previewUrl) ??
     undefined;
