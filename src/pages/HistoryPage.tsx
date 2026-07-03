@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { AppLayout } from '@/components/recify/AppLayout';
 import { MetricCard } from '@/components/recify/MetricCard';
 import { StatusBadge } from '@/components/recify/StatusBadge';
@@ -10,6 +10,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -28,9 +38,18 @@ import {
   ArrowUpDown, Trash2, Edit3, X, Loader2, Save, XCircle,
 } from 'lucide-react';
 import { mapBackendTicket, mapBackendTickets } from '@/mappers/ticket.mapper';
-import { useTicket, useTickets, useUpdateTicket } from '@/hooks/use-tickets';
+import { useTicket, useUpdateTicket } from '@/hooks/use-tickets';
+import { useDailyReport, useUpdateDailyReportTicket } from '@/hooks/use-dashboard';
+import { EditableCell } from '@/components/recify/EditableCell';
+import type { DashboardDailyReportTicketUpdate } from '@/types/dashboard';
 import { useAuth } from '@/hooks/use-auth';
 import { deleteTicket } from '@/services/tickets.service';
+import {
+  PeriodFilter,
+  buildPeriodSelection,
+  type PeriodSelection,
+  type PeriodValue,
+} from '@/components/recify/PeriodFilter';
 import type {
   BackendPaymentMethod,
   BackendTicketReviewStatus,
@@ -43,71 +62,7 @@ const formatMXN = (n: number) =>
 
 const statusOptions = ['analizado', 'pendiente', 'error'] as const;
 
-const columns: ColumnDef<UiTicket>[] = [
-  {
-    accessorKey: 'comercio',
-    header: ({ column }) => (
-      <button
-        className="flex items-center gap-1 hover:text-foreground transition-colors"
-        onClick={() => column.toggleSorting()}
-      >
-        Comercio <ArrowUpDown size={12} />
-      </button>
-    ),
-    cell: ({ row }) => (
-      <span className="font-medium text-foreground text-sm">{row.getValue('comercio')}</span>
-    ),
-  },
-  {
-    accessorKey: 'fecha',
-    header: ({ column }) => (
-      <button
-        className="flex items-center gap-1 hover:text-foreground transition-colors"
-        onClick={() => column.toggleSorting()}
-      >
-        Fecha <ArrowUpDown size={12} />
-      </button>
-    ),
-    cell: ({ row }) => (
-      <span className="text-sm text-muted-foreground">{row.getValue('fecha')}</span>
-    ),
-  },
-  {
-    accessorKey: 'categoria',
-    header: 'Categoría',
-    cell: ({ row }) => <CategoryBadge category={row.getValue('categoria')} />,
-    filterFn: 'equals',
-  },
-  {
-    accessorKey: 'metodoPago',
-    header: 'Método',
-    cell: ({ row }) => (
-      <span className="text-sm text-muted-foreground">{row.getValue('metodoPago')}</span>
-    ),
-  },
-  {
-    accessorKey: 'total',
-    header: ({ column }) => (
-      <button
-        className="flex items-center gap-1 hover:text-foreground transition-colors"
-        onClick={() => column.toggleSorting()}
-      >
-        Total <ArrowUpDown size={12} />
-      </button>
-    ),
-    cell: ({ row }) => (
-      <span className="font-semibold text-foreground text-sm">
-        {formatMXN(row.getValue('total'))}
-      </span>
-    ),
-  },
-  {
-    accessorKey: 'estatus',
-    header: 'Estatus',
-    cell: ({ row }) => <StatusBadge status={row.getValue('estatus')} />,
-    filterFn: 'equals',
-  },
-];
+// Columnas se definen dentro del componente para tener acceso al handler de edición inline.
 
 const PAYMENT_OPTIONS: { value: BackendPaymentMethod; label: string }[] = [
   { value: 'card', label: 'Tarjeta de crédito' },
@@ -138,6 +93,18 @@ function labelToBackendStatus(label: string): BackendTicketStatus {
   return match?.value ?? 'pending';
 }
 
+function uiStatusToBackend(estatus: UiTicket['estatus']): BackendTicketStatus {
+  switch (estatus) {
+    case 'analizado':
+      return 'processed';
+    case 'error':
+      return 'failed';
+    case 'pendiente':
+    default:
+      return 'pending';
+  }
+}
+
 export default function HistoryPage() {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -151,16 +118,74 @@ export default function HistoryPage() {
   const [draftStatus, setDraftStatus] = useState<BackendTicketStatus>('pending');
   const [draftReviewStatus, setDraftReviewStatus] = useState<BackendTicketReviewStatus>('pendiente');
 
+  const [ticketToDelete, setTicketToDelete] = useState<UiTicket | null>(null);
+  const [periodValue, setPeriodValue] = useState<PeriodValue>('last_30_days');
+  const [customRange, setCustomRange] = useState<{ from?: Date; to?: Date }>({});
+  const [periodSelection, setPeriodSelection] = useState<PeriodSelection>(() =>
+    buildPeriodSelection('last_30_days'),
+  );
+
   const { companyId } = useAuth();
   const queryClient = useQueryClient();
 
-  const ticketsQuery = useTickets({ page: 1, limit: 100 });
+  const handlePeriodChange = (selection: PeriodSelection) => {
+    setPeriodValue(selection.value);
+    setPeriodSelection(selection);
+  };
+
+  const handleCustomRangeChange = (range: { from?: Date; to?: Date }) => {
+    setCustomRange(range);
+  };
+
+  const dailyReportParams = useMemo(
+    () => ({
+      datePreset: periodSelection.datePreset,
+      dateFrom: periodSelection.dateFrom,
+      dateTo: periodSelection.dateTo,
+      page: 1,
+      limit: 100,
+    }),
+    [periodSelection],
+  );
+
+  const ticketsQuery = useDailyReport(dailyReportParams);
   const detailQuery = useTicket(selectedTicket?.id);
   const updateMutation = useUpdateTicket();
+  const inlineUpdateMutation = useUpdateDailyReportTicket();
+
+  const patchTicket = useCallback(
+    async (ticketId: string, payload: DashboardDailyReportTicketUpdate) => {
+      try {
+        await inlineUpdateMutation.mutateAsync({ ticketId, payload });
+        toast.success('Cambio guardado.');
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'No se pudo guardar el cambio.';
+        toast.error(message);
+        throw err; // EditableCell muestra el error inline
+      }
+    },
+    [inlineUpdateMutation],
+  );
+
+  const deleteMutation = useMutation({
+    mutationFn: async (ticketId: string) => {
+      if (!companyId) throw new Error('No hay compañía activa.');
+      await deleteTicket(companyId, ticketId);
+    },
+    onSuccess: async () => {
+      toast.success('Ticket eliminado.');
+      setSelectedTicket(null);
+      await queryClient.invalidateQueries({ queryKey: ['dashboard', 'daily-report', companyId] });
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : 'No se pudo eliminar el ticket.';
+      toast.error(message);
+    },
+  });
 
   const tickets = useMemo(
-    () => mapBackendTickets(ticketsQuery.data?.data),
-    [ticketsQuery.data?.data],
+    () => mapBackendTickets(ticketsQuery.data?.tickets),
+    [ticketsQuery.data?.tickets],
   );
 
   const categorias = useMemo(() => {
@@ -180,6 +205,157 @@ export default function HistoryPage() {
     return selectedTicket;
   }, [detailQuery.data, selectedTicket]);
 
+  const columns = useMemo<ColumnDef<UiTicket>[]>(
+    () => [
+      {
+        accessorKey: 'comercio',
+        header: ({ column }) => (
+          <button
+            className="flex items-center gap-1 hover:text-foreground transition-colors"
+            onClick={() => column.toggleSorting()}
+          >
+            Comercio <ArrowUpDown size={12} />
+          </button>
+        ),
+        cell: ({ row }) => (
+          <span className="font-medium text-foreground text-sm">{row.getValue('comercio')}</span>
+        ),
+      },
+      {
+        accessorKey: 'fecha',
+        header: ({ column }) => (
+          <button
+            className="flex items-center gap-1 hover:text-foreground transition-colors"
+            onClick={() => column.toggleSorting()}
+          >
+            Fecha <ArrowUpDown size={12} />
+          </button>
+        ),
+        cell: ({ row }) => {
+          const t = row.original;
+          return (
+            <EditableCell
+              mode="date"
+              value={t.fecha}
+              display={<span className="text-sm text-muted-foreground">{t.fecha}</span>}
+              onSave={async (next) => {
+                if (!next) return;
+                await patchTicket(t.id, { date: new Date(`${next}T00:00:00`).toISOString() });
+              }}
+            />
+          );
+        },
+      },
+      {
+        accessorKey: 'categoria',
+        header: 'Categoría',
+        cell: ({ row }) => {
+          const t = row.original;
+          return (
+            <EditableCell
+              mode="text"
+              value={t.categoria}
+              placeholder="Categoría"
+              display={<CategoryBadge category={t.categoria} />}
+              onSave={async (next) => {
+                await patchTicket(t.id, { category: next.trim() || undefined });
+              }}
+            />
+          );
+        },
+        filterFn: 'equals',
+      },
+      {
+        accessorKey: 'metodoPago',
+        header: 'Método',
+        cell: ({ row }) => {
+          const t = row.original;
+          return (
+            <EditableCell
+              mode="select"
+              value={labelToPaymentMethod(t.metodoPago)}
+              options={PAYMENT_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+              display={<span className="text-sm text-muted-foreground">{t.metodoPago}</span>}
+              onSave={async (next) => {
+                await patchTicket(t.id, { paymentMethod: next as BackendPaymentMethod });
+              }}
+            />
+          );
+        },
+      },
+      {
+        accessorKey: 'total',
+        header: ({ column }) => (
+          <button
+            className="flex items-center gap-1 hover:text-foreground transition-colors"
+            onClick={() => column.toggleSorting()}
+          >
+            Total <ArrowUpDown size={12} />
+          </button>
+        ),
+        cell: ({ row }) => {
+          const t = row.original;
+          return (
+            <EditableCell
+              mode="number"
+              value={t.total}
+              display={
+                <span className="font-semibold text-foreground text-sm">{formatMXN(t.total)}</span>
+              }
+              onSave={async (next) => {
+                const num = Number(next);
+                if (!Number.isFinite(num) || num < 0) {
+                  throw new Error('Importe inválido.');
+                }
+                await patchTicket(t.id, { amount: num });
+              }}
+            />
+          );
+        },
+      },
+      {
+        accessorKey: 'estatus',
+        header: 'Estatus',
+        cell: ({ row }) => {
+          const t = row.original;
+          return (
+            <EditableCell
+              mode="select"
+              value={uiStatusToBackend(t.estatus)}
+              options={BACKEND_STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+              display={<StatusBadge status={t.estatus} />}
+              onSave={async (next) => {
+                await patchTicket(t.id, { status: next as BackendTicketStatus });
+              }}
+            />
+          );
+        },
+        filterFn: 'equals',
+      },
+      {
+        id: 'actions',
+        header: () => <span className="sr-only">Acciones</span>,
+        enableSorting: false,
+        cell: ({ row }) => {
+          const t = row.original;
+          return (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              onClick={() => setTicketToDelete(t)}
+              aria-label={`Eliminar ticket de ${t.comercio}`}
+              title="Eliminar ticket"
+            >
+              <Trash2 size={16} />
+            </Button>
+          );
+        },
+      },
+    ],
+    [patchTicket],
+  );
+
   const table = useReactTable({
     data: filteredData,
     columns,
@@ -192,22 +368,6 @@ export default function HistoryPage() {
     getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     initialState: { pagination: { pageSize: 8 } },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (ticketId: string) => {
-      if (!companyId) throw new Error('No hay compañía activa.');
-      await deleteTicket(companyId, ticketId);
-    },
-    onSuccess: async () => {
-      toast.success('Ticket eliminado.');
-      setSelectedTicket(null);
-      await queryClient.invalidateQueries({ queryKey: ['tickets', companyId] });
-    },
-    onError: (error) => {
-      const message = error instanceof Error ? error.message : 'No se pudo eliminar el ticket.';
-      toast.error(message);
-    },
   });
 
   const handleOpenSheet = (ticket: UiTicket) => {
@@ -282,7 +442,13 @@ export default function HistoryPage() {
         </div>
 
         {/* Filters */}
-        <div className="bg-card rounded-2xl border border-border/50 shadow-elegant p-4">
+        <div className="bg-card rounded-2xl border border-border/50 shadow-elegant p-4 space-y-3">
+          <PeriodFilter
+            value={periodValue}
+            onChange={handlePeriodChange}
+            customRange={customRange}
+            onCustomRangeChange={handleCustomRangeChange}
+          />
           <div className="flex flex-col sm:flex-row gap-3">
             <div className="flex-1 flex items-center gap-2 bg-secondary rounded-xl px-3 py-2">
               <Search size={16} className="text-muted-foreground shrink-0" />
@@ -378,8 +544,7 @@ export default function HistoryPage() {
                     {table.getRowModel().rows.map((row) => (
                       <tr
                         key={row.id}
-                        onClick={() => handleOpenSheet(row.original)}
-                        className="border-b border-border/30 hover:bg-surface-hover cursor-pointer transition-colors"
+                        className="border-b border-border/30 hover:bg-surface-hover/40 transition-colors"
                       >
                         {row.getVisibleCells().map((cell) => (
                           <td key={cell.id} className="px-4 py-3">
@@ -591,6 +756,46 @@ export default function HistoryPage() {
           )}
         </SheetContent>
       </Sheet>
+
+      <AlertDialog
+        open={ticketToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setTicketToDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar este ticket?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción no se puede deshacer. Se eliminará permanentemente el ticket de{' '}
+              <strong>{ticketToDelete?.comercio ?? 'Sin comercio'}</strong> por{' '}
+              <strong>{ticketToDelete ? formatMXN(ticketToDelete.total) : ''}</strong>.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleteMutation.isPending}
+              onClick={async (e) => {
+                e.preventDefault();
+                if (!ticketToDelete?.id) return;
+                try {
+                  await deleteMutation.mutateAsync(ticketToDelete.id);
+                  setTicketToDelete(null);
+                } catch {
+                  /* el toast del onError ya informa */
+                }
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending ? (
+                <Loader2 size={16} className="mr-2 animate-spin" />
+              ) : null}
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppLayout>
   );
 }

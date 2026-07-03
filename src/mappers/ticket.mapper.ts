@@ -67,9 +67,8 @@ function normalizeStatus(value: unknown): BackendTicketStatus {
   return 'processed';
 }
 
-// Convierte la forma del backend a la forma visual usada hoy por el UI
-// (basada en `src/data/dummy-tickets.ts`). Se mantiene separado de los servicios
-// para no acoplar la API a los componentes.
+// Convierte la forma del backend a la forma visual usada por el UI.
+// Se mantiene separado de los servicios para no acoplar la API a los componentes.
 export function mapBackendTicket(t: BackendTicket): UiTicket {
   const { fecha, hora } = splitDate(asString(t.date) ?? '');
   const total = Math.max(0, asNumber(t.amount) ?? 0);
@@ -78,11 +77,16 @@ export function mapBackendTicket(t: BackendTicket): UiTicket {
   const subtotal = subtotalFromApi ?? (taxFromApi !== null ? Math.max(0, total - taxFromApi) : total);
   const iva = taxFromApi ?? Math.max(0, total - subtotal);
   const categoria = asString(t.category) ?? CATEGORY_BY_TYPE[t.type] ?? 'Sin categoría';
+  // Si el backend no expone el vendor/comercio (ej. tickets sin OCR o respuestas
+  // ligeras de daily-report), mostramos un placeholder claro en vez de la
+  // categoría: evita confundir al usuario haciendo creer que la categoría es
+  // el nombre del establecimiento.
   const comercio =
     asString(t.rawData?.vendor) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.merchantName) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.merchant) ??
-    categoria;
+    asString((t.rawData as Record<string, unknown> | undefined)?.comercio) ??
+    'Sin comercio';
   const moneda =
     asString((t.rawData as Record<string, unknown> | undefined)?.currency) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.moneda) ??
@@ -92,7 +96,12 @@ export function mapBackendTicket(t: BackendTicket): UiTicket {
     asString((t.rawData as Record<string, unknown> | undefined)?.description) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.ocrText) ??
     'Sin notas';
+  // Tolerante a varias formas de exponer la URL de la imagen:
+  // - top-level `imageUrl` (si el backend serializa el campo fuera de rawData)
+  // - `rawData.imageUrl` (donde se guarda originalmente en upload.controller)
+  // - `rawData.previewUrl` (fallback histórico)
   const imageUrl =
+    asString((t as unknown as { imageUrl?: unknown }).imageUrl) ??
     asString(t.rawData?.imageUrl) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.previewUrl) ??
     undefined;

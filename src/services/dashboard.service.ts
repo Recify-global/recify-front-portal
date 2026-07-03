@@ -4,10 +4,10 @@ import type {
   DashboardBaseFilters,
   DashboardByDateFilters,
   DashboardDailyReportFilters,
+  DashboardDailyReportResponse,
   DashboardDailyReportTicketUpdate,
 } from '@/types/dashboard';
 import type { BackendTicket } from '@/types/ticket';
-import type { Paginated } from '@/types/api';
 
 function toQueryString(params: Record<string, unknown>): string {
   const qs = new URLSearchParams();
@@ -42,9 +42,9 @@ export async function getDashboardByPaymentMethod(companyId: string, params: Das
 export async function getDashboardDailyReport(
   companyId: string,
   params: DashboardDailyReportFilters = {},
-): Promise<Paginated<BackendTicket>> {
+): Promise<DashboardDailyReportResponse> {
   const url = `${endpoints.dashboard.dailyReport(companyId)}${toQueryString(params as Record<string, unknown>)}`;
-  return apiRequest<Paginated<BackendTicket>>(url);
+  return apiRequest<DashboardDailyReportResponse>(url);
 }
 
 export async function updateDashboardDailyReportTicket(

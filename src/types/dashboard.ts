@@ -1,5 +1,6 @@
 import type {
   BackendPaymentMethod,
+  BackendTicket,
   BackendTicketStatus,
   BackendTicketType,
   BackendTicketReviewStatus,
@@ -37,6 +38,25 @@ export interface DashboardDailyReportFilters {
   paymentMethod?: BackendPaymentMethod;
   page?: number;
   limit?: number;
+}
+
+export interface DashboardDailyReportAppliedFilters {
+  appliedDatePreset: DashboardDatePreset | null;
+  dateFrom: string | null;
+  dateTo: string | null;
+  type: BackendTicketType | null;
+  status: BackendTicketStatus | null;
+  category: string | null;
+  paymentMethod: BackendPaymentMethod | null;
+}
+
+export interface DashboardDailyReportResponse {
+  filters: DashboardDailyReportAppliedFilters;
+  tickets: BackendTicket[];
+  page: number;
+  limit: number;
+  total: number;
+  pages: number;
 }
 
 export interface DashboardDailyReportTicketUpdate {

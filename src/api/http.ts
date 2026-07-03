@@ -1,18 +1,11 @@
 import type { ApiEnvelope, ApiValidationIssue } from '@/types/api';
 import { clearAuthSession, getStoredToken } from '@/auth/storage';
-
-const API_PREFIX = '/api/v1';
-
-function resolveBaseUrl(): string {
-  const raw = import.meta.env.VITE_API_URL as string | undefined;
-  if (!raw) return '';
-  return raw.replace(/\/$/, '');
-}
+import { env } from '@/config/env';
+import { API_PREFIX } from '@/constants/api';
 
 function buildUrl(path: string): string {
-  const base = resolveBaseUrl();
   const normalized = path.startsWith('/') ? path : `/${path}`;
-  return `${base}${API_PREFIX}${normalized}`;
+  return `${env.apiUrl}${API_PREFIX}${normalized}`;
 }
 
 export class ApiRequestError extends Error {
