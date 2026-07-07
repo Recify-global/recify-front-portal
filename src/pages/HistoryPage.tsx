@@ -121,7 +121,7 @@ const columns: ColumnDef<UiTicket>[] = [
 ];
 
 const PAYMENT_OPTIONS: { value: BackendPaymentMethod; label: string }[] = [
-  { value: 'card', label: 'Tarjeta de crédito' },
+  { value: 'card', label: 'Tarjeta' },
   { value: 'cash', label: 'Efectivo' },
   { value: 'transfer', label: 'Transferencia' },
   { value: 'other', label: 'Otro' },
@@ -141,7 +141,7 @@ const REVIEW_STATUS_OPTIONS: { value: BackendTicketReviewStatus; label: string }
 
 const TYPE_OPTIONS: { value: BackendTicketType; label: string }[] = [
   { value: 'ingreso', label: 'Ingreso' },
-  { value: 'egreso', label: 'Egreso' },
+  { value: 'egreso', label: 'Gasto' },
 ];
 
 function extractMessage(err: unknown, fallback: string): string {
@@ -209,6 +209,20 @@ export default function HistoryPage() {
     [baselineDraft, draft],
   );
   const canSaveEdit = Boolean(draft && baselineDraft && hasEditChanges && !editValidationMessage);
+  const editReadonlyFields = useMemo(
+    () =>
+      selectedTicketDetail
+        ? [
+            { label: 'Comercio', value: selectedTicketDetail.comercio },
+            ...(selectedTicketDetail.folio ? [{ label: 'Folio', value: selectedTicketDetail.folio }] : []),
+            { label: 'Hora', value: selectedTicketDetail.hora },
+            { label: 'Subtotal', value: formatMXN(selectedTicketDetail.subtotal) },
+            { label: 'IVA', value: formatMXN(selectedTicketDetail.iva) },
+            { label: 'Moneda', value: selectedTicketDetail.moneda },
+          ]
+        : [],
+    [selectedTicketDetail],
+  );
 
   useEffect(() => {
     if (selectedTicketDetail?.imagenUrl) {
@@ -290,10 +304,10 @@ export default function HistoryPage() {
         ticketId: selectedTicketDetail.id,
         payload: result.payload,
       });
-      toast.success('Cambios guardados.');
       const normalizedDraft = normalizeTicketEditDraft(draft);
       setBaselineDraft(normalizedDraft);
-      setDraft(normalizedDraft);
+      setDraft(null);
+      toast.success('Cambios guardados.');
     } catch (err) {
       toast.error(extractMessage(err, 'No se pudieron guardar los cambios.'));
     }
@@ -508,11 +522,16 @@ export default function HistoryPage() {
               {/* Datos del ticket */}
               <div className="grid grid-cols-2 gap-3">
                 {[
+                  ...(selectedTicketDetail.folio ? [{ label: 'Folio', value: selectedTicketDetail.folio }] : []),
                   { label: 'Fecha', value: `${selectedTicketDetail.fecha} ${selectedTicketDetail.hora}` },
                   { label: 'Subtotal', value: formatMXN(selectedTicketDetail.subtotal) },
                   { label: 'IVA', value: formatMXN(selectedTicketDetail.iva) },
                   { label: 'Total', value: formatMXN(selectedTicketDetail.total) },
                   { label: 'Moneda', value: selectedTicketDetail.moneda },
+                  { label: 'Método de pago', value: selectedTicketDetail.metodoPago },
+                  { label: 'Tipo', value: selectedTicketDetail.tipo },
+                  { label: 'Estatus', value: selectedTicketDetail.estatus },
+                  { label: 'Revisión', value: selectedTicketDetail.reviewStatus },
                 ].map((f) => (
                   <div key={f.label}>
                     <p className="text-xs text-muted-foreground">{f.label}</p>
@@ -526,7 +545,7 @@ export default function HistoryPage() {
               </div>
 
               <TicketNotes
-                title="Notas"
+                title="Productos detectados"
                 sources={[detailQuery.data, selectedTicketDetail]}
               />
 
@@ -534,6 +553,17 @@ export default function HistoryPage() {
               {editing && draft ? (
                 <div className="space-y-3 rounded-xl border border-border/50 bg-secondary/30 p-4">
                   <p className="text-xs font-medium text-foreground">Editar ticket</p>
+
+                  {editReadonlyFields.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg bg-background/70 p-3">
+                      {editReadonlyFields.map((field) => (
+                        <div key={field.label} className="space-y-0.5">
+                          <p className="text-xs text-muted-foreground">{field.label}</p>
+                          <p className="text-sm font-medium text-foreground">{field.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
 
                   <div className="space-y-1.5">
                     <Label className="text-xs text-muted-foreground">Tipo</Label>

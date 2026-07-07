@@ -11,8 +11,15 @@ export interface FormattedTicketNotes {
   fallback: string;
 }
 
-const NOTE_FALLBACK = 'Sin notas registradas.';
-const OCR_LIMIT = 220;
+export interface TicketLineItem {
+  name: string;
+  quantity?: string | number;
+  unit?: string;
+  unitPrice?: string | number;
+  total?: string | number;
+}
+
+const NOTE_FALLBACK = 'Sin productos o notas registradas.';
 const TEXT_LIMIT = 180;
 const TECHNICAL_KEYS = new Set([
   '_id',
@@ -36,6 +43,59 @@ const TECHNICAL_KEYS = new Set([
   'publicurl',
   'attachmenturl',
 ]);
+const LINE_ITEM_KEYS = [
+  'items',
+  'lineItems',
+  'products',
+  'concepts',
+  'detalles',
+  'productos',
+  'conceptos',
+  'details',
+];
+const NESTED_SOURCE_KEYS = ['rawData', 'structured', 'data', 'ticket'];
+const GENERATED_TRANSCRIPT_MARKERS = [
+  'here is a detailed transcription',
+  'here is the transcription',
+  'detailed transcription of the items',
+  'store name:',
+  'location:',
+  'quantity | description',
+  'quantity|description',
+  'unit price | total price',
+  'total price',
+];
+const NON_PRODUCT_TERMS = [
+  'store name',
+  'location',
+  'ubicacion',
+  'ubicación',
+  'total',
+  'subtotal',
+  'iva',
+  'tax',
+  'payment',
+  'payment method',
+  'metodo de pago',
+  'método de pago',
+  'efectivo',
+  'cash',
+  'su cambio',
+  'cambio',
+  'change',
+  'fecha',
+  'date',
+  'folio',
+  'rfc',
+  'cajero',
+  'cashier',
+  'puntos',
+  'points',
+  'categoria',
+  'categoría',
+  'status',
+  'review',
+];
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
@@ -63,6 +123,16 @@ function cleanLongText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
+function normalizeLooseText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[*_`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function asNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim()) {
@@ -78,45 +148,77 @@ function formatCurrency(value: unknown): string | null {
   return `$${amount.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function formatDate(value: unknown): string | null {
-  const raw = asCleanString(value);
-  if (!raw) return null;
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) return truncate(raw, 60);
-  return new Intl.DateTimeFormat('es-MX', { year: 'numeric', month: 'short', day: '2-digit' }).format(date);
+function cleanMarkdownCell(value: string): string {
+  return value
+    .replace(/\*\*/g, '')
+    .replace(/`/g, '')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-function normalizePaymentMethod(value: unknown): string | null {
+function isMarkdownSeparatorRow(cells: string[]): boolean {
+  return cells.length > 0 && cells.every((cell) => /^:?-{2,}:?$/.test(cell.trim()));
+}
+
+function isNonProductName(value: string): boolean {
+  const normalized = normalizeLooseText(value);
+  if (!normalized || normalized.length < 2) return true;
+  return NON_PRODUCT_TERMS.some((term) => normalized === term || normalized.startsWith(`${term}:`) || normalized.includes(` ${term}:`));
+}
+
+function headerKind(value: string): 'quantity' | 'description' | 'unitPrice' | 'total' | null {
+  const normalized = normalizeLooseText(value);
+  if (['quantity', 'qty', 'cantidad', 'cant'].includes(normalized)) return 'quantity';
+  if (['description', 'descripcion', 'descrip', 'producto', 'concepto', 'item', 'articulo', 'articulo/servicio'].includes(normalized)) {
+    return 'description';
+  }
+  if (
+    normalized.includes('unit price') ||
+    normalized.includes('precio unitario') ||
+    normalized === 'p.unit' ||
+    normalized === 'p unit' ||
+    normalized === 'unitario'
+  ) {
+    return 'unitPrice';
+  }
+  if (
+    normalized === 'total' ||
+    normalized.includes('total price') ||
+    normalized.includes('precio total') ||
+    normalized.includes('p.total') ||
+    normalized.includes('importe')
+  ) {
+    return 'total';
+  }
+  return null;
+}
+
+export function formatTicketPaymentMethod(value: unknown): string {
   const raw = asCleanString(value)?.toLowerCase();
-  if (!raw) return null;
+  if (!raw) return 'No identificado';
   if (raw === 'cash' || raw.includes('efectivo')) return 'Efectivo';
-  if (raw === 'card' || raw === 'credit_card' || raw === 'debit_card' || raw.includes('tarjeta')) return 'Tarjeta';
+  if (raw === 'credit_card' || raw === 'credito' || raw === 'crédito') return 'Crédito';
+  if (raw === 'debit_card' || raw === 'debito' || raw === 'débito') return 'Débito';
+  if (raw === 'card' || raw.includes('tarjeta')) return 'Tarjeta';
   if (raw === 'transfer' || raw.includes('transfer')) return 'Transferencia';
   if (raw === 'other') return 'Otro';
-  if (raw === 'unknown') return 'No identificado';
+  if (raw === 'unknown' || raw === 'no identificado') return 'No identificado';
   return truncate(raw, 80);
 }
 
-function normalizeType(value: unknown): string | null {
+export function formatTicketType(value: unknown): string {
   const raw = asCleanString(value)?.toLowerCase();
-  if (!raw) return null;
-  if (raw === 'income' || raw === 'ingreso') return 'Ingreso';
-  if (raw === 'expense' || raw === 'egreso') return 'Egreso';
-  if (raw === 'sale' || raw === 'venta') return 'Venta';
-  if (raw === 'purchase' || raw === 'compra') return 'Compra';
+  if (!raw) return 'Gasto';
+  if (raw === 'income' || raw === 'ingreso' || raw === 'sale' || raw === 'venta') return 'Ingreso';
+  if (raw === 'expense' || raw === 'egreso' || raw === 'gasto' || raw === 'purchase' || raw === 'compra') return 'Gasto';
   return truncate(raw, 80);
 }
 
-function normalizeStatus(value: unknown): string | null {
+export function formatTicketReviewStatus(value: unknown): string {
   const raw = asCleanString(value)?.toLowerCase();
-  if (!raw) return null;
-  if (raw === 'pending' || raw === 'pendiente') return 'Pendiente';
-  if (raw === 'processed' || raw === 'reviewed' || raw === 'revisado') return 'Revisado';
-  if (raw === 'approved' || raw === 'aprobado') return 'Aprobado';
-  if (raw === 'rejected' || raw === 'rechazado') return 'Rechazado';
-  if (raw === 'failed' || raw === 'error') return 'Error';
-  if (raw === 'duplicate' || raw === 'duplicado') return 'Duplicado';
-  return truncate(raw, 80);
+  if (raw === 'revisado' || raw === 'reviewed') return 'Revisado';
+  return 'Pendiente de revisión';
 }
 
 function parseJson(value: string): unknown | null {
@@ -155,53 +257,217 @@ function normalizeSource(source: unknown): Record<string, unknown> | null {
   return rawData ? { ...record, ...rawData } : record;
 }
 
-function summarizeItems(value: unknown): string | null {
-  if (!Array.isArray(value) || value.length === 0) return null;
-  const items = value
-    .slice(0, 3)
-    .map((item) => {
-      const record = asRecord(item);
-      if (!record) return asCleanString(item);
-      const name = asCleanString(record.name ?? record.description ?? record.concept ?? record.product);
-      const amount = formatCurrency(record.amount ?? record.total ?? record.price);
-      if (name && amount) return `${truncate(name, 40)} (${amount})`;
-      return name ? truncate(name, 50) : amount;
-    })
-    .filter(Boolean) as string[];
-  if (items.length === 0) return null;
-  const suffix = value.length > 3 ? ` y ${value.length - 3} más` : '';
-  return `${items.join(', ')}${suffix}`;
+function getStringKey(record: Record<string, unknown>, keys: string[]): string | null {
+  return asCleanString(readFirst(record, keys));
 }
 
-function collectFromRecord(record: Record<string, unknown>, sections: TicketNoteSection[]) {
-  pushUnique(sections, 'Comercio', asCleanString(readFirst(record, ['vendor', 'vendorName', 'merchant', 'merchantName', 'store', 'comercio'])));
-  pushUnique(sections, 'RFC', asCleanString(readFirst(record, ['vendorRFC', 'rfc'])));
-  pushUnique(sections, 'Folio', asCleanString(readFirst(record, ['folio', 'ticketNumber', 'receiptNumber'])));
-  pushUnique(sections, 'Fecha', formatDate(readFirst(record, ['date', 'fecha'])));
-  pushUnique(sections, 'Hora', asCleanString(readFirst(record, ['time', 'hora'])));
-  pushUnique(sections, 'Subtotal', formatCurrency(readFirst(record, ['subtotal'])));
-  pushUnique(sections, 'IVA', formatCurrency(readFirst(record, ['tax', 'iva'])));
-  pushUnique(sections, 'Total', formatCurrency(readFirst(record, ['amount', 'total'])));
-  pushUnique(sections, 'Moneda', asCleanString(readFirst(record, ['currency', 'moneda'])));
-  pushUnique(sections, 'Tipo', normalizeType(readFirst(record, ['type', 'tipo'])));
-  pushUnique(sections, 'Categoría', asCleanString(readFirst(record, ['category', 'categoria'])));
-  pushUnique(sections, 'Método de pago', normalizePaymentMethod(readFirst(record, ['paymentMethod', 'metodoPago'])));
-  pushUnique(sections, 'Estado', normalizeStatus(readFirst(record, ['status', 'estatus'])));
-  pushUnique(sections, 'Revisión', normalizeStatus(readFirst(record, ['reviewStatus'])));
-  pushUnique(sections, 'Conceptos', summarizeItems(readFirst(record, ['items', 'conceptos', 'lineItems'])));
+function formatQuantity(value: unknown, unitValue: unknown): string | null {
+  const quantity = asNumber(value);
+  if (quantity === null || quantity <= 0) return null;
+  const unit = asCleanString(unitValue);
+  const rawQuantity = asCleanString(value);
+  if (unit) return `${quantity} ${unit}`;
+  return Number.isInteger(quantity) ? `${quantity}x` : rawQuantity ?? String(quantity);
+}
 
-  const note = asCleanString(readFirst(record, ['notes', 'notas', 'description', 'concept']));
-  if (note) {
-    const parsed = parseJson(note);
-    if (asRecord(parsed)) {
-      collectFromRecord(parsed as Record<string, unknown>, sections);
-    } else {
-      pushUnique(sections, 'Nota', truncate(cleanLongText(note)));
+function isTechnicalLabel(value: string): boolean {
+  return TECHNICAL_KEYS.has(value.toLowerCase().replace(/[\s_-]/g, ''));
+}
+
+export function isGeneratedOcrTranscript(text: string): boolean {
+  const normalized = normalizeLooseText(text);
+  if (!normalized) return false;
+  if (GENERATED_TRANSCRIPT_MARKERS.some((marker) => normalized.includes(marker))) return true;
+
+  const pipeCount = (text.match(/\|/g) ?? []).length;
+  const hasTableHeaders =
+    /quantity|cantidad|qty|cant/i.test(text) &&
+    /description|descripci[oó]n|producto|concepto/i.test(text) &&
+    /unit price|precio unitario|total price|precio total|importe/i.test(text);
+
+  return pipeCount >= 8 && hasTableHeaders;
+}
+
+function parseMarkdownCells(row: string): string[] {
+  return row
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map(cleanMarkdownCell);
+}
+
+function findHeaderMap(cells: string[]): Partial<Record<'quantity' | 'description' | 'unitPrice' | 'total', number>> {
+  return cells.reduce<Partial<Record<'quantity' | 'description' | 'unitPrice' | 'total', number>>>((acc, cell, index) => {
+    const kind = headerKind(cell);
+    if (kind && acc[kind] === undefined) acc[kind] = index;
+    return acc;
+  }, {});
+}
+
+function rowToLineItem(
+  cells: string[],
+  headerMap: Partial<Record<'quantity' | 'description' | 'unitPrice' | 'total', number>>,
+): TicketLineItem | null {
+  const descriptionIndex = headerMap.description;
+  if (descriptionIndex === undefined) return null;
+
+  const name = cleanMarkdownCell(cells[descriptionIndex] ?? '');
+  if (!name || isNonProductName(name) || isTechnicalLabel(name)) return null;
+
+  const quantity = headerMap.quantity !== undefined ? cleanMarkdownCell(cells[headerMap.quantity] ?? '') : '';
+  const unitPrice = headerMap.unitPrice !== undefined ? cleanMarkdownCell(cells[headerMap.unitPrice] ?? '') : '';
+  const total = headerMap.total !== undefined ? cleanMarkdownCell(cells[headerMap.total] ?? '') : '';
+
+  return {
+    name,
+    quantity: quantity || undefined,
+    unitPrice: unitPrice || undefined,
+    total: total || unitPrice || undefined,
+  };
+}
+
+function extractTableRows(text: string): string[] {
+  const rows = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.includes('|'));
+
+  if (rows.length > 0) return rows;
+
+  const tableStart = text.search(/\|\s*(Quantity|Cantidad|Qty|Cant)\s*\|/i);
+  if (tableStart < 0) return [];
+
+  const cells = text.slice(tableStart).split('|').map(cleanMarkdownCell);
+  const rowsFromInline: string[] = [];
+  for (let i = 1; i + 3 < cells.length; i += 4) {
+    rowsFromInline.push(`| ${cells.slice(i, i + 4).join(' |')} |`);
+  }
+  return rowsFromInline;
+}
+
+export function extractLineItemsFromText(text: string): TicketLineItem[] {
+  const rows = extractTableRows(text);
+  if (rows.length < 2) return [];
+
+  let headerMap: Partial<Record<'quantity' | 'description' | 'unitPrice' | 'total', number>> | null = null;
+  const items: TicketLineItem[] = [];
+
+  for (const row of rows) {
+    const cells = parseMarkdownCells(row);
+    if (cells.length < 2 || isMarkdownSeparatorRow(cells)) continue;
+
+    const candidateHeader = findHeaderMap(cells);
+    if (candidateHeader.description !== undefined && (candidateHeader.quantity !== undefined || candidateHeader.total !== undefined)) {
+      headerMap = candidateHeader;
+      continue;
+    }
+
+    if (!headerMap) continue;
+    const item = rowToLineItem(cells, headerMap);
+    if (item && !items.some((existing) => existing.name === item.name && existing.total === item.total)) {
+      items.push(item);
     }
   }
 
-  const ocr = asCleanString(readFirst(record, ['ocrText', 'text', 'rawText']));
-  if (ocr) pushUnique(sections, 'Texto detectado', truncate(cleanLongText(ocr), OCR_LIMIT));
+  return items;
+}
+
+export function formatTicketLineItem(item: unknown): string | null {
+  const rawText = asCleanString(item);
+  if (rawText) {
+    if (isGeneratedOcrTranscript(rawText) || /\|.*\|/.test(rawText) || isNonProductName(rawText)) return null;
+    return truncate(cleanLongText(rawText), 80);
+  }
+
+  const record = asRecord(item);
+  if (!record) return null;
+
+  const name = getStringKey(record, [
+    'name',
+    'nombre',
+    'description',
+    'descripcion',
+    'concept',
+    'concepto',
+    'product',
+    'producto',
+    'item',
+    'title',
+    'label',
+  ]);
+  if (!name || isTechnicalLabel(name) || isNonProductName(name)) return null;
+
+  const quantity = formatQuantity(
+    readFirst(record, ['quantity', 'qty', 'cantidad']),
+    readFirst(record, ['unit', 'unidad', 'units', 'unidades']),
+  );
+  const price = formatCurrency(readFirst(record, ['total', 'lineTotal', 'importe', 'amount', 'price', 'precio', 'unitPrice', 'precioUnitario']));
+  const prefix = quantity ? `${quantity} ` : '';
+  const suffix = price ? ` — ${price}` : '';
+  return `${prefix}${truncate(name, 70)}${suffix}`;
+}
+
+function collectLineItems(value: unknown, items: string[]) {
+  const parsedString = asCleanString(value);
+  if (parsedString) {
+    const parsed = parseJson(parsedString);
+    if (parsed) {
+      collectLineItems(parsed, items);
+      return;
+    }
+    extractLineItemsFromText(parsedString).forEach((item) => {
+      const formatted = formatTicketLineItem(item);
+      if (formatted && !items.includes(formatted)) items.push(formatted);
+    });
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const formatted = formatTicketLineItem(item);
+      if (formatted && !items.includes(formatted)) items.push(formatted);
+    }
+    return;
+  }
+
+  const record = asRecord(value);
+  if (!record) return;
+
+  for (const key of LINE_ITEM_KEYS) {
+    collectLineItems(record[key], items);
+  }
+
+  const directConcept = formatTicketLineItem({
+    name: readFirst(record, ['concept', 'concepto']),
+    amount: readFirst(record, ['price', 'precio', 'amount']),
+    quantity: readFirst(record, ['quantity', 'qty', 'cantidad']),
+    unit: readFirst(record, ['unit', 'unidad', 'units', 'unidades']),
+  });
+  if (directConcept && !items.includes(directConcept)) items.push(directConcept);
+
+  for (const key of NESTED_SOURCE_KEYS) {
+    collectLineItems(record[key], items);
+  }
+}
+
+export function getTicketFolio(...sources: unknown[]): string | null {
+  for (const source of sources) {
+    const normalized = normalizeSource(source);
+    if (!normalized) continue;
+    const folio = asCleanString(readFirst(normalized, ['folio', 'ticketNumber', 'receiptNumber']));
+    if (folio) return folio;
+  }
+  return null;
+}
+
+export function getTicketLineItems(...sources: unknown[]): string[] {
+  const items: string[] = [];
+  for (const source of sources) {
+    const normalized = normalizeSource(source);
+    if (normalized) collectLineItems(normalized, items);
+  }
+  return items;
 }
 
 export function getTicketImageUrl(ticket: BackendTicket | null | undefined): string | null {
@@ -234,13 +500,12 @@ export function getTicketImageUrl(ticket: BackendTicket | null | undefined): str
 }
 
 export function getTicketNoteSections(...sources: unknown[]): FormattedTicketNotes {
+  const items = getTicketLineItems(...sources);
   const details: TicketNoteSection[] = [];
 
-  for (const source of sources) {
-    const normalized = normalizeSource(source);
-    if (!normalized) continue;
-    collectFromRecord(normalized, details);
-  }
+  items.forEach((item) => {
+    pushUnique(details, 'Producto / concepto', item);
+  });
 
   const filteredDetails = details.filter((section) => {
     const key = section.label.toLowerCase();
@@ -248,8 +513,7 @@ export function getTicketNoteSections(...sources: unknown[]): FormattedTicketNot
   });
 
   const summary = filteredDetails
-    .filter((section) => ['Comercio', 'Folio', 'Total'].includes(section.label))
-    .slice(0, 3)
+    .slice(0, 2)
     .map((section) => `${section.label}: ${section.value}`)
     .join(' · ');
 

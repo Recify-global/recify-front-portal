@@ -8,6 +8,7 @@ import type {
   UiTicket,
   UiTicketStatus,
 } from '@/types/ticket';
+import { formatTicketPaymentMethod, formatTicketReviewStatus, formatTicketType } from './ticket-display';
 
 export interface TicketEditDraft {
   type: BackendTicketType;
@@ -18,13 +19,6 @@ export interface TicketEditDraft {
   status: BackendTicketStatus;
   reviewStatus: BackendTicketReviewStatus;
 }
-
-const PAYMENT_LABELS: Record<BackendPaymentMethod, string> = {
-  card: 'Tarjeta de crédito',
-  cash: 'Efectivo',
-  transfer: 'Transferencia',
-  other: 'Otro',
-};
 
 const STATUS_LABELS: Record<BackendTicketStatus, UiTicketStatus> = {
   processed: 'analizado',
@@ -115,8 +109,10 @@ export function applyDraftToUiTicket(ticket: UiTicket, draft: TicketEditDraft): 
     iva,
     total: amount,
     categoria: normalizedDraft.category || ticket.categoria,
-    metodoPago: PAYMENT_LABELS[normalizedDraft.paymentMethod],
+    tipo: formatTicketType(normalizedDraft.type),
+    metodoPago: formatTicketPaymentMethod(normalizedDraft.paymentMethod),
     estatus: STATUS_LABELS[normalizedDraft.status] ?? ticket.estatus,
+    reviewStatus: formatTicketReviewStatus(normalizedDraft.reviewStatus),
   };
 }
 
@@ -170,7 +166,7 @@ export function buildTicketUpdatePayload(
   const normalizedBaseline = normalizeTicketEditDraft(baseline);
   const normalizedDraft = normalizeTicketEditDraft(draft);
   const validation = validateDraft(normalizedDraft);
-  if (!validation.ok) {
+  if ('message' in validation) {
     return { ok: false, reason: 'validation', message: validation.message };
   }
 
@@ -207,5 +203,5 @@ export function hasTicketEditChanges(baseline: TicketEditDraft | null, draft: Ti
 export function getTicketEditValidationMessage(draft: TicketEditDraft | null): string | null {
   if (!draft) return null;
   const validation = validateDraft(draft);
-  return validation.ok ? null : validation.message;
+  return 'message' in validation ? validation.message : null;
 }

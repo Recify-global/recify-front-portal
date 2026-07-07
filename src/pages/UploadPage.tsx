@@ -39,7 +39,7 @@ const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'
 const MAX_SIZE_BYTES = 10 * 1024 * 1024;
 
 const PAYMENT_OPTIONS: { value: BackendPaymentMethod; label: string }[] = [
-  { value: 'card', label: 'Tarjeta de crédito' },
+  { value: 'card', label: 'Tarjeta' },
   { value: 'cash', label: 'Efectivo' },
   { value: 'transfer', label: 'Transferencia' },
   { value: 'other', label: 'Otro' },
@@ -59,7 +59,7 @@ const REVIEW_STATUS_OPTIONS: { value: BackendTicketReviewStatus; label: string }
 
 const TYPE_OPTIONS: { value: BackendTicketType; label: string }[] = [
   { value: 'ingreso', label: 'Ingreso' },
-  { value: 'egreso', label: 'Egreso' },
+  { value: 'egreso', label: 'Gasto' },
 ];
 
 export default function UploadPage() {
@@ -270,6 +270,7 @@ export default function UploadPage() {
       ticket
         ? [
             { label: 'Comercio', value: ticket.comercio, key: 'comercio' },
+            ...(ticket.folio ? [{ label: 'Folio', value: ticket.folio, key: 'folio' }] : []),
             { label: 'Fecha', value: ticket.fecha, key: 'fecha' },
             { label: 'Hora', value: ticket.hora, key: 'hora' },
             { label: 'Subtotal', value: formatMXN(ticket.subtotal), key: 'subtotal' },
@@ -277,6 +278,24 @@ export default function UploadPage() {
             { label: 'Total', value: formatMXN(ticket.total), key: 'total' },
             { label: 'Moneda', value: ticket.moneda, key: 'moneda' },
             { label: 'Método de pago', value: ticket.metodoPago, key: 'metodoPago' },
+            { label: 'Tipo', value: ticket.tipo, key: 'tipo' },
+            { label: 'Estatus', value: ticket.estatus, key: 'estatus' },
+            { label: 'Revisión', value: ticket.reviewStatus, key: 'reviewStatus' },
+          ]
+        : [],
+    [ticket, formatMXN],
+  );
+
+  const editReadonlyFields = useMemo(
+    () =>
+      ticket
+        ? [
+            { label: 'Comercio', value: ticket.comercio, key: 'edit-comercio' },
+            ...(ticket.folio ? [{ label: 'Folio', value: ticket.folio, key: 'edit-folio' }] : []),
+            { label: 'Hora', value: ticket.hora, key: 'edit-hora' },
+            { label: 'Subtotal', value: formatMXN(ticket.subtotal), key: 'edit-subtotal' },
+            { label: 'IVA', value: formatMXN(ticket.iva), key: 'edit-iva' },
+            { label: 'Moneda', value: ticket.moneda, key: 'edit-moneda' },
           ]
         : [],
     [ticket, formatMXN],
@@ -311,8 +330,8 @@ export default function UploadPage() {
     const normalizedDraft = normalizeTicketEditDraft(draft);
     setTicket(applyDraftToUiTicket(ticket, normalizedDraft));
     setEditBaseline(normalizedDraft);
-    setDraft(normalizedDraft);
-    toast.success('Cambios aplicados al análisis.');
+    setDraft(null);
+    toast.success('Cambios guardados.');
   };
 
   return (
@@ -520,6 +539,16 @@ export default function UploadPage() {
 
                   {editing && draft ? (
                     <div className="space-y-3 rounded-xl border border-border/50 bg-secondary/30 p-4">
+                      {editReadonlyFields.length > 0 ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg bg-background/70 p-3">
+                          {editReadonlyFields.map((field) => (
+                            <div key={field.key} className="space-y-0.5">
+                              <p className="text-xs text-muted-foreground">{field.label}</p>
+                              <p className="text-sm font-medium text-foreground">{field.value}</p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="space-y-1.5">
                           <Label className="text-xs text-muted-foreground">Tipo</Label>
@@ -617,6 +646,10 @@ export default function UploadPage() {
                         </div>
                       </div>
 
+                      <div className="pt-1">
+                        <TicketNotes title="Productos detectados" sources={[analysisRaw, ticket]} />
+                      </div>
+
                       <div className="flex flex-col sm:flex-row gap-2 pt-1">
                         <Button
                           className="flex-1 h-10 rounded-xl bg-gradient-primary text-primary-foreground transition-all hover:shadow-md hover:ring-2 hover:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none disabled:hover:ring-0"
@@ -651,7 +684,7 @@ export default function UploadPage() {
                         ))}
                       </div>
                       <div className="mt-3 pt-3 border-t border-border/50">
-                        <TicketNotes title="Notas" sources={[analysisRaw, ticket]} />
+                        <TicketNotes title="Productos detectados" sources={[analysisRaw, ticket]} />
                       </div>
                     </>
                   )}

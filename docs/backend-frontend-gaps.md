@@ -278,6 +278,77 @@ Complementa: [`backend-requirements.md`](./backend-requirements.md) (requerimien
 
 ---
 
+### GAP-015 — Productos/conceptos del ticket no vienen estructurados o no llegan al frontend
+
+- **Ticket relacionado:** KAN-31
+- **Severidad:** P1
+- **Pantalla afectada:** Upload (`/app/upload`), Histórico (`/app/history`)
+- **Endpoint relacionado:** `POST /upload/preprocess`, `POST /upload/ticket`, `GET /tickets`, `GET /tickets/:id`
+- **Problema:** Tickets reales como Alsuper contienen productos, cantidades, unidades y precios, pero el backend actual no devuelve partidas estructuradas. El prompt de Gemini indica explícitamente "solo resumen; no partidas ni arreglo items" y "No incluyas items ni listas de productos"; además `preprocess.service.js` elimina `parsed.items` y `upload.controller.js` elimina `structuredSummary.items` antes de guardar. `rawData` se guarda con `select: false`, por lo que Histórico tampoco recibe OCR/rawData en `GET /tickets` ni `GET /tickets/:id`. En QA también se observó que esos datos pueden llegar como transcripción OCR/Gemini en inglés o tabla markdown dentro de texto.
+- **Impacto frontend:** La sección "Productos detectados" puede mostrar `items/products/lineItems/concepts` si algún endpoint los trae y tiene un workaround para parsear tablas markdown simples, pero no debe depender de texto OCR/Gemini en inglés para construir UI confiable. Si no hay productos estructurados o tabla parseable, debe mostrar fallback limpio.
+- **Contrato esperado:**
+  ```json
+  {
+    "items": [
+      {
+        "name": "Leche evaporada",
+        "quantity": 1,
+        "unit": "pieza",
+        "unitPrice": 24.9,
+        "total": 24.9
+      },
+      {
+        "name": "Plátano",
+        "quantity": 0.38,
+        "unit": "kg",
+        "unitPrice": 18.89,
+        "total": 7.18
+      }
+    ],
+    "notes": "Nota humana opcional",
+    "vendor": "Walmart",
+    "folio": "12345",
+    "paymentMethod": "credit_card",
+    "type": "expense"
+  }
+  ```
+- **Bloquea ticket actual:** sí para mostrar productos reales cuando backend no los entrega; no bloquea el fallback frontend.
+- **Workaround frontend permitido:** sí — buscar line items en claves conocidas si ya vienen en respuesta, parsear tablas markdown simples como solución frágil, no renderizar JSON crudo, bloquear transcripciones OCR/Gemini visibles y mostrar método/tipo como campos propios.
+- **Workaround frontend prohibido:** inventar productos desde OCR plano si no vienen de forma confiable.
+- **Notas para backend:** Exponer `items[]` tipado en preprocess, upload y GET detalle/listado. Separar `notes` humana de OCR/rawData. Ampliar `paymentMethod` si producto necesita distinguir `credit_card` y `debit_card`.
+- **Resultado debug (2026-06-12, script local `recify-back-api/scripts/debug-gemini-ticket-output.js`):**
+  - **Diagnóstico tickets reales (Alsuper, QA + audit código):** **B** — productos en tabla markdown dentro del texto OCR (DeepInfra), no en JSON estructurado.
+  - **Diagnóstico Gemini estructurado:** **C/D** — Gemini devuelve solo resumen (`type`, `date`, `amount`, `subtotal`, `tax`, `category`, `paymentMethod`, `vendor`, `folio`); sin `items`/`products`/`lineItems` ni antes ni después del strip en producción.
+  - **Campo donde vienen productos (cuando existen):** texto OCR (`ocrText`) — transcripción en inglés con tabla markdown (`| Quantity | Description | Unit Price | Total Price |`).
+  - **Campo donde NO vienen:** respuesta JSON de Gemini (`structured` / `ticket` en preprocess); el prompt prohíbe `"items"` y `preprocess.service.js` hace `delete parsed.items` antes de devolver.
+  - **Ejemplo de shape real observado en QA (OCR, excerpt):**
+    ```
+    Here is a detailed transcription of the items and costs from the receipt:
+    **Store Name:** alsuper **Location:** Jimenez, Chih.
+    | Quantity | Description | Unit Price | Total Price |
+    | :--- | :--- | :--- | ...
+    ```
+  - **Ejemplo de shape real Gemini (preprocess/upload, sin items):**
+    ```json
+    {
+      "type": "egreso",
+      "date": "2026-06-01T00:00:00.000Z",
+      "amount": 123.45,
+      "subtotal": 106.42,
+      "tax": 17.03,
+      "category": "Supermercado y Abarrotes",
+      "paymentMethod": "card",
+      "vendor": "alsuper",
+      "vendorRFC": null,
+      "folio": "12345"
+    }
+    ```
+  - **Smoke test script (logo.png, no ticket):** OCR 258 chars, Gemini JSON válido con 10 claves de resumen, `items` count 0, sin tabla markdown — confirma pipeline pero no sustituye ticket Alsuper.
+  - **Contrato esperado (sin cambios):** ver bloque `items[]` arriba en este gap.
+  - **Acción backend (GAP-015):** ampliar prompt Gemini para devolver `items[]` tipado; dejar de eliminar `parsed.items`; exponer en preprocess, upload y GET; no usar OCR crudo como notas de usuario.
+
+---
+
 ## Gaps cerrados
 
 _(Vacío — mover aquí cuando backend resuelva.)_

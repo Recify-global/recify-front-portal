@@ -1,17 +1,16 @@
 import type {
-  BackendPaymentMethod,
   BackendTicket,
   BackendTicketStatus,
   UiTicket,
 } from '@/types/ticket';
-import { formatTicketNotes, getTicketImageUrl } from '@/utils/ticket-display';
-
-const PAYMENT_LABELS: Record<BackendPaymentMethod, string> = {
-  card: 'Tarjeta de crédito',
-  cash: 'Efectivo',
-  transfer: 'Transferencia',
-  other: 'Otro',
-};
+import {
+  formatTicketNotes,
+  formatTicketPaymentMethod,
+  formatTicketReviewStatus,
+  formatTicketType,
+  getTicketFolio,
+  getTicketImageUrl,
+} from '@/utils/ticket-display';
 
 const STATUS_MAP: Record<BackendTicketStatus, UiTicket['estatus']> = {
   processed: 'analizado',
@@ -90,10 +89,12 @@ export function mapBackendTicket(t: BackendTicket): UiTicket {
     'MXN';
   const notas = formatTicketNotes(t);
   const imageUrl = getTicketImageUrl(t) ?? undefined;
+  const folio = getTicketFolio(t) ?? undefined;
 
   return {
     id: asString(t._id) ?? 'sin-id',
     comercio,
+    folio,
     fecha,
     hora,
     subtotal,
@@ -101,8 +102,10 @@ export function mapBackendTicket(t: BackendTicket): UiTicket {
     total,
     moneda,
     categoria,
-    metodoPago: PAYMENT_LABELS[t.paymentMethod] ?? t.paymentMethod,
+    tipo: formatTicketType(t.type),
+    metodoPago: formatTicketPaymentMethod(t.paymentMethod),
     estatus: STATUS_MAP[t.status] ?? 'pendiente',
+    reviewStatus: formatTicketReviewStatus(t.reviewStatus),
     notas,
     imagenUrl: imageUrl,
   };
@@ -140,6 +143,8 @@ export function mapPreprocessTicket(
     status: normalizeStatus(raw.status),
     rawData: {
       vendor: asString(raw.vendor) ?? asString(raw.comercio) ?? undefined,
+      vendorRFC: asString(raw.vendorRFC) ?? asString(raw.rfc) ?? undefined,
+      folio: asString(raw.folio) ?? asString(raw.ticketNumber) ?? undefined,
       subtotal: asNumber(raw.subtotal),
       tax: asNumber(raw.tax) ?? asNumber(raw.iva),
       imageUrl: meta.imageUrl,

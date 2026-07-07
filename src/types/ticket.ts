@@ -55,6 +55,7 @@ export type UiTicketStatus = 'analizado' | 'pendiente' | 'error';
 export interface UiTicket {
   id: string;
   comercio: string;
+  folio?: string;
   fecha: string;
   hora: string;
   subtotal: number;
@@ -62,8 +63,10 @@ export interface UiTicket {
   total: number;
   moneda: string;
   categoria: string;
+  tipo: string;
   metodoPago: string;
   estatus: UiTicketStatus;
+  reviewStatus: string;
   notas: string;
   imagenUrl?: string;
 }
