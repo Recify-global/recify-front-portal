@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppLayout } from '@/components/recify/AppLayout';
 import { MetricCard } from '@/components/recify/MetricCard';
+import { SkeletonCard } from '@/components/recify/SkeletonCard';
 import { StatusBadge } from '@/components/recify/StatusBadge';
 import { CategoryBadge } from '@/components/recify/CategoryBadge';
 import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
@@ -11,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -25,12 +27,19 @@ import {
   type ColumnFiltersState,
 } from '@tanstack/react-table';
 import {
-  Receipt, DollarSign, Tags, AlertCircle, Search, ChevronLeft, ChevronRight,
-  ArrowUpDown, Trash2, Edit3, X, Loader2, Save, XCircle,
+  Receipt, ArrowDownCircle, ArrowUpCircle, Scale, CreditCard,
+  AlertCircle, Search, ChevronLeft, ChevronRight,
+  ArrowUpDown, Trash2, Edit3, X, Loader2, Save, XCircle, Info,
 } from 'lucide-react';
 import { ApiRequestError } from '@/api/http';
 import { mapBackendTicket, mapBackendTickets } from '@/mappers/ticket.mapper';
-import { useTicket, useTickets, useUpdateDashboardTicket } from '@/hooks/use-tickets';
+import {
+  useDashboardDailyReport,
+  useTicket,
+  useTickets,
+  useUpdateDashboardTicket,
+} from '@/hooks/use-tickets';
+import { useFinancialKpis } from '@/hooks/use-financial-kpis';
 import { useAuth } from '@/hooks/use-auth';
 import { deleteTicket } from '@/services/tickets.service';
 import {
@@ -41,6 +50,15 @@ import {
   normalizeTicketEditDraft,
   type TicketEditDraft,
 } from '@/utils/ticket-edit';
+import {
+  detectActivePreset,
+  formatMxn,
+  isValidDateRange,
+  last12MonthsRange,
+  last30DaysRange,
+} from '@/utils/financial-kpis';
+import { selectTicketImageUrl } from '@/utils/ticket-image';
+import { cn } from '@/lib/utils';
 import type {
   BackendPaymentMethod,
   BackendTicketReviewStatus,
@@ -49,8 +67,7 @@ import type {
   UiTicket,
 } from '@/types/ticket';
 
-const formatMXN = (n: number) =>
-  `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
+const formatMXN = (n: number) => formatMxn(n);
 
 const statusOptions = ['analizado', 'pendiente', 'error'] as const;
 
@@ -173,14 +190,17 @@ function clearHistoryFilters(
 }
 
 export default function HistoryPage() {
+  const [periodReference] = useState(() => new Date());
+  const [initialDateRange] = useState(() => last12MonthsRange(periodReference));
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
   const [selectedTicket, setSelectedTicket] = useState<UiTicket | null>(null);
+  const [selectedTicketCompanyId, setSelectedTicketCompanyId] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFromFilter, setDateFromFilter] = useState('');
-  const [dateToFilter, setDateToFilter] = useState('');
+  const [dateFromFilter, setDateFromFilter] = useState(initialDateRange.dateFrom);
+  const [dateToFilter, setDateToFilter] = useState(initialDateRange.dateTo);
   const [lastKnownImageUrl, setLastKnownImageUrl] = useState<string | null>(null);
   const [baselineDraft, setBaselineDraft] = useState<TicketEditDraft | null>(null);
   const [draft, setDraft] = useState<TicketEditDraft | null>(null);
@@ -188,17 +208,46 @@ export default function HistoryPage() {
   const { companyId } = useAuth();
   const queryClient = useQueryClient();
 
+  // P0 multitenant: al cambiar compañía, cerrar detalle y limpiar fallback visual.
+  useEffect(() => {
+    setSelectedTicket(null);
+    setSelectedTicketCompanyId(null);
+    setLastKnownImageUrl(null);
+    setBaselineDraft(null);
+    setDraft(null);
+  }, [companyId]);
+
   const ticketsQuery = useTickets({ page: 1, limit: 100 });
-  const detailQuery = useTicket(selectedTicket?.id);
+  const dailyReportQuery = useDashboardDailyReport({ page: 1, limit: 100 });
+  const selectedTicketIdForQuery =
+    selectedTicketCompanyId === companyId ? selectedTicket?.id : null;
+  const detailQuery = useTicket(selectedTicketIdForQuery);
   const updateMutation = useUpdateDashboardTicket();
   const backendTicket = detailQuery.data;
   const editing = draft !== null;
   const canEdit = Boolean(backendTicket) && !detailQuery.isLoading;
 
-  const tickets = useMemo(
-    () => mapBackendTickets(ticketsQuery.data?.data),
-    [ticketsQuery.data?.data],
-  );
+  const financialKpis = useFinancialKpis({
+    dateFrom: dateFromFilter,
+    dateTo: dateToFilter,
+    category: categoryFilter,
+  });
+  const activePreset = detectActivePreset(dateFromFilter, dateToFilter, periodReference);
+  const dateRangeInvalid = !isValidDateRange(dateFromFilter, dateToFilter);
+
+  const tickets = useMemo(() => {
+    const list = mapBackendTickets(ticketsQuery.data?.data);
+    const enriched = mapBackendTickets(dailyReportQuery.data?.tickets);
+    const imageByTicketId = new Map(
+      enriched
+        .filter((ticket) => Boolean(ticket.imagenUrl))
+        .map((ticket) => [ticket.id, ticket.imagenUrl] as const),
+    );
+    return list.map((ticket) => ({
+      ...ticket,
+      imagenUrl: imageByTicketId.get(ticket.id) ?? ticket.imagenUrl,
+    }));
+  }, [dailyReportQuery.data?.tickets, ticketsQuery.data?.data]);
 
   const categorias = useMemo(() => {
     const values = Array.from(new Set(tickets.map((t) => t.categoria))).filter(Boolean);
@@ -235,20 +284,88 @@ export default function HistoryPage() {
     );
   };
 
+  const applyLastMonthPreset = () => {
+    const range = last30DaysRange(periodReference);
+    setDateFromFilter(range.dateFrom);
+    setDateToFilter(range.dateTo);
+  };
+
+  const applyLastYearPreset = () => {
+    const range = last12MonthsRange(periodReference);
+    setDateFromFilter(range.dateFrom);
+    setDateToFilter(range.dateTo);
+  };
+
   const selectedTicketDetail = useMemo(() => {
-    if (detailQuery.data) {
+    if (
+      !selectedTicket ||
+      !companyId ||
+      selectedTicketCompanyId !== companyId
+    ) {
+      return null;
+    }
+    // Solo usar detalle remoto si pertenece a la misma compañía activa.
+    if (
+      detailQuery.data &&
+      companyId &&
+      detailQuery.data.companyId === companyId &&
+      detailQuery.data._id === selectedTicket.id
+    ) {
       const mapped = mapBackendTicket(detailQuery.data);
+      const currentListTicket = tickets.find(
+        (ticket) => ticket.id === selectedTicket.id,
+      );
+      const imageUrl = selectTicketImageUrl(
+        companyId,
+        selectedTicket.id,
+        {
+          ticketId: detailQuery.data._id,
+          companyId: detailQuery.data.companyId,
+          imageUrl: mapped.imagenUrl,
+        },
+        {
+          ticketId: selectedTicket.id,
+          companyId: selectedTicketCompanyId,
+          imageUrl:
+            currentListTicket?.imagenUrl ??
+            selectedTicket.imagenUrl ??
+            lastKnownImageUrl,
+        },
+      );
       return {
         ...mapped,
-        imagenUrl: mapped.imagenUrl ?? lastKnownImageUrl ?? selectedTicket?.imagenUrl,
+        imagenUrl: imageUrl ?? undefined,
       };
     }
-    if (!selectedTicket) return null;
+    // Fallback de lista solo mientras el detalle de ESTA compañía carga.
+    const currentListTicket = tickets.find(
+      (ticket) => ticket.id === selectedTicket.id,
+    );
+    const listImageUrl = selectTicketImageUrl(
+      companyId,
+      selectedTicket.id,
+      null,
+      {
+        ticketId: selectedTicket.id,
+        companyId: selectedTicketCompanyId,
+        imageUrl:
+          currentListTicket?.imagenUrl ??
+          selectedTicket.imagenUrl ??
+          lastKnownImageUrl,
+      },
+    );
     return {
       ...selectedTicket,
-      imagenUrl: selectedTicket.imagenUrl ?? lastKnownImageUrl ?? undefined,
+      imagenUrl: listImageUrl ?? undefined,
     };
-  }, [detailQuery.data, lastKnownImageUrl, selectedTicket]);
+  }, [
+    companyId,
+    detailQuery.data,
+    lastKnownImageUrl,
+    selectedTicket,
+    selectedTicketCompanyId,
+    tickets,
+  ]);
 
   const editValidationMessage = useMemo(() => getTicketEditValidationMessage(draft), [draft]);
   const hasEditChanges = useMemo(
@@ -299,7 +416,12 @@ export default function HistoryPage() {
     onSuccess: async () => {
       toast.success('Ticket eliminado.');
       setSelectedTicket(null);
-      await queryClient.invalidateQueries({ queryKey: ['tickets', companyId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['tickets', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard-daily-report', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard-summary', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard-by-payment-method', companyId] }),
+      ]);
     },
     onError: (error) => {
       const message = error instanceof Error ? error.message : 'No se pudo eliminar el ticket.';
@@ -309,6 +431,7 @@ export default function HistoryPage() {
 
   const handleOpenSheet = (ticket: UiTicket) => {
     setSelectedTicket(ticket);
+    setSelectedTicketCompanyId(companyId);
     setLastKnownImageUrl(ticket.imagenUrl ?? null);
     setBaselineDraft(null);
     setDraft(null);
@@ -316,6 +439,7 @@ export default function HistoryPage() {
 
   const handleCloseSheet = () => {
     setSelectedTicket(null);
+    setSelectedTicketCompanyId(null);
     setLastKnownImageUrl(null);
     setBaselineDraft(null);
     setDraft(null);
@@ -369,11 +493,35 @@ export default function HistoryPage() {
     deleteMutation.mutate(selectedTicketDetail.id);
   };
 
-  const totalGasto = filteredData.reduce((acc, t) => acc + t.total, 0);
-  const uniqueCategories = new Set(filteredData.map((t) => t.categoria)).size;
-  const pendientes = filteredData.filter((t) => t.estatus === 'pendiente').length;
-  const subtitle = new Intl.DateTimeFormat('es-MX', { month: 'long', year: 'numeric' }).format(new Date());
-  const capitalizedSubtitle = subtitle.charAt(0).toUpperCase() + subtitle.slice(1);
+  const kpiUnavailableLabel = (() => {
+    switch (financialKpis.availability) {
+      case 'invalid-range':
+        return 'Rango inválido';
+      case 'category-unsupported':
+        return 'No disponible';
+      case 'error':
+        return 'No disponible';
+      default:
+        return 'No disponible';
+    }
+  })();
+
+  const kpiUnavailableHint = (() => {
+    switch (financialKpis.availability) {
+      case 'invalid-range':
+        return 'La fecha inicial no puede ser posterior a la final.';
+      case 'category-unsupported':
+        return 'El backend aún no agrega métricas por categoría.';
+      case 'error':
+        return 'No fue posible cargar esta métrica.';
+      case 'empty':
+        return financialKpis.periodLabel === 'Selecciona un período'
+          ? 'Usa Último mes, Último año o un rango de fechas.'
+          : 'Período sin movimientos.';
+      default:
+        return 'No fue posible cargar esta métrica.';
+    }
+  })();
 
   return (
     <AppLayout>
@@ -384,11 +532,91 @@ export default function HistoryPage() {
         </div>
 
         {/* Metrics */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <MetricCard title="Tickets este mes" value={filteredData.length} subtitle={capitalizedSubtitle} icon={<Receipt size={20} />} />
-          <MetricCard title="Gasto total" value={formatMXN(totalGasto)} subtitle={capitalizedSubtitle} icon={<DollarSign size={20} />} />
-          <MetricCard title="Categorías" value={uniqueCategories} subtitle="detectadas" icon={<Tags size={20} />} />
-          <MetricCard title="Pendientes" value={pendientes} subtitle="por revisar" icon={<AlertCircle size={20} />} />
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-medium text-foreground">Métricas del período</h2>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="Información sobre las métricas"
+                >
+                  <Info size={14} />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-80 text-sm leading-relaxed">
+                Las métricas se calculan según la compañía, el período y la categoría seleccionados.
+                La búsqueda por texto no modifica estos indicadores.
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {financialKpis.availability === 'loading' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <SkeletonCard lines={1} />
+              <SkeletonCard lines={1} />
+              <SkeletonCard lines={1} />
+              <SkeletonCard lines={1} />
+            </div>
+          ) : financialKpis.income && financialKpis.expense && financialKpis.balance && financialKpis.paymentMethod ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <MetricCard
+                title="Ingresos totales"
+                value={financialKpis.income.value}
+                subtitle={financialKpis.income.subtitle}
+                icon={<ArrowUpCircle size={20} />}
+              />
+              <MetricCard
+                title="Egresos totales"
+                value={financialKpis.expense.value}
+                subtitle={financialKpis.expense.subtitle}
+                icon={<ArrowDownCircle size={20} />}
+              />
+              <MetricCard
+                title="Saldo neto"
+                value={financialKpis.balance.value}
+                subtitle={financialKpis.balance.subtitle}
+                icon={<Scale size={20} />}
+              />
+              <MetricCard
+                title="Método más usado"
+                value={financialKpis.paymentMethod.title}
+                subtitle={[
+                  financialKpis.paymentMethod.subtitle,
+                  financialKpis.paymentMethod.unspecifiedDetail,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+                icon={<CreditCard size={20} />}
+              />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {(
+                [
+                  { title: 'Ingresos totales', icon: <ArrowUpCircle size={20} /> },
+                  { title: 'Egresos totales', icon: <ArrowDownCircle size={20} /> },
+                  { title: 'Saldo neto', icon: <Scale size={20} /> },
+                  { title: 'Método más usado', icon: <CreditCard size={20} /> },
+                ] as const
+              ).map((card) => (
+                <MetricCard
+                  key={card.title}
+                  title={card.title}
+                  value={kpiUnavailableLabel}
+                  subtitle={kpiUnavailableHint}
+                  icon={card.icon}
+                />
+              ))}
+            </div>
+          )}
+
+          {financialKpis.income ? (
+            <p className="text-xs text-muted-foreground">
+              El backend todavía incluye tickets duplicados y fallidos en estos agregados.
+            </p>
+          ) : null}
         </div>
 
         {/* Filters */}
@@ -433,44 +661,75 @@ export default function HistoryPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
-              <div className="space-y-1.5 w-full sm:w-40">
-                <Label htmlFor="history-date-from" className="text-xs text-muted-foreground">
-                  Desde
-                </Label>
-                <Input
-                  id="history-date-from"
-                  type="date"
-                  value={dateFromFilter}
-                  onChange={(e) => setDateFromFilter(e.target.value)}
-                  className="h-10 rounded-xl border-border"
-                />
-              </div>
-              <div className="space-y-1.5 w-full sm:w-40">
-                <Label htmlFor="history-date-to" className="text-xs text-muted-foreground">
-                  Hasta
-                </Label>
-                <Input
-                  id="history-date-to"
-                  type="date"
-                  value={dateToFilter}
-                  onChange={(e) => setDateToFilter(e.target.value)}
-                  className="h-10 rounded-xl border-border"
-                />
-              </div>
-              {(globalFilter ||
-                categoryFilter !== 'all' ||
-                statusFilter !== 'all' ||
-                dateFromFilter ||
-                dateToFilter) && (
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
-                  variant="outline"
-                  className="rounded-xl h-10"
-                  onClick={handleClearFilters}
+                  variant={activePreset === 'last_30_days' ? 'default' : 'outline'}
+                  className="rounded-xl h-9"
+                  onClick={applyLastMonthPreset}
                 >
-                  Limpiar filtros
+                  Último mes
                 </Button>
+                <Button
+                  type="button"
+                  variant={activePreset === 'last_12_months' ? 'default' : 'outline'}
+                  className="rounded-xl h-9"
+                  onClick={applyLastYearPreset}
+                >
+                  Último año
+                </Button>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+                <div className="space-y-1.5 w-full sm:w-40">
+                  <Label htmlFor="history-date-from" className="text-xs text-muted-foreground">
+                    Desde
+                  </Label>
+                  <Input
+                    id="history-date-from"
+                    type="date"
+                    value={dateFromFilter}
+                    onChange={(e) => setDateFromFilter(e.target.value)}
+                    className={cn(
+                      'h-10 rounded-xl border-border',
+                      dateRangeInvalid && 'border-destructive',
+                    )}
+                  />
+                </div>
+                <div className="space-y-1.5 w-full sm:w-40">
+                  <Label htmlFor="history-date-to" className="text-xs text-muted-foreground">
+                    Hasta
+                  </Label>
+                  <Input
+                    id="history-date-to"
+                    type="date"
+                    value={dateToFilter}
+                    onChange={(e) => setDateToFilter(e.target.value)}
+                    className={cn(
+                      'h-10 rounded-xl border-border',
+                      dateRangeInvalid && 'border-destructive',
+                    )}
+                  />
+                </div>
+                {(globalFilter ||
+                  categoryFilter !== 'all' ||
+                  statusFilter !== 'all' ||
+                  dateFromFilter ||
+                  dateToFilter) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-xl h-10"
+                    onClick={handleClearFilters}
+                  >
+                    Limpiar filtros
+                  </Button>
+                )}
+              </div>
+              {dateRangeInvalid && (
+                <p className="text-xs text-destructive">
+                  La fecha inicial no puede ser posterior a la fecha final.
+                </p>
               )}
             </div>
           </div>
@@ -579,7 +838,12 @@ export default function HistoryPage() {
       </div>
 
       {/* Detail Sheet */}
-      <Sheet open={!!selectedTicket} onOpenChange={(open) => { if (!open) handleCloseSheet(); }}>
+      <Sheet
+        open={Boolean(selectedTicketDetail)}
+        onOpenChange={(open) => {
+          if (!open) handleCloseSheet();
+        }}
+      >
         <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
           {selectedTicketDetail && (
             <div className="space-y-5">
@@ -606,6 +870,7 @@ export default function HistoryPage() {
               <TicketImagePreview
                 imageUrl={selectedTicketDetail.imagenUrl}
                 alt={`Ticket de ${selectedTicketDetail.comercio}`}
+                loading={detailQuery.isFetching || dailyReportQuery.isFetching}
               />
 
               {/* Datos del ticket */}

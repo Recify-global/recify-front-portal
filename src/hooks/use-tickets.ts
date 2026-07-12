@@ -1,10 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { updateDashboardDailyReportTicket } from '@/services/dashboard.service';
+import {
+  getDashboardDailyReport,
+  updateDashboardDailyReportTicket,
+} from '@/services/dashboard.service';
 import {
   getTicket,
   listTickets,
 } from '@/services/tickets.service';
-import type { DashboardDailyReportTicketUpdate } from '@/types/dashboard';
+import type {
+  DashboardDailyReportFilters,
+  DashboardDailyReportTicketUpdate,
+} from '@/types/dashboard';
 import type { TicketsListParams } from '@/types/ticket';
 import { useAuth } from './use-auth';
 
@@ -23,6 +29,18 @@ export function useTicket(id: string | null | undefined) {
     queryKey: ['ticket', companyId, id],
     queryFn: () => getTicket(companyId as string, id as string),
     enabled: Boolean(companyId) && Boolean(id),
+  });
+}
+
+/** Misma página del Histórico, enriquecida por backend con `imageUrl`. */
+export function useDashboardDailyReport(
+  params: DashboardDailyReportFilters = {},
+) {
+  const { companyId } = useAuth();
+  return useQuery({
+    queryKey: ['dashboard-daily-report', companyId, params],
+    queryFn: () => getDashboardDailyReport(companyId as string, params),
+    enabled: Boolean(companyId),
   });
 }
 
@@ -46,6 +64,9 @@ export function useUpdateDashboardTicket() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['tickets', companyId] }),
         queryClient.invalidateQueries({ queryKey: ['ticket', companyId, ticketId] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard-daily-report', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard-summary', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard-by-payment-method', companyId] }),
       ]);
     },
   });
