@@ -1,7 +1,7 @@
-import { Upload, History, LayoutDashboard, Settings, HelpCircle } from 'lucide-react';
-import { useLocation } from 'react-router-dom';
+import { Upload, History, Settings, HelpCircle } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { RecifyLogo } from './RecifyLogo';
+import { CompanySelector } from './CompanySelector';
 import {
   Sidebar,
   SidebarContent,
@@ -27,12 +27,14 @@ const secondaryNav = [
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === 'collapsed';
-  const location = useLocation();
 
   return (
     <Sidebar collapsible="icon" className="border-r border-border/50">
       <div className="p-4">
         <RecifyLogo size={collapsed ? 'sm' : 'md'} showIcon />
+      </div>
+      <div className={collapsed ? 'px-2 pb-2' : 'px-3 pb-2'}>
+        <CompanySelector collapsed={collapsed} />
       </div>
       <SidebarContent>
         <SidebarGroup>
