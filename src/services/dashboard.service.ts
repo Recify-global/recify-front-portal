@@ -4,10 +4,12 @@ import type {
   DashboardBaseFilters,
   DashboardByDateFilters,
   DashboardDailyReportFilters,
+  DashboardDailyReportResponse,
   DashboardDailyReportTicketUpdate,
+  DashboardPaymentMethodResponse,
+  DashboardSummaryResponse,
 } from '@/types/dashboard';
 import type { BackendTicket } from '@/types/ticket';
-import type { Paginated } from '@/types/api';
 
 function toQueryString(params: Record<string, unknown>): string {
   const qs = new URLSearchParams();
@@ -19,9 +21,12 @@ function toQueryString(params: Record<string, unknown>): string {
   return str ? `?${str}` : '';
 }
 
-export async function getDashboardSummary(companyId: string, params: DashboardBaseFilters = {}) {
+export async function getDashboardSummary(
+  companyId: string,
+  params: DashboardBaseFilters = {},
+): Promise<DashboardSummaryResponse> {
   const url = `${endpoints.dashboard.summary(companyId)}${toQueryString(params as Record<string, unknown>)}`;
-  return apiRequest<Record<string, unknown>>(url);
+  return apiRequest<DashboardSummaryResponse>(url);
 }
 
 export async function getDashboardByDate(companyId: string, params: DashboardByDateFilters = {}) {
@@ -34,17 +39,20 @@ export async function getDashboardByCategory(companyId: string, params: Dashboar
   return apiRequest<Record<string, unknown>>(url);
 }
 
-export async function getDashboardByPaymentMethod(companyId: string, params: DashboardBaseFilters = {}) {
+export async function getDashboardByPaymentMethod(
+  companyId: string,
+  params: DashboardBaseFilters = {},
+): Promise<DashboardPaymentMethodResponse> {
   const url = `${endpoints.dashboard.byPaymentMethod(companyId)}${toQueryString(params as Record<string, unknown>)}`;
-  return apiRequest<Record<string, unknown>>(url);
+  return apiRequest<DashboardPaymentMethodResponse>(url);
 }
 
 export async function getDashboardDailyReport(
   companyId: string,
   params: DashboardDailyReportFilters = {},
-): Promise<Paginated<BackendTicket>> {
+): Promise<DashboardDailyReportResponse> {
   const url = `${endpoints.dashboard.dailyReport(companyId)}${toQueryString(params as Record<string, unknown>)}`;
-  return apiRequest<Paginated<BackendTicket>>(url);
+  return apiRequest<DashboardDailyReportResponse>(url);
 }
 
 export async function updateDashboardDailyReportTicket(

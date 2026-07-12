@@ -1,5 +1,6 @@
 import type {
   BackendPaymentMethod,
+  BackendTicket,
   BackendTicketStatus,
   BackendTicketType,
   BackendTicketReviewStatus,
@@ -39,6 +40,24 @@ export interface DashboardDailyReportFilters {
   limit?: number;
 }
 
+export interface DashboardDailyReportResponse {
+  filters: {
+    appliedDatePreset: DashboardDatePreset | null;
+    dateFrom: string | null;
+    dateTo: string | null;
+    type: BackendTicketType | null;
+    status: BackendTicketStatus | null;
+    reviewStatus: BackendTicketReviewStatus | null;
+    category: string | null;
+    paymentMethod: BackendPaymentMethod | null;
+  };
+  tickets: BackendTicket[];
+  page: number;
+  limit: number;
+  total: number;
+  pages: number;
+}
+
 export interface DashboardDailyReportTicketUpdate {
   type?: BackendTicketType;
   date?: string;
@@ -48,3 +67,39 @@ export interface DashboardDailyReportTicketUpdate {
   status?: BackendTicketStatus;
   reviewStatus?: BackendTicketReviewStatus;
 }
+
+/** Response real de GET /dashboard/summary (verificado en backend service). */
+export interface DashboardSummaryTotalsBucket {
+  count: number;
+  amount: number;
+}
+
+export interface DashboardSummaryResponse {
+  period: {
+    from: string | null;
+    to: string | null;
+  };
+  totals: {
+    ingresos: DashboardSummaryTotalsBucket;
+    egresos: DashboardSummaryTotalsBucket;
+    balance: number;
+  };
+  byStatus: Record<string, number>;
+  totalTickets: number;
+  avgAmount: number;
+  topPaymentMethod: {
+    paymentMethod: BackendPaymentMethod | string;
+    count: number;
+  } | null;
+}
+
+/** Response real de GET /dashboard/by-payment-method (array). */
+export interface DashboardPaymentMethodRow {
+  paymentMethod: BackendPaymentMethod | string | null;
+  count: number;
+  amount: number;
+  /** Porcentaje por monto (backend). No usar para KPI de frecuencia. */
+  percentage: number;
+}
+
+export type DashboardPaymentMethodResponse = DashboardPaymentMethodRow[];
