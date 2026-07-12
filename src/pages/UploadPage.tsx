@@ -530,6 +530,7 @@ export default function UploadPage() {
                 {/* Imagen del ticket */}
                 <TicketImagePreview
                   imageUrl={ticket.imagenUrl}
+                  fallbackImageUrl={previewUrl}
                   alt={`Ticket de ${ticket.comercio}`}
                 />
 

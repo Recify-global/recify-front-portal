@@ -18,6 +18,8 @@ export interface BackendTicketRawData {
 export interface BackendTicket {
   _id: string;
   companyId: string;
+  /** Proyectado por daily-report; GET /tickets todavía no lo entrega. */
+  imageUrl?: string | null;
   type: BackendTicketType;
   date: string;
   amount: number;
