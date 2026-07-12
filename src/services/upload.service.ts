@@ -19,16 +19,26 @@ function buildFormData(file: File): FormData {
   return fd;
 }
 
-export async function preprocessTicket(companyId: string, file: File): Promise<PreprocessResponse> {
+export async function preprocessTicket(
+  companyId: string,
+  file: File,
+  opts: { signal?: AbortSignal } = {},
+): Promise<PreprocessResponse> {
   return apiRequest<PreprocessResponse>(endpoints.upload.preprocess(companyId), {
     method: 'POST',
     formData: buildFormData(file),
+    signal: opts.signal,
   });
 }
 
-export async function uploadTicket(companyId: string, file: File): Promise<UploadTicketResponse> {
+export async function uploadTicket(
+  companyId: string,
+  file: File,
+  opts: { signal?: AbortSignal } = {},
+): Promise<UploadTicketResponse> {
   return apiRequest<UploadTicketResponse>(endpoints.upload.ticket(companyId), {
     method: 'POST',
     formData: buildFormData(file),
+    signal: opts.signal,
   });
 }
