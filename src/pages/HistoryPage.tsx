@@ -150,6 +150,28 @@ function extractMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Normaliza `UiTicket.fecha` (YYYY-MM-DD) para comparar por día completo. */
+function ticketDateKey(fecha: string | undefined | null): string | null {
+  if (!fecha || typeof fecha !== 'string') return null;
+  const trimmed = fecha.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function clearHistoryFilters(
+  setGlobalFilter: (v: string) => void,
+  setCategoryFilter: (v: string) => void,
+  setStatusFilter: (v: string) => void,
+  setDateFromFilter: (v: string) => void,
+  setDateToFilter: (v: string) => void,
+) {
+  setGlobalFilter('');
+  setCategoryFilter('all');
+  setStatusFilter('all');
+  setDateFromFilter('');
+  setDateToFilter('');
+}
+
 export default function HistoryPage() {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -157,6 +179,8 @@ export default function HistoryPage() {
   const [selectedTicket, setSelectedTicket] = useState<UiTicket | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [dateFromFilter, setDateFromFilter] = useState('');
+  const [dateToFilter, setDateToFilter] = useState('');
   const [lastKnownImageUrl, setLastKnownImageUrl] = useState<string | null>(null);
   const [baselineDraft, setBaselineDraft] = useState<TicketEditDraft | null>(null);
   const [draft, setDraft] = useState<TicketEditDraft | null>(null);
@@ -185,8 +209,31 @@ export default function HistoryPage() {
     let data = [...tickets];
     if (categoryFilter !== 'all') data = data.filter((t) => t.categoria === categoryFilter);
     if (statusFilter !== 'all') data = data.filter((t) => t.estatus === statusFilter);
+
+    const fromKey = dateFromFilter.trim() || null;
+    const toKey = dateToFilter.trim() || null;
+    if (fromKey || toKey) {
+      data = data.filter((t) => {
+        const key = ticketDateKey(t.fecha);
+        if (!key) return false;
+        if (fromKey && key < fromKey) return false;
+        if (toKey && key > toKey) return false;
+        return true;
+      });
+    }
+
     return data;
-  }, [tickets, categoryFilter, statusFilter]);
+  }, [tickets, categoryFilter, statusFilter, dateFromFilter, dateToFilter]);
+
+  const handleClearFilters = () => {
+    clearHistoryFilters(
+      setGlobalFilter,
+      setCategoryFilter,
+      setStatusFilter,
+      setDateFromFilter,
+      setDateToFilter,
+    );
+  };
 
   const selectedTicketDetail = useMemo(() => {
     if (detailQuery.data) {
@@ -346,44 +393,86 @@ export default function HistoryPage() {
 
         {/* Filters */}
         <div className="bg-card rounded-2xl border border-border/50 shadow-elegant p-4">
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="flex-1 flex items-center gap-2 bg-secondary rounded-xl px-3 py-2">
-              <Search size={16} className="text-muted-foreground shrink-0" />
-              <input
-                type="text"
-                placeholder="Buscar por comercio, categoría..."
-                value={globalFilter}
-                onChange={(e) => setGlobalFilter(e.target.value)}
-                className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground"
-              />
-              {globalFilter && (
-                <button onClick={() => setGlobalFilter('')}>
-                  <X size={14} className="text-muted-foreground" />
-                </button>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex-1 flex items-center gap-2 bg-secondary rounded-xl px-3 py-2">
+                <Search size={16} className="text-muted-foreground shrink-0" />
+                <input
+                  type="text"
+                  placeholder="Buscar por comercio, categoría..."
+                  value={globalFilter}
+                  onChange={(e) => setGlobalFilter(e.target.value)}
+                  className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground"
+                />
+                {globalFilter && (
+                  <button type="button" onClick={() => setGlobalFilter('')}>
+                    <X size={14} className="text-muted-foreground" />
+                  </button>
+                )}
+              </div>
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="w-full sm:w-44 h-10 rounded-xl border-border">
+                  <SelectValue placeholder="Categoría" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las categorías</SelectItem>
+                  {categorias.map((c) => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-full sm:w-36 h-10 rounded-xl border-border">
+                  <SelectValue placeholder="Estatus" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  {statusOptions.map((s) => (
+                    <SelectItem key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+              <div className="space-y-1.5 w-full sm:w-40">
+                <Label htmlFor="history-date-from" className="text-xs text-muted-foreground">
+                  Desde
+                </Label>
+                <Input
+                  id="history-date-from"
+                  type="date"
+                  value={dateFromFilter}
+                  onChange={(e) => setDateFromFilter(e.target.value)}
+                  className="h-10 rounded-xl border-border"
+                />
+              </div>
+              <div className="space-y-1.5 w-full sm:w-40">
+                <Label htmlFor="history-date-to" className="text-xs text-muted-foreground">
+                  Hasta
+                </Label>
+                <Input
+                  id="history-date-to"
+                  type="date"
+                  value={dateToFilter}
+                  onChange={(e) => setDateToFilter(e.target.value)}
+                  className="h-10 rounded-xl border-border"
+                />
+              </div>
+              {(globalFilter ||
+                categoryFilter !== 'all' ||
+                statusFilter !== 'all' ||
+                dateFromFilter ||
+                dateToFilter) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-xl h-10"
+                  onClick={handleClearFilters}
+                >
+                  Limpiar filtros
+                </Button>
               )}
             </div>
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-full sm:w-44 h-10 rounded-xl border-border">
-                <SelectValue placeholder="Categoría" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas las categorías</SelectItem>
-                {categorias.map((c) => (
-                  <SelectItem key={c} value={c}>{c}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full sm:w-36 h-10 rounded-xl border-border">
-                <SelectValue placeholder="Estatus" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                {statusOptions.map((s) => (
-                  <SelectItem key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
         </div>
 
@@ -410,13 +499,13 @@ export default function HistoryPage() {
           ) : table.getRowModel().rows.length === 0 ? (
             <EmptyState
               icon={<Receipt size={32} />}
-              title="Sin resultados"
-              description="No se encontraron tickets con los filtros seleccionados."
+              title="No hay tickets para estos filtros."
+              description="Prueba otro rango de fechas, categoría o búsqueda. Limpiar filtros muestra de nuevo los tickets cargados."
               action={
                 <Button
                   variant="outline"
                   className="rounded-xl"
-                  onClick={() => { setGlobalFilter(''); setCategoryFilter('all'); setStatusFilter('all'); }}
+                  onClick={handleClearFilters}
                 >
                   Limpiar filtros
                 </Button>
