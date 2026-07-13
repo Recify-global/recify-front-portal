@@ -100,6 +100,27 @@ export function clearAuthSession(): void {
   emitAuthChange();
 }
 
+/**
+ * Cambia la compañía activa sin tocar token ni user.
+ * Solo acepta IDs presentes en `user.companies` de la sesión actual.
+ */
+export function setActiveCompany(companyId: string): void {
+  const nextId = typeof companyId === 'string' ? companyId.trim() : '';
+  if (!nextId) {
+    throw new Error('companyId inválido.');
+  }
+  if (!getStoredToken()) {
+    throw new Error('No hay sesión activa.');
+  }
+  const user = getStoredUser();
+  if (!user || !Array.isArray(user.companies) || !user.companies.includes(nextId)) {
+    throw new Error('La compañía no pertenece al usuario autenticado.');
+  }
+  if (getStoredCompanyId() === nextId) return;
+  safeSet(AUTH_STORAGE_KEYS.companyId, nextId);
+  emitAuthChange();
+}
+
 export function emitAuthChange(): void {
   try {
     window.dispatchEvent(new Event(AUTH_EVENT));

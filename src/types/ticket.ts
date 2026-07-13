@@ -18,6 +18,13 @@ export interface BackendTicketRawData {
 export interface BackendTicket {
   _id: string;
   companyId: string;
+  /** Proyectado por daily-report; GET /tickets todavía no lo entrega. */
+  imageUrl?: string | null;
+  /**
+   * GET /tickets (findAll/findById) lo backfillea desde rawData.vendor y
+   * garantiza la clave (null si no hay comercio). rawData ya no viene ahí.
+   */
+  vendor?: string | null;
   type: BackendTicketType;
   date: string;
   amount: number;

@@ -1,33 +1,66 @@
-import { useEffect, useState } from 'react';
-import { FileImage } from 'lucide-react';
+import { useState } from 'react';
+import { FileImage, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { resolveTicketImageUrl } from '@/utils/ticket-image';
 
 interface TicketImagePreviewProps {
   imageUrl?: string | null;
+  /** Preview local usado si una URL persistente no puede cargarse. */
+  fallbackImageUrl?: string | null;
+  /** Evita mostrar "Sin imagen" mientras las fuentes remotas siguen cargando. */
+  loading?: boolean;
   alt?: string;
   className?: string;
 }
 
-export function TicketImagePreview({ imageUrl, alt = 'Imagen del ticket', className }: TicketImagePreviewProps) {
-  const [hasError, setHasError] = useState(false);
-  const validUrl = typeof imageUrl === 'string' && imageUrl.trim().length > 0 ? imageUrl.trim() : null;
+export function TicketImagePreview({
+  imageUrl,
+  fallbackImageUrl,
+  loading = false,
+  alt = 'Imagen del ticket',
+  className,
+}: TicketImagePreviewProps) {
+  const primaryUrl = resolveTicketImageUrl(imageUrl);
+  const fallbackUrl = resolveTicketImageUrl(fallbackImageUrl);
+  const [failedPrimaryUrl, setFailedPrimaryUrl] = useState<string | null>(null);
+  const [failedFallbackUrl, setFailedFallbackUrl] = useState<string | null>(null);
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const currentUrl =
+    primaryUrl && failedPrimaryUrl !== primaryUrl
+      ? primaryUrl
+      : fallbackUrl && failedFallbackUrl !== fallbackUrl
+        ? fallbackUrl
+        : null;
+  const hadSource = Boolean(primaryUrl || fallbackUrl);
+  const hasError = hadSource && !currentUrl;
+  const isImageLoading = Boolean(currentUrl && loadedUrl !== currentUrl);
 
-  useEffect(() => {
-    setHasError(false);
-  }, [validUrl]);
+  if (!currentUrl && loading) {
+    return (
+      <div
+        className={cn(
+          'flex h-44 items-center justify-center rounded-2xl bg-muted',
+          className,
+        )}
+        aria-label="Cargando imagen del ticket"
+      >
+        <Loader2 size={20} className="animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
-  if (!validUrl || hasError) {
+  if (!currentUrl || hasError) {
     return (
       <div
         className={cn(
           'flex h-44 items-center justify-center rounded-2xl bg-muted flex-col gap-2',
           className,
         )}
-        aria-label={validUrl ? 'Imagen de ticket no disponible' : 'Sin imagen de ticket'}
+        aria-label={hasError ? 'Imagen de ticket no disponible' : 'Sin imagen de ticket'}
       >
         <FileImage size={36} className="text-muted-foreground opacity-40" />
         <span className="text-xs text-muted-foreground">
-          {validUrl ? 'Imagen no disponible' : 'Sin imagen'}
+          {hasError ? 'No fue posible cargar la imagen.' : 'Sin imagen'}
         </span>
       </div>
     );
@@ -35,7 +68,7 @@ export function TicketImagePreview({ imageUrl, alt = 'Imagen del ticket', classN
 
   return (
     <a
-      href={validUrl}
+      href={currentUrl}
       target="_blank"
       rel="noopener noreferrer"
       title="Ver imagen completa"
@@ -46,10 +79,23 @@ export function TicketImagePreview({ imageUrl, alt = 'Imagen del ticket', classN
         className,
       )}
     >
+      {isImageLoading ? (
+        <span className="absolute inset-0 z-10 flex items-center justify-center bg-muted">
+          <Loader2 size={20} className="animate-spin text-muted-foreground" />
+        </span>
+      ) : null}
       <img
-        src={validUrl}
+        key={currentUrl}
+        src={currentUrl}
         alt={alt}
-        onError={() => setHasError(true)}
+        onLoad={() => setLoadedUrl(currentUrl)}
+        onError={() => {
+          if (currentUrl === primaryUrl) {
+            setFailedPrimaryUrl(primaryUrl);
+          } else {
+            setFailedFallbackUrl(currentUrl);
+          }
+        }}
         className="h-full w-full object-cover blur-[2px] brightness-90 transition-all duration-200 group-hover:blur-0 group-hover:brightness-100"
       />
       <span className="absolute inset-0 flex items-end justify-center pb-3 opacity-100 transition-opacity group-hover:opacity-0">

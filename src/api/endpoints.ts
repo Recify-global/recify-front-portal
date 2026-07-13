@@ -16,6 +16,7 @@ export const endpoints = {
     ticket: (companyId: string) => `/companies/${companyId}/upload/ticket`,
   },
   dashboard: {
+    kpis: (companyId: string) => `/companies/${companyId}/dashboard/kpis`,
     summary: (companyId: string) => `/companies/${companyId}/dashboard/summary`,
     byDate: (companyId: string) => `/companies/${companyId}/dashboard/by-date`,
     byCategory: (companyId: string) => `/companies/${companyId}/dashboard/by-category`,

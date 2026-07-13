@@ -114,6 +114,10 @@ export default {
           "0%": { backgroundPosition: "-200% 0" },
           "100%": { backgroundPosition: "200% 0" },
         },
+        "scan-y": {
+          "0%": { top: "-35%" },
+          "100%": { top: "110%" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -123,6 +127,7 @@ export default {
         "scale-in": "scale-in 0.2s ease-out",
         "pulse-soft": "pulse-soft 2s ease-in-out infinite",
         "shimmer": "shimmer 2s linear infinite",
+        "scan-y": "scan-y 1.8s ease-in-out infinite",
       },
     },
   },

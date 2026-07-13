@@ -13,6 +13,7 @@ import {
   getStoredCompanyId,
   getStoredToken,
   getStoredUser,
+  setActiveCompany as persistActiveCompany,
   setAuthSession,
   subscribeAuthChanges,
 } from '@/auth/storage';
@@ -53,6 +54,11 @@ export function useAuth() {
     navigate('/auth', { replace: true });
   }, [navigate]);
 
+  const setActiveCompany = useCallback((nextCompanyId: string) => {
+    persistActiveCompany(nextCompanyId);
+    setCompanyId(getStoredCompanyId());
+  }, []);
+
   return {
     token,
     user,
@@ -61,5 +67,6 @@ export function useAuth() {
     login,
     register,
     logout,
+    setActiveCompany,
   };
 }

@@ -4,6 +4,9 @@ import { StatusBadge } from '@/components/recify/StatusBadge';
 import { CategoryBadge } from '@/components/recify/CategoryBadge';
 import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
 import { TicketNotes } from '@/components/recify/TicketNotes';
+import { CameraCaptureDialog } from '@/components/recify/CameraCaptureDialog';
+import { BatchUploadDialog } from '@/components/recify/BatchUploadDialog';
+import { TicketScanAnimation } from '@/components/recify/TicketScanAnimation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -30,7 +33,7 @@ import type {
   BackendTicketType,
   UiTicket,
 } from '@/types/ticket';
-import { Upload, Camera, FileImage, Loader2, CheckCircle2, Edit3, Save, Plus, Receipt, XCircle } from 'lucide-react';
+import { Upload, Camera, FileImage, Loader2, CheckCircle2, Edit3, Save, Plus, Receipt, XCircle, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import { ApiRequestError } from '@/api/http';
 
@@ -71,6 +74,8 @@ export default function UploadPage() {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | undefined>(undefined);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { token, companyId } = useAuth();
   const preprocessMutation = usePreprocessTicket();
@@ -198,6 +203,22 @@ export default function UploadPage() {
     if (isBusy) return;
     if (!validateSession()) return;
     fileInputRef.current?.click();
+  };
+
+  const openCamera = () => {
+    if (isBusy) return;
+    if (!validateSession()) return;
+    setCameraOpen(true);
+  };
+
+  const openBatch = () => {
+    if (isBusy) return;
+    if (!validateSession()) return;
+    setBatchOpen(true);
+  };
+
+  const handleCameraCapture = (file: File) => {
+    void handleNewFile(file);
   };
 
   const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -396,32 +417,9 @@ export default function UploadPage() {
               )}
 
               {state === 'analyzing' && (
-                <div className="text-center space-y-4 animate-fade-in">
-                  <div className="relative">
-                    <FileImage size={48} className="text-muted-foreground mx-auto opacity-50" />
-                    <Loader2
-                      size={24}
-                      className="absolute -bottom-1 text-primary animate-spin mx-auto"
-                      style={{ left: '50%', transform: 'translateX(8px)' }}
-                    />
-                  </div>
-                  <div>
-                    <p className="font-medium text-foreground">Analizando ticket...</p>
-                    <p className="text-sm text-muted-foreground mt-1">Extrayendo información con IA</p>
-                  </div>
-                  <div className="w-48 mx-auto">
-                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-primary rounded-full animate-shimmer"
-                        style={{
-                          width: '70%',
-                          backgroundSize: '200% 100%',
-                          backgroundImage:
-                            'linear-gradient(90deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.5) 50%, hsl(var(--primary)) 100%)',
-                        }}
-                      />
-                    </div>
-                  </div>
+                <div className="animate-fade-in text-center space-y-4">
+                  <TicketScanAnimation />
+                  <p className="font-medium text-foreground animate-pulse-soft">Analizando…</p>
                 </div>
               )}
 
@@ -437,25 +435,43 @@ export default function UploadPage() {
             </div>
 
             {state === 'idle' && (
-              <div className="flex gap-3">
+              <div className="space-y-2">
+                <div className="flex gap-3">
+                  <Button
+                    variant="outline"
+                    className="flex-1 h-11 rounded-xl"
+                    onClick={openCamera}
+                    disabled={isBusy}
+                  >
+                    <Camera size={16} className="mr-2" /> Tomar foto
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1 h-11 rounded-xl"
+                    onClick={openFilePicker}
+                    disabled={isBusy}
+                  >
+                    <Upload size={16} className="mr-2" /> Subir archivo
+                  </Button>
+                </div>
                 <Button
-                  variant="outline"
-                  className="flex-1 h-11 rounded-xl"
-                  onClick={openFilePicker}
+                  variant="secondary"
+                  className="w-full h-11 rounded-xl"
+                  onClick={openBatch}
                   disabled={isBusy}
                 >
-                  <Camera size={16} className="mr-2" /> Tomar foto
-                </Button>
-                <Button
-                  variant="outline"
-                  className="flex-1 h-11 rounded-xl"
-                  onClick={openFilePicker}
-                  disabled={isBusy}
-                >
-                  <Upload size={16} className="mr-2" /> Subir archivo
+                  <Layers size={16} className="mr-2" /> Subir varios tickets
                 </Button>
               </div>
             )}
+
+            <CameraCaptureDialog
+              open={cameraOpen}
+              onOpenChange={setCameraOpen}
+              onCapture={handleCameraCapture}
+            />
+
+            <BatchUploadDialog open={batchOpen} onOpenChange={setBatchOpen} />
 
             {state === 'done' && (
               <Button
@@ -492,6 +508,7 @@ export default function UploadPage() {
                 {/* Imagen del ticket */}
                 <TicketImagePreview
                   imageUrl={ticket.imagenUrl}
+                  fallbackImageUrl={previewUrl}
                   alt={`Ticket de ${ticket.comercio}`}
                 />
 
