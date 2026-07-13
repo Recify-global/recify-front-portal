@@ -101,6 +101,25 @@ const columns: ColumnDef<UiTicket>[] = [
     ),
   },
   {
+    accessorKey: 'tipo',
+    header: 'Tipo',
+    cell: ({ row }) => {
+      const tipo = row.getValue<string>('tipo');
+      const isIngreso = tipo === 'Ingreso';
+      return (
+        <span
+          className={cn(
+            'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
+            isIngreso ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive',
+          )}
+        >
+          {tipo}
+        </span>
+      );
+    },
+    filterFn: 'equals',
+  },
+  {
     accessorKey: 'categoria',
     header: 'Categoría',
     cell: ({ row }) => <CategoryBadge category={row.getValue('categoria')} />,
@@ -564,30 +583,21 @@ export default function HistoryPage() {
               <MetricCard
                 title="Ingresos totales"
                 value={financialKpis.income.value}
-                subtitle={financialKpis.income.subtitle}
                 icon={<ArrowUpCircle size={20} />}
               />
               <MetricCard
                 title="Egresos totales"
                 value={financialKpis.expense.value}
-                subtitle={financialKpis.expense.subtitle}
                 icon={<ArrowDownCircle size={20} />}
               />
               <MetricCard
                 title="Saldo neto"
                 value={financialKpis.balance.value}
-                subtitle={financialKpis.balance.subtitle}
                 icon={<Scale size={20} />}
               />
               <MetricCard
                 title="Método más usado"
                 value={financialKpis.paymentMethod.title}
-                subtitle={[
-                  financialKpis.paymentMethod.subtitle,
-                  financialKpis.paymentMethod.unspecifiedDetail,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
                 icon={<CreditCard size={20} />}
               />
             </div>
@@ -612,11 +622,6 @@ export default function HistoryPage() {
             </div>
           )}
 
-          {financialKpis.income ? (
-            <p className="text-xs text-muted-foreground">
-              El backend todavía incluye tickets duplicados y fallidos en estos agregados.
-            </p>
-          ) : null}
         </div>
 
         {/* Filters */}

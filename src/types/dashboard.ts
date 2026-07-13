@@ -68,6 +68,39 @@ export interface DashboardDailyReportTicketUpdate {
   reviewStatus?: BackendTicketReviewStatus;
 }
 
+/**
+ * Filters de GET /dashboard/kpis. Usar `period` o `dateFrom`/`dateTo`.
+ * No acepta `type` (responde 400): el balance neto necesita ambos flujos.
+ */
+export interface DashboardKpisFilters {
+  period?: DashboardPeriod;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export interface DashboardKpisBucket {
+  amount: number;
+  count: number;
+}
+
+/** Response real de GET /dashboard/kpis. */
+export interface DashboardKpisResponse {
+  /** from/to en UTC (medianoche de la TZ de la empresa); null sin filtro de fechas. */
+  period: {
+    from: string | null;
+    to: string | null;
+  };
+  totalIncome: DashboardKpisBucket;
+  totalExpenses: DashboardKpisBucket;
+  /** Puede ser negativo. */
+  netBalance: number;
+  /** null si no hay tickets en el período. */
+  topPaymentMethod: {
+    paymentMethod: BackendPaymentMethod | string;
+    count: number;
+  } | null;
+}
+
 /** Response real de GET /dashboard/summary (verificado en backend service). */
 export interface DashboardSummaryTotalsBucket {
   count: number;

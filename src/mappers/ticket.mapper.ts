@@ -1,4 +1,5 @@
 import type {
+  BackendPaymentMethod,
   BackendTicket,
   BackendTicketStatus,
   UiTicket,
@@ -79,6 +80,7 @@ export function mapBackendTicket(t: BackendTicket): UiTicket {
   const iva = taxFromApi ?? Math.max(0, total - subtotal);
   const categoria = asString(t.category) ?? CATEGORY_BY_TYPE[t.type] ?? 'Sin categoría';
   const comercio =
+    asString(t.vendor) ??
     asString(t.rawData?.vendor) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.merchantName) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.merchant) ??
@@ -138,6 +140,7 @@ export function mapPreprocessTicket(
       asString(raw.created_at) ??
       new Date().toISOString(),
     amount: Math.max(0, asNumber(raw.amount) ?? asNumber(raw.total) ?? 0),
+    vendor: asString(raw.vendor) ?? asString(raw.comercio) ?? undefined,
     category: asString(raw.category) ?? asString(raw.categoria) ?? undefined,
     paymentMethod: normalizePaymentMethod(raw.paymentMethod ?? raw.metodoPago),
     status: normalizeStatus(raw.status),

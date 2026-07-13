@@ -1,19 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import {
-  getDashboardByPaymentMethod,
-  getDashboardSummary,
-} from '@/services/dashboard.service';
-import type {
-  DashboardPaymentMethodResponse,
-  DashboardSummaryResponse,
-} from '@/types/dashboard';
+import { getDashboardKpis } from '@/services/dashboard.service';
+import type { DashboardKpisResponse } from '@/types/dashboard';
 import {
   endOfCivilDayIso,
   formatMxn,
   isFiniteNumber,
   isValidDateRange,
-  resolveMostUsedPaymentMethod,
+  paymentMethodKpiFromTop,
   startOfCivilDayIso,
   type PaymentMethodKpiResult,
 } from '@/utils/financial-kpis';
@@ -45,17 +39,15 @@ export interface FinancialKpisView {
   categorySupported: boolean;
 }
 
-function parseSummary(raw: unknown): DashboardSummaryResponse | null {
+function parseKpis(raw: unknown): DashboardKpisResponse | null {
   if (!raw || typeof raw !== 'object') return null;
   const data = raw as Record<string, unknown>;
-  const totals = data.totals;
-  if (!totals || typeof totals !== 'object') return null;
-  const t = totals as Record<string, unknown>;
-  const ingresos = t.ingresos as Record<string, unknown> | undefined;
-  const egresos = t.egresos as Record<string, unknown> | undefined;
-  if (!ingresos || !egresos) return null;
-  if (!isFiniteNumber(ingresos.amount) || !isFiniteNumber(egresos.amount)) return null;
-  if (!isFiniteNumber(t.balance)) return null;
+  const income = data.totalIncome as Record<string, unknown> | undefined;
+  const expenses = data.totalExpenses as Record<string, unknown> | undefined;
+  if (!income || typeof income !== 'object') return null;
+  if (!expenses || typeof expenses !== 'object') return null;
+  if (!isFiniteNumber(income.amount) || !isFiniteNumber(expenses.amount)) return null;
+  if (!isFiniteNumber(data.netBalance)) return null;
 
   return {
     period: {
@@ -68,49 +60,20 @@ function parseSummary(raw: unknown): DashboardSummaryResponse | null {
           ? ((data.period as { to?: string | null }).to ?? null)
           : null,
     },
-    totals: {
-      ingresos: {
-        count: isFiniteNumber(ingresos.count) ? ingresos.count : 0,
-        amount: ingresos.amount,
-      },
-      egresos: {
-        count: isFiniteNumber(egresos.count) ? egresos.count : 0,
-        amount: egresos.amount,
-      },
-      balance: t.balance,
+    totalIncome: {
+      amount: income.amount,
+      count: isFiniteNumber(income.count) ? income.count : 0,
     },
-    byStatus:
-      data.byStatus && typeof data.byStatus === 'object'
-        ? (data.byStatus as Record<string, number>)
-        : {},
-    totalTickets: isFiniteNumber(data.totalTickets) ? data.totalTickets : 0,
-    avgAmount: isFiniteNumber(data.avgAmount) ? data.avgAmount : 0,
+    totalExpenses: {
+      amount: expenses.amount,
+      count: isFiniteNumber(expenses.count) ? expenses.count : 0,
+    },
+    netBalance: data.netBalance,
     topPaymentMethod:
       data.topPaymentMethod && typeof data.topPaymentMethod === 'object'
-        ? (data.topPaymentMethod as DashboardSummaryResponse['topPaymentMethod'])
+        ? (data.topPaymentMethod as DashboardKpisResponse['topPaymentMethod'])
         : null,
   };
-}
-
-function parsePaymentMethods(raw: unknown): DashboardPaymentMethodResponse | null {
-  if (!Array.isArray(raw)) return null;
-  const rows: DashboardPaymentMethodResponse = [];
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') return null;
-    const row = item as Record<string, unknown>;
-    if (!isFiniteNumber(row.count) || row.count < 0) return null;
-    if (!isFiniteNumber(row.amount)) return null;
-    rows.push({
-      paymentMethod:
-        typeof row.paymentMethod === 'string' || row.paymentMethod === null
-          ? (row.paymentMethod as string | null)
-          : String(row.paymentMethod ?? ''),
-      count: Math.trunc(row.count),
-      amount: row.amount,
-      percentage: isFiniteNumber(row.percentage) ? row.percentage : 0,
-    });
-  }
-  return rows;
 }
 
 function buildPeriodLabel(dateFrom: string, dateTo: string): string {
@@ -120,12 +83,17 @@ function buildPeriodLabel(dateFrom: string, dateTo: string): string {
   return 'Sin rango de fechas';
 }
 
+function ticketsLabel(count: number): string {
+  return `${count} ticket${count === 1 ? '' : 's'}`;
+}
+
 /**
- * KPIs financieros desde agregados de dashboard (no desde la página de tickets).
+ * KPIs financieros desde GET /dashboard/kpis (agregado dedicado del backend:
+ * ingresos, egresos, balance neto y método de pago top en una sola llamada).
  *
  * Limitaciones contractuales actuales del backend:
- * - summary / by-payment-method no aceptan `category`.
- * - no excluyen `duplicate` ni `failed`.
+ * - /dashboard/kpis no acepta `category` ni `type` (400 si se mandan).
+ * - no excluye `duplicate` ni `failed`.
  */
 export function useFinancialKpis(filters: FinancialKpiFilters): FinancialKpisView {
   const { companyId } = useAuth();
@@ -145,20 +113,9 @@ export function useFinancialKpis(filters: FinancialKpiFilters): FinancialKpisVie
   const enabled =
     Boolean(companyId) && rangeValid && !categoryActive && hasDateFilter;
 
-  const summaryQuery = useQuery({
-    queryKey: ['dashboard-summary', companyId, queryParams.dateFrom ?? null, queryParams.dateTo ?? null],
-    queryFn: () => getDashboardSummary(companyId as string, queryParams),
-    enabled,
-  });
-
-  const paymentQuery = useQuery({
-    queryKey: [
-      'dashboard-by-payment-method',
-      companyId,
-      queryParams.dateFrom ?? null,
-      queryParams.dateTo ?? null,
-    ],
-    queryFn: () => getDashboardByPaymentMethod(companyId as string, queryParams),
+  const kpisQuery = useQuery({
+    queryKey: ['dashboard-kpis', companyId, queryParams.dateFrom ?? null, queryParams.dateTo ?? null],
+    queryFn: () => getDashboardKpis(companyId as string, queryParams),
     enabled,
   });
 
@@ -204,7 +161,7 @@ export function useFinancialKpis(filters: FinancialKpiFilters): FinancialKpisVie
       };
     }
 
-    if (summaryQuery.isPending || paymentQuery.isPending) {
+    if (kpisQuery.isPending) {
       return {
         availability: 'loading',
         income: null,
@@ -217,7 +174,8 @@ export function useFinancialKpis(filters: FinancialKpiFilters): FinancialKpisVie
       };
     }
 
-    if (summaryQuery.isError || paymentQuery.isError) {
+    const kpis = kpisQuery.isError ? null : parseKpis(kpisQuery.data);
+    if (!kpis) {
       return {
         availability: 'error',
         income: null,
@@ -230,36 +188,21 @@ export function useFinancialKpis(filters: FinancialKpiFilters): FinancialKpisVie
       };
     }
 
-    const summary = parseSummary(summaryQuery.data);
-    const methods = parsePaymentMethods(paymentQuery.data);
-    if (!summary || !methods) {
-      return {
-        availability: 'error',
-        income: null,
-        expense: null,
-        balance: null,
-        paymentMethod: null,
-        periodLabel,
-        includesAllStatuses: true,
-        categorySupported: false,
-      };
-    }
-
-    const paymentMethod = resolveMostUsedPaymentMethod(methods);
-    const noMovements = summary.totalTickets === 0;
+    const paymentMethod = paymentMethodKpiFromTop(kpis.topPaymentMethod);
+    const noMovements = kpis.totalIncome.count === 0 && kpis.totalExpenses.count === 0;
 
     return {
       availability: noMovements ? 'empty' : 'ready',
       income: {
-        value: formatMxn(summary.totals.ingresos.amount),
-        subtitle: periodLabel,
+        value: formatMxn(kpis.totalIncome.amount),
+        subtitle: `${ticketsLabel(kpis.totalIncome.count)} · ${periodLabel}`,
       },
       expense: {
-        value: formatMxn(summary.totals.egresos.amount),
-        subtitle: periodLabel,
+        value: formatMxn(kpis.totalExpenses.amount),
+        subtitle: `${ticketsLabel(kpis.totalExpenses.count)} · ${periodLabel}`,
       },
       balance: {
-        value: formatMxn(summary.totals.balance),
+        value: formatMxn(kpis.netBalance),
         subtitle: 'Ingresos menos egresos',
       },
       paymentMethod,
@@ -272,12 +215,9 @@ export function useFinancialKpis(filters: FinancialKpiFilters): FinancialKpisVie
     dateFrom,
     dateTo,
     hasDateFilter,
-    paymentQuery.data,
-    paymentQuery.isError,
-    paymentQuery.isPending,
+    kpisQuery.data,
+    kpisQuery.isError,
+    kpisQuery.isPending,
     rangeValid,
-    summaryQuery.data,
-    summaryQuery.isError,
-    summaryQuery.isPending,
   ]);
 }

@@ -139,6 +139,55 @@ export function resolveMostUsedPaymentMethod(
   };
 }
 
+/**
+ * Convierte el `topPaymentMethod` del endpoint /dashboard/kpis (un solo
+ * ganador ya calculado por backend) al formato de la card.
+ * Valores posibles del backend: card, cash, transfer, other, o null sin tickets.
+ */
+export function paymentMethodKpiFromTop(
+  top: { paymentMethod: string | null | undefined; count: number } | null | undefined,
+): PaymentMethodKpiResult {
+  const count =
+    top && Number.isFinite(top.count) && top.count > 0 ? Math.trunc(top.count) : 0;
+
+  if (!top || count <= 0) {
+    return {
+      kind: 'empty',
+      title: 'Sin movimientos',
+      subtitle: 'Período sin métodos de pago',
+      unspecifiedDetail: null,
+      winners: [],
+      identifiedTotal: 0,
+      unspecifiedCount: 0,
+    };
+  }
+
+  const raw = typeof top.paymentMethod === 'string' ? top.paymentMethod.trim() : '';
+  const movimientos = `${count} movimiento${count === 1 ? '' : 's'}`;
+
+  if (isIdentifiedPaymentMethod(raw)) {
+    return {
+      kind: 'winner',
+      title: PAYMENT_METHOD_LABELS[raw],
+      subtitle: movimientos,
+      unspecifiedDetail: null,
+      winners: [raw],
+      identifiedTotal: count,
+      unspecifiedCount: 0,
+    };
+  }
+
+  return {
+    kind: 'unspecified-only',
+    title: raw === 'other' ? PAYMENT_METHOD_LABELS.other : 'Sin especificar',
+    subtitle: movimientos,
+    unspecifiedDetail: null,
+    winners: [],
+    identifiedTotal: 0,
+    unspecifiedCount: count,
+  };
+}
+
 function pad2(n: number): string {
   return String(n).padStart(2, '0');
 }

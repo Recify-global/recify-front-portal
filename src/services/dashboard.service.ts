@@ -6,6 +6,8 @@ import type {
   DashboardDailyReportFilters,
   DashboardDailyReportResponse,
   DashboardDailyReportTicketUpdate,
+  DashboardKpisFilters,
+  DashboardKpisResponse,
   DashboardPaymentMethodResponse,
   DashboardSummaryResponse,
 } from '@/types/dashboard';
@@ -19,6 +21,14 @@ function toQueryString(params: Record<string, unknown>): string {
   });
   const str = qs.toString();
   return str ? `?${str}` : '';
+}
+
+export async function getDashboardKpis(
+  companyId: string,
+  params: DashboardKpisFilters = {},
+): Promise<DashboardKpisResponse> {
+  const url = `${endpoints.dashboard.kpis(companyId)}${toQueryString(params as Record<string, unknown>)}`;
+  return apiRequest<DashboardKpisResponse>(url);
 }
 
 export async function getDashboardSummary(

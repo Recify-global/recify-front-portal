@@ -6,6 +6,7 @@ import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
 import { TicketNotes } from '@/components/recify/TicketNotes';
 import { CameraCaptureDialog } from '@/components/recify/CameraCaptureDialog';
 import { BatchUploadDialog } from '@/components/recify/BatchUploadDialog';
+import { TicketScanAnimation } from '@/components/recify/TicketScanAnimation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -416,32 +417,9 @@ export default function UploadPage() {
               )}
 
               {state === 'analyzing' && (
-                <div className="text-center space-y-4 animate-fade-in">
-                  <div className="relative">
-                    <FileImage size={48} className="text-muted-foreground mx-auto opacity-50" />
-                    <Loader2
-                      size={24}
-                      className="absolute -bottom-1 text-primary animate-spin mx-auto"
-                      style={{ left: '50%', transform: 'translateX(8px)' }}
-                    />
-                  </div>
-                  <div>
-                    <p className="font-medium text-foreground">Analizando ticket...</p>
-                    <p className="text-sm text-muted-foreground mt-1">Extrayendo información con IA</p>
-                  </div>
-                  <div className="w-48 mx-auto">
-                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-primary rounded-full animate-shimmer"
-                        style={{
-                          width: '70%',
-                          backgroundSize: '200% 100%',
-                          backgroundImage:
-                            'linear-gradient(90deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.5) 50%, hsl(var(--primary)) 100%)',
-                        }}
-                      />
-                    </div>
-                  </div>
+                <div className="animate-fade-in text-center space-y-4">
+                  <TicketScanAnimation />
+                  <p className="font-medium text-foreground animate-pulse-soft">Analizando…</p>
                 </div>
               )}
 

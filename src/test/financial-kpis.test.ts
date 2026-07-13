@@ -7,6 +7,7 @@ import {
   isValidDateRange,
   last12MonthsRange,
   last30DaysRange,
+  paymentMethodKpiFromTop,
   resolveMostUsedPaymentMethod,
   startOfCivilDayIso,
 } from '@/utils/financial-kpis';
@@ -88,6 +89,45 @@ describe('resolveMostUsedPaymentMethod', () => {
     const result = resolveMostUsedPaymentMethod([]);
     expect(result.kind).toBe('empty');
     expect(result.title).toBe('Sin movimientos');
+  });
+});
+
+describe('paymentMethodKpiFromTop', () => {
+  it('translates an identified backend winner', () => {
+    const result = paymentMethodKpiFromTop({ paymentMethod: 'cash', count: 18 });
+    expect(result.kind).toBe('winner');
+    expect(result.title).toBe('Efectivo');
+    expect(result.subtitle).toBe('18 movimientos');
+    expect(result.winners).toEqual(['cash']);
+  });
+
+  it('uses singular for a single movement', () => {
+    const result = paymentMethodKpiFromTop({ paymentMethod: 'card', count: 1 });
+    expect(result.subtitle).toBe('1 movimiento');
+  });
+
+  it('translates other as Otro', () => {
+    const result = paymentMethodKpiFromTop({ paymentMethod: 'other', count: 4 });
+    expect(result.kind).toBe('unspecified-only');
+    expect(result.title).toBe('Otro');
+    expect(result.unspecifiedCount).toBe(4);
+  });
+
+  it('handles unknown methods as unspecified', () => {
+    const result = paymentMethodKpiFromTop({ paymentMethod: 'crypto', count: 2 });
+    expect(result.kind).toBe('unspecified-only');
+    expect(result.title).toBe('Sin especificar');
+  });
+
+  it('returns empty when backend sends null', () => {
+    const result = paymentMethodKpiFromTop(null);
+    expect(result.kind).toBe('empty');
+    expect(result.title).toBe('Sin movimientos');
+  });
+
+  it('returns empty on non-positive counts', () => {
+    expect(paymentMethodKpiFromTop({ paymentMethod: 'card', count: 0 }).kind).toBe('empty');
+    expect(paymentMethodKpiFromTop({ paymentMethod: 'card', count: -3 }).kind).toBe('empty');
   });
 });
 
