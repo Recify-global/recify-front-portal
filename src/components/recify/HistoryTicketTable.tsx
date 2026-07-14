@@ -11,6 +11,7 @@ import {
 } from '@tanstack/react-table';
 import {
   ArrowUpDown,
+  Camera,
   ChevronLeft,
   ChevronRight,
   Edit3,
@@ -82,40 +83,31 @@ interface HistoryTicketTableProps {
   onSave: () => void;
   onCancel: () => void;
   onOpen: (ticket: UiTicket) => void;
+  onPreviewImage: (ticket: UiTicket) => void;
   onDelete: (ticketId: string) => void;
   onClearFilters: () => void;
 }
 
-function columnClass(columnId: string, header = false): string {
-  const background = header ? 'bg-card' : 'bg-card group-hover:bg-surface-hover';
+function columnClass(columnId: string): string {
   switch (columnId) {
     case 'comercio':
-      return cn(
-        'sticky left-0 z-20 min-w-[200px] w-[200px] sm:min-w-[220px] sm:w-[220px]',
-        background,
-      );
+      return 'w-[16%]';
     case 'fecha':
-      return cn('min-w-[180px] w-[180px] lg:sticky lg:left-[220px] lg:z-20', background);
+      return 'w-[12%]';
     case 'total':
-      return cn('min-w-[130px] w-[130px] lg:sticky lg:left-[400px] lg:z-20', background);
-    case 'subtotal':
-      return 'min-w-[130px] w-[130px]';
+      return 'w-[9%] text-right';
     case 'iva':
-      return 'min-w-[110px] w-[110px]';
-    case 'moneda':
-      return 'min-w-[90px] w-[90px]';
+      return 'w-[8%] text-right';
     case 'metodoPago':
-      return 'min-w-[170px] w-[170px]';
+      return 'w-[12%]';
     case 'tipo':
-      return 'min-w-[120px] w-[120px]';
+      return 'w-[9%]';
     case 'estatus':
-      return 'min-w-[145px] w-[145px]';
+      return 'w-[10%]';
     case 'categoria':
-      return 'min-w-[210px] w-[210px]';
-    case 'notas':
-      return 'min-w-[280px] w-[280px]';
+      return 'w-[13%]';
     case 'actions':
-      return cn('sticky right-0 z-20 min-w-[100px] w-[100px] sm:min-w-[110px] sm:w-[110px]', background);
+      return 'w-[11%]';
     default:
       return '';
   }
@@ -140,6 +132,7 @@ export function HistoryTicketTable({
   onSave,
   onCancel,
   onOpen,
+  onPreviewImage,
   onDelete,
   onClearFilters,
 }: HistoryTicketTableProps) {
@@ -160,13 +153,19 @@ export function HistoryTicketTable({
           <Input
             value={draft.vendor}
             maxLength={200}
+            placeholder="Nombre del comercio"
             aria-label={`Comercio de ${row.original.comercio}`}
-            className="h-8 min-w-[175px] bg-background text-xs"
+            className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
             onClick={(event) => event.stopPropagation()}
             onChange={(event) => onUpdateDraft(row.original.id, { vendor: event.target.value })}
           />
         ) : (
-          <span className="block text-sm font-medium text-foreground">{row.original.comercio}</span>
+          <span
+            className="block truncate text-sm font-medium text-foreground"
+            title={row.original.comercio}
+          >
+            {row.original.comercio}
+          </span>
         );
       },
     },
@@ -174,38 +173,30 @@ export function HistoryTicketTable({
       accessorKey: 'fecha',
       header: ({ column }) => (
         <button type="button" className="flex items-center gap-1" onClick={() => column.toggleSorting()}>
-          Fecha y hora <ArrowUpDown size={12} />
+          Fecha <ArrowUpDown size={12} />
         </button>
       ),
       cell: ({ row }) => {
         const draft = drafts[row.original.id];
         if (!isEditing || !draft) {
-          return <span className="text-sm text-muted-foreground">{formatTicketDateTime(row.original.fecha, row.original.hora)}</span>;
+          return <span className="text-sm text-muted-foreground">{formatTicketDateTime(row.original.fecha)}</span>;
         }
         return (
-          <div className="space-y-1.5" onClick={(event) => event.stopPropagation()}>
-            <Input
-              type="date"
-              value={draft.date}
-              aria-label={`Fecha de ${row.original.comercio}`}
-              className="h-8 min-w-[155px] bg-background text-xs"
-              onChange={(event) => onUpdateDraft(row.original.id, { date: event.target.value })}
-            />
-            <Input
-              type="time"
-              value={draft.time}
-              aria-label={`Hora de ${row.original.comercio}`}
-              className="h-8 min-w-[155px] bg-background text-xs"
-              onChange={(event) => onUpdateDraft(row.original.id, { time: event.target.value })}
-            />
-          </div>
+          <Input
+            type="date"
+            value={draft.date}
+            aria-label={`Fecha de ${row.original.comercio}`}
+            className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => onUpdateDraft(row.original.id, { date: event.target.value })}
+          />
         );
       },
     },
     {
       accessorKey: 'total',
       header: ({ column }) => (
-        <button type="button" className="flex items-center gap-1" onClick={() => column.toggleSorting()}>
+        <button type="button" className="flex w-full items-center justify-end gap-1" onClick={() => column.toggleSorting()}>
           Total <ArrowUpDown size={12} />
         </button>
       ),
@@ -216,31 +207,22 @@ export function HistoryTicketTable({
             type="number"
             min={0}
             step="0.01"
+            inputMode="decimal"
             value={draft.amount}
             aria-label={`Total de ${row.original.comercio}`}
-            className="h-8 min-w-[105px] bg-background text-sm"
+            className="h-9 w-full rounded-lg bg-background text-right text-sm tabular-nums shadow-sm"
             onClick={(event) => event.stopPropagation()}
             onChange={(event) => onUpdateDraft(row.original.id, { amount: event.target.value })}
           />
         ) : (
-          <span className="text-sm font-semibold text-foreground">{formatMxn(row.original.total)}</span>
+          <span className="block text-right text-sm font-semibold tabular-nums text-foreground">{formatMxn(row.original.total)}</span>
         );
       },
     },
     {
-      accessorKey: 'subtotal',
-      header: 'Subtotal',
-      cell: ({ row }) => <span className="text-sm text-muted-foreground">{formatMxn(row.original.subtotal)}</span>,
-    },
-    {
       accessorKey: 'iva',
       header: 'IVA',
-      cell: ({ row }) => <span className="text-sm text-muted-foreground">{formatMxn(row.original.iva)}</span>,
-    },
-    {
-      accessorKey: 'moneda',
-      header: 'Moneda',
-      cell: () => <span className="text-sm text-muted-foreground">MXN</span>,
+      cell: ({ row }) => <span className="block text-right text-sm tabular-nums text-muted-foreground">{formatMxn(row.original.iva)}</span>,
     },
     {
       accessorKey: 'metodoPago',
@@ -253,7 +235,7 @@ export function HistoryTicketTable({
             onValueChange={(value) => onUpdateDraft(row.original.id, { paymentMethod: value as BackendPaymentMethod })}
           >
             <SelectTrigger
-              className="h-8 min-w-[145px] bg-background text-xs"
+              className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
               aria-label={`Método de pago de ${row.original.comercio}`}
               onClick={(event) => event.stopPropagation()}
             >
@@ -282,7 +264,7 @@ export function HistoryTicketTable({
               onValueChange={(value) => onUpdateDraft(row.original.id, { type: value as BackendTicketType })}
             >
               <SelectTrigger
-                className="h-8 min-w-[100px] bg-background text-xs"
+                className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
                 aria-label={`Tipo de ${row.original.comercio}`}
                 onClick={(event) => event.stopPropagation()}
               >
@@ -319,7 +301,7 @@ export function HistoryTicketTable({
             onValueChange={(value) => onUpdateDraft(row.original.id, { status: value as BackendTicketStatus })}
           >
             <SelectTrigger
-              className="h-8 min-w-[120px] bg-background text-xs"
+              className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
               aria-label={`Estatus de ${row.original.comercio}`}
               onClick={(event) => event.stopPropagation()}
             >
@@ -345,8 +327,9 @@ export function HistoryTicketTable({
           <Input
             value={draft.category}
             maxLength={100}
+            placeholder="Categoría"
             aria-label={`Categoría de ${row.original.comercio}`}
-            className="h-8 min-w-[185px] bg-background text-xs"
+            className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
             onClick={(event) => event.stopPropagation()}
             onChange={(event) => onUpdateDraft(row.original.id, { category: event.target.value })}
           />
@@ -356,23 +339,22 @@ export function HistoryTicketTable({
       },
     },
     {
-      accessorKey: 'notas',
-      header: 'Productos o notas',
-      cell: ({ row }) => (
-        <p
-          className="line-clamp-2 text-sm leading-5 text-muted-foreground"
-          title={row.original.notas}
-        >
-          {row.original.notas || 'Sin productos o notas registradas.'}
-        </p>
-      ),
-    },
-    {
       id: 'actions',
       header: 'Acciones',
       enableSorting: false,
       cell: ({ row }) => (
         <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            aria-label={`Ver imagen del ticket de ${row.original.comercio}`}
+            title="Ver imagen"
+            onClick={() => onPreviewImage(row.original)}
+          >
+            <Camera size={15} />
+          </Button>
           <Button
             type="button"
             variant="ghost"
@@ -401,7 +383,7 @@ export function HistoryTicketTable({
         </div>
       ),
     },
-  ], [deletingTicketId, drafts, isEditing, onDelete, onOpen, onUpdateDraft]);
+  ], [deletingTicketId, drafts, isEditing, onDelete, onOpen, onPreviewImage, onUpdateDraft]);
 
   const table = useReactTable({
     data: tickets,
@@ -487,8 +469,8 @@ export function HistoryTicketTable({
         />
       ) : (
         <>
-          <div className="overflow-x-auto" tabIndex={0} aria-label="Tabla de tickets con desplazamiento horizontal">
-            <table className="min-w-[1905px] w-full border-separate border-spacing-0">
+          <div className="overflow-x-auto" tabIndex={0} aria-label="Tabla de tickets">
+            <table className="w-full min-w-[880px] table-fixed border-separate border-spacing-0">
               <thead>
                 {table.getHeaderGroups().map((headerGroup) => (
                   <tr key={headerGroup.id} className="border-b border-border/50">
@@ -497,8 +479,8 @@ export function HistoryTicketTable({
                         key={header.id}
                         scope="col"
                         className={cn(
-                          'border-b border-border/50 px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground',
-                          columnClass(header.column.id, true),
+                          'border-b border-border/50 px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground',
+                          columnClass(header.column.id),
                         )}
                       >
                         {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
@@ -525,16 +507,7 @@ export function HistoryTicketTable({
                       {row.getVisibleCells().map((cell) => (
                         <td
                           key={cell.id}
-                          className={cn(
-                            'border-b border-border/30 px-4 py-3 align-top',
-                            columnClass(cell.column.id),
-                            isDirty && (
-                              cell.column.id === 'comercio' ||
-                              cell.column.id === 'fecha' ||
-                              cell.column.id === 'total' ||
-                              cell.column.id === 'actions'
-                            ) && 'bg-amber-50/95 dark:bg-amber-950/90',
-                          )}
+                          className="border-b border-border/30 px-3 py-3 align-middle"
                         >
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
                           {cell.column.id === 'comercio' && rowError ? (

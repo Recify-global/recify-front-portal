@@ -90,8 +90,8 @@ function normalizeStatus(value: unknown): BackendTicketStatus {
 export function mapBackendTicket(t: BackendTicket): UiTicket {
   const { fecha, hora } = splitDate(asString(t.date) ?? '');
   const total = Math.max(0, asNumber(t.amount) ?? 0);
-  const subtotalFromApi = asNumber(t.rawData?.subtotal);
-  const taxFromApi = asNumber(t.rawData?.tax);
+  const subtotalFromApi = asNumber(t.subtotal) ?? asNumber(t.rawData?.subtotal);
+  const taxFromApi = asNumber(t.tax) ?? asNumber(t.rawData?.tax);
   const subtotal = subtotalFromApi ?? (taxFromApi !== null ? Math.max(0, total - taxFromApi) : total);
   const iva = taxFromApi ?? Math.max(0, total - subtotal);
   const categoria = asString(t.category) ?? CATEGORY_BY_TYPE[t.type] ?? 'Sin categoría';
