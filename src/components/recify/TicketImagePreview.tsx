@@ -9,6 +9,8 @@ interface TicketImagePreviewProps {
   fallbackImageUrl?: string | null;
   /** Evita mostrar "Sin imagen" mientras las fuentes remotas siguen cargando. */
   loading?: boolean;
+  /** Muestra la imagen completa y nítida (sin blur ni recorte), p.ej. en un diálogo. */
+  plain?: boolean;
   alt?: string;
   className?: string;
 }
@@ -17,6 +19,7 @@ export function TicketImagePreview({
   imageUrl,
   fallbackImageUrl,
   loading = false,
+  plain = false,
   alt = 'Imagen del ticket',
   className,
 }: TicketImagePreviewProps) {
@@ -74,7 +77,8 @@ export function TicketImagePreview({
       title="Ver imagen completa"
       aria-label="Ver imagen del ticket en nueva pestaña"
       className={cn(
-        'group relative block h-44 w-full overflow-hidden rounded-2xl border border-border/50 bg-muted',
+        'group relative block w-full overflow-hidden rounded-2xl border border-border/50 bg-muted',
+        plain ? 'h-auto min-h-44' : 'h-44',
         'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
         className,
       )}
@@ -96,13 +100,20 @@ export function TicketImagePreview({
             setFailedFallbackUrl(currentUrl);
           }
         }}
-        className="h-full w-full object-cover blur-[2px] brightness-90 transition-all duration-200 group-hover:blur-0 group-hover:brightness-100"
+        className={cn(
+          'w-full transition-all duration-200',
+          plain
+            ? 'h-auto object-contain'
+            : 'h-full object-cover blur-[2px] brightness-90 group-hover:blur-0 group-hover:brightness-100',
+        )}
       />
-      <span className="absolute inset-0 flex items-end justify-center pb-3 opacity-100 transition-opacity group-hover:opacity-0">
-        <span className="rounded-full bg-background/80 px-3 py-1 text-xs font-medium text-foreground shadow-sm backdrop-blur-sm">
-          Ver imagen completa
+      {plain ? null : (
+        <span className="absolute inset-0 flex items-end justify-center pb-3 opacity-100 transition-opacity group-hover:opacity-0">
+          <span className="rounded-full bg-background/80 px-3 py-1 text-xs font-medium text-foreground shadow-sm backdrop-blur-sm">
+            Ver imagen completa
+          </span>
         </span>
-      </span>
+      )}
     </a>
   );
 }

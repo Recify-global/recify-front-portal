@@ -215,6 +215,16 @@ export function formatTicketType(value: unknown): string {
   return truncate(raw, 80);
 }
 
+export function formatTicketDateTime(date: string, time?: string | null): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date.trim());
+  if (!match) return 'Sin fecha';
+  const [, year, month, day] = match;
+  const validTime = typeof time === 'string' && /^\d{2}:\d{2}$/.test(time)
+    ? time
+    : null;
+  return `${day}/${month}/${year}${validTime ? ` · ${validTime}` : ''}`;
+}
+
 export function formatTicketReviewStatus(value: unknown): string {
   const raw = asCleanString(value)?.toLowerCase();
   if (raw === 'revisado' || raw === 'reviewed') return 'Revisado';

@@ -1,37 +1,37 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppLayout } from '@/components/recify/AppLayout';
 import { MetricCard } from '@/components/recify/MetricCard';
 import { SkeletonCard } from '@/components/recify/SkeletonCard';
-import { StatusBadge } from '@/components/recify/StatusBadge';
-import { CategoryBadge } from '@/components/recify/CategoryBadge';
+import { HistoryTicketTable } from '@/components/recify/HistoryTicketTable';
+import { HistoryTicketDrawer } from '@/components/recify/HistoryTicketDrawer';
 import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
-import { TicketNotes } from '@/components/recify/TicketNotes';
-import { EmptyState } from '@/components/recify/EmptyState';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
-  useReactTable,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getSortedRowModel,
-  getPaginationRowModel,
-  flexRender,
-  type ColumnDef,
-  type SortingState,
-  type ColumnFiltersState,
-} from '@tanstack/react-table';
-import {
   Receipt, ArrowDownCircle, ArrowUpCircle, Scale, CreditCard,
-  AlertCircle, Search, ChevronLeft, ChevronRight,
-  ArrowUpDown, Trash2, Edit3, X, Loader2, Save, XCircle, Info,
+  AlertCircle, Search, X, Loader2, Info,
 } from 'lucide-react';
-import { ApiRequestError } from '@/api/http';
 import { mapBackendTicket, mapBackendTickets } from '@/mappers/ticket.mapper';
 import {
   useDashboardDailyReport,
@@ -39,17 +39,13 @@ import {
   useTickets,
   useUpdateDashboardTicket,
 } from '@/hooks/use-tickets';
+import {
+  saveHistoryTicketDrafts,
+  useHistoryTableEditing,
+} from '@/hooks/use-history-table-editing';
 import { useFinancialKpis } from '@/hooks/use-financial-kpis';
 import { useAuth } from '@/hooks/use-auth';
 import { deleteTicket } from '@/services/tickets.service';
-import {
-  buildTicketUpdatePayload,
-  createDraftFromTicket,
-  getTicketEditValidationMessage,
-  hasTicketEditChanges,
-  normalizeTicketEditDraft,
-  type TicketEditDraft,
-} from '@/utils/ticket-edit';
 import {
   detectActivePreset,
   formatMxn,
@@ -60,131 +56,13 @@ import {
 import { selectTicketImageUrl } from '@/utils/ticket-image';
 import { cn } from '@/lib/utils';
 import type {
-  BackendPaymentMethod,
-  BackendTicketReviewStatus,
-  BackendTicketStatus,
-  BackendTicketType,
+  BackendTicket,
   UiTicket,
 } from '@/types/ticket';
 
 const formatMXN = (n: number) => formatMxn(n);
 
 const statusOptions = ['analizado', 'pendiente', 'error'] as const;
-
-const columns: ColumnDef<UiTicket>[] = [
-  {
-    accessorKey: 'comercio',
-    header: ({ column }) => (
-      <button
-        className="flex items-center gap-1 hover:text-foreground transition-colors"
-        onClick={() => column.toggleSorting()}
-      >
-        Comercio <ArrowUpDown size={12} />
-      </button>
-    ),
-    cell: ({ row }) => (
-      <span className="font-medium text-foreground text-sm">{row.getValue('comercio')}</span>
-    ),
-  },
-  {
-    accessorKey: 'fecha',
-    header: ({ column }) => (
-      <button
-        className="flex items-center gap-1 hover:text-foreground transition-colors"
-        onClick={() => column.toggleSorting()}
-      >
-        Fecha <ArrowUpDown size={12} />
-      </button>
-    ),
-    cell: ({ row }) => (
-      <span className="text-sm text-muted-foreground">{row.getValue('fecha')}</span>
-    ),
-  },
-  {
-    accessorKey: 'tipo',
-    header: 'Tipo',
-    cell: ({ row }) => {
-      const tipo = row.getValue<string>('tipo');
-      const isIngreso = tipo === 'Ingreso';
-      return (
-        <span
-          className={cn(
-            'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
-            isIngreso ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive',
-          )}
-        >
-          {tipo}
-        </span>
-      );
-    },
-    filterFn: 'equals',
-  },
-  {
-    accessorKey: 'categoria',
-    header: 'Categoría',
-    cell: ({ row }) => <CategoryBadge category={row.getValue('categoria')} />,
-    filterFn: 'equals',
-  },
-  {
-    accessorKey: 'metodoPago',
-    header: 'Método',
-    cell: ({ row }) => (
-      <span className="text-sm text-muted-foreground">{row.getValue('metodoPago')}</span>
-    ),
-  },
-  {
-    accessorKey: 'total',
-    header: ({ column }) => (
-      <button
-        className="flex items-center gap-1 hover:text-foreground transition-colors"
-        onClick={() => column.toggleSorting()}
-      >
-        Total <ArrowUpDown size={12} />
-      </button>
-    ),
-    cell: ({ row }) => (
-      <span className="font-semibold text-foreground text-sm">
-        {formatMXN(row.getValue('total'))}
-      </span>
-    ),
-  },
-  {
-    accessorKey: 'estatus',
-    header: 'Estatus',
-    cell: ({ row }) => <StatusBadge status={row.getValue('estatus')} />,
-    filterFn: 'equals',
-  },
-];
-
-const PAYMENT_OPTIONS: { value: BackendPaymentMethod; label: string }[] = [
-  { value: 'card', label: 'Tarjeta' },
-  { value: 'cash', label: 'Efectivo' },
-  { value: 'transfer', label: 'Transferencia' },
-  { value: 'other', label: 'Otro' },
-];
-
-const BACKEND_STATUS_OPTIONS: { value: BackendTicketStatus; label: string }[] = [
-  { value: 'processed', label: 'Analizado' },
-  { value: 'pending', label: 'Pendiente' },
-  { value: 'failed', label: 'Error' },
-  { value: 'duplicate', label: 'Duplicado' },
-];
-
-const REVIEW_STATUS_OPTIONS: { value: BackendTicketReviewStatus; label: string }[] = [
-  { value: 'pendiente', label: 'Pendiente de revisión' },
-  { value: 'revisado', label: 'Revisado' },
-];
-
-const TYPE_OPTIONS: { value: BackendTicketType; label: string }[] = [
-  { value: 'ingreso', label: 'Ingreso' },
-  { value: 'egreso', label: 'Gasto' },
-];
-
-function extractMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiRequestError) return err.message || fallback;
-  if (err instanceof Error) return err.message || fallback;
-  return fallback;
-}
 
 /** Normaliza `UiTicket.fecha` (YYYY-MM-DD) para comparar por día completo. */
 function ticketDateKey(fecha: string | undefined | null): string | null {
@@ -211,30 +89,41 @@ function clearHistoryFilters(
 export default function HistoryPage() {
   const [periodReference] = useState(() => new Date());
   const [initialDateRange] = useState(() => last12MonthsRange(periodReference));
-  const [sorting, setSorting] = useState<SortingState>([]);
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
   const [selectedTicket, setSelectedTicket] = useState<UiTicket | null>(null);
   const [selectedTicketCompanyId, setSelectedTicketCompanyId] = useState<string | null>(null);
+  const [detailView, setDetailView] = useState<'drawer' | 'image'>('drawer');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFromFilter, setDateFromFilter] = useState(initialDateRange.dateFrom);
   const [dateToFilter, setDateToFilter] = useState(initialDateRange.dateTo);
   const [lastKnownImageUrl, setLastKnownImageUrl] = useState<string | null>(null);
-  const [baselineDraft, setBaselineDraft] = useState<TicketEditDraft | null>(null);
-  const [draft, setDraft] = useState<TicketEditDraft | null>(null);
+  const [isSavingTable, setIsSavingTable] = useState(false);
+  const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
+  const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
 
   const { companyId } = useAuth();
   const queryClient = useQueryClient();
+  const companyIdRef = useRef(companyId);
+  const previousCompanyIdRef = useRef(companyId);
+  const savingClaimRef = useRef(false);
+  const tableEditing = useHistoryTableEditing();
+  const { cancelEditing, isTableEditing } = tableEditing;
+  companyIdRef.current = companyId;
 
   // P0 multitenant: al cambiar compañía, cerrar detalle y limpiar fallback visual.
   useEffect(() => {
-    setSelectedTicket(null);
-    setSelectedTicketCompanyId(null);
-    setLastKnownImageUrl(null);
-    setBaselineDraft(null);
-    setDraft(null);
-  }, [companyId]);
+    if (previousCompanyIdRef.current !== companyId) {
+      setSelectedTicket(null);
+      setSelectedTicketCompanyId(null);
+      setLastKnownImageUrl(null);
+      if (previousCompanyIdRef.current && isTableEditing) {
+        cancelEditing();
+        toast.info('La edición se canceló al cambiar de compañía.');
+      }
+    }
+    previousCompanyIdRef.current = companyId;
+  }, [cancelEditing, companyId, isTableEditing]);
 
   const ticketsQuery = useTickets({ page: 1, limit: 100 });
   const dailyReportQuery = useDashboardDailyReport({ page: 1, limit: 100 });
@@ -242,9 +131,6 @@ export default function HistoryPage() {
     selectedTicketCompanyId === companyId ? selectedTicket?.id : null;
   const detailQuery = useTicket(selectedTicketIdForQuery);
   const updateMutation = useUpdateDashboardTicket();
-  const backendTicket = detailQuery.data;
-  const editing = draft !== null;
-  const canEdit = Boolean(backendTicket) && !detailQuery.isLoading;
 
   const financialKpis = useFinancialKpis({
     dateFrom: dateFromFilter,
@@ -254,19 +140,29 @@ export default function HistoryPage() {
   const activePreset = detectActivePreset(dateFromFilter, dateToFilter, periodReference);
   const dateRangeInvalid = !isValidDateRange(dateFromFilter, dateToFilter);
 
-  const tickets = useMemo(() => {
-    const list = mapBackendTickets(ticketsQuery.data?.data);
-    const enriched = mapBackendTickets(dailyReportQuery.data?.tickets);
-    const imageByTicketId = new Map(
-      enriched
-        .filter((ticket) => Boolean(ticket.imagenUrl))
-        .map((ticket) => [ticket.id, ticket.imagenUrl] as const),
+  const backendTickets = useMemo(() => {
+    const dailyById = new Map(
+      (dailyReportQuery.data?.tickets ?? []).map((ticket) => [ticket._id, ticket]),
     );
-    return list.map((ticket) => ({
-      ...ticket,
-      imagenUrl: imageByTicketId.get(ticket.id) ?? ticket.imagenUrl,
-    }));
+    return (ticketsQuery.data?.data ?? []).map((ticket) => {
+      const dailyTicket = dailyById.get(ticket._id);
+      if (!dailyTicket || dailyTicket.companyId !== ticket.companyId) return ticket;
+      return {
+        ...ticket,
+        ...dailyTicket,
+        rawData: dailyTicket.rawData ?? ticket.rawData,
+        vendor: dailyTicket.vendor ?? ticket.vendor,
+        imageUrl: dailyTicket.imageUrl ?? ticket.imageUrl,
+        tax: dailyTicket.tax ?? ticket.tax,
+        subtotal: dailyTicket.subtotal ?? ticket.subtotal,
+      };
+    });
   }, [dailyReportQuery.data?.tickets, ticketsQuery.data?.data]);
+  const tickets = useMemo(() => mapBackendTickets(backendTickets), [backendTickets]);
+  const backendTicketById = useMemo(
+    () => new Map(backendTickets.map((ticket) => [ticket._id, ticket])),
+    [backendTickets],
+  );
 
   const categorias = useMemo(() => {
     const values = Array.from(new Set(tickets.map((t) => t.categoria))).filter(Boolean);
@@ -330,7 +226,17 @@ export default function HistoryPage() {
       detailQuery.data.companyId === companyId &&
       detailQuery.data._id === selectedTicket.id
     ) {
-      const mapped = mapBackendTicket(detailQuery.data);
+      const currentBackendTicket = backendTicketById.get(selectedTicket.id);
+      const mergedDetail: BackendTicket = {
+        ...currentBackendTicket,
+        ...detailQuery.data,
+        rawData: detailQuery.data.rawData ?? currentBackendTicket?.rawData,
+        vendor: detailQuery.data.vendor ?? currentBackendTicket?.vendor,
+        imageUrl: detailQuery.data.imageUrl ?? currentBackendTicket?.imageUrl,
+        tax: detailQuery.data.tax ?? currentBackendTicket?.tax,
+        subtotal: detailQuery.data.subtotal ?? currentBackendTicket?.subtotal,
+      };
+      const mapped = mapBackendTicket(mergedDetail);
       const currentListTicket = tickets.find(
         (ticket) => ticket.id === selectedTicket.id,
       );
@@ -379,6 +285,7 @@ export default function HistoryPage() {
     };
   }, [
     companyId,
+    backendTicketById,
     detailQuery.data,
     lastKnownImageUrl,
     selectedTicket,
@@ -386,130 +293,137 @@ export default function HistoryPage() {
     tickets,
   ]);
 
-  const editValidationMessage = useMemo(() => getTicketEditValidationMessage(draft), [draft]);
-  const hasEditChanges = useMemo(
-    () => hasTicketEditChanges(baselineDraft, draft),
-    [baselineDraft, draft],
-  );
-  const canSaveEdit = Boolean(draft && baselineDraft && hasEditChanges && !editValidationMessage);
-  const editReadonlyFields = useMemo(
-    () =>
-      selectedTicketDetail
-        ? [
-            { label: 'Comercio', value: selectedTicketDetail.comercio },
-            ...(selectedTicketDetail.folio ? [{ label: 'Folio', value: selectedTicketDetail.folio }] : []),
-            { label: 'Hora', value: selectedTicketDetail.hora },
-            { label: 'Subtotal', value: formatMXN(selectedTicketDetail.subtotal) },
-            { label: 'IVA', value: formatMXN(selectedTicketDetail.iva) },
-            { label: 'Moneda', value: selectedTicketDetail.moneda },
-          ]
-        : [],
-    [selectedTicketDetail],
-  );
-
   useEffect(() => {
     if (selectedTicketDetail?.imagenUrl) {
       setLastKnownImageUrl(selectedTicketDetail.imagenUrl);
     }
   }, [selectedTicketDetail?.imagenUrl]);
 
-  const table = useReactTable({
-    data: filteredData,
-    columns,
-    state: { sorting, columnFilters, globalFilter },
-    onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
-    onGlobalFilterChange: setGlobalFilter,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    initialState: { pagination: { pageSize: 8 } },
-  });
-
   const deleteMutation = useMutation({
-    mutationFn: async (ticketId: string) => {
-      if (!companyId) throw new Error('No hay compañía activa.');
-      await deleteTicket(companyId, ticketId);
+    mutationFn: async ({
+      ticketId,
+      originCompanyId,
+    }: {
+      ticketId: string;
+      originCompanyId: string;
+    }) => {
+      await deleteTicket(originCompanyId, ticketId);
     },
-    onSuccess: async () => {
+    onMutate: ({ ticketId }) => {
+      setDeletingTicketId(ticketId);
+    },
+    onSuccess: async (_data, { originCompanyId }) => {
       toast.success('Ticket eliminado.');
       setSelectedTicket(null);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['tickets', companyId] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard-daily-report', companyId] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard-summary', companyId] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard-by-payment-method', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['tickets', originCompanyId] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard-daily-report', originCompanyId] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard-summary', originCompanyId] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard-by-payment-method', originCompanyId] }),
       ]);
     },
-    onError: (error) => {
-      const message = error instanceof Error ? error.message : 'No se pudo eliminar el ticket.';
-      toast.error(message);
+    onError: () => {
+      toast.error('No fue posible eliminar el ticket.');
+    },
+    onSettled: () => {
+      setDeletingTicketId(null);
     },
   });
 
   const handleOpenSheet = (ticket: UiTicket) => {
+    setDetailView('drawer');
     setSelectedTicket(ticket);
     setSelectedTicketCompanyId(companyId);
     setLastKnownImageUrl(ticket.imagenUrl ?? null);
-    setBaselineDraft(null);
-    setDraft(null);
+  };
+
+  const handlePreviewImage = (ticket: UiTicket) => {
+    setDetailView('image');
+    setSelectedTicket(ticket);
+    setSelectedTicketCompanyId(companyId);
+    setLastKnownImageUrl(ticket.imagenUrl ?? null);
   };
 
   const handleCloseSheet = () => {
     setSelectedTicket(null);
     setSelectedTicketCompanyId(null);
     setLastKnownImageUrl(null);
-    setBaselineDraft(null);
-    setDraft(null);
   };
 
-  const handleStartEdit = () => {
-    if (!backendTicket) return;
-    const nextDraft = createDraftFromTicket(backendTicket);
-    setBaselineDraft(nextDraft);
-    setDraft(nextDraft);
+  const handleStartTableEditing = (ticketIds: string[]) => {
+    if (!companyId) return;
+    const editableRows = ticketIds.flatMap((ticketId) => {
+      const ticket = backendTicketById.get(ticketId);
+      return ticket && ticket.companyId === companyId
+        ? [{ id: ticketId, companyId, ticket }]
+        : [];
+    });
+    if (editableRows.length === 0) {
+      toast.error('No fue posible preparar los tickets visibles para edición.');
+      return;
+    }
+    tableEditing.startEditing(editableRows, companyId);
   };
 
-  const handleCancelEdit = () => {
-    setBaselineDraft(null);
-    setDraft(null);
+  const handleCancelTableEditing = () => {
+    if (tableEditing.dirtyTicketIds.length > 0) {
+      setShowCancelConfirmation(true);
+      return;
+    }
+    tableEditing.cancelEditing();
   };
 
-  const handleSaveEdit = async () => {
-    if (!selectedTicketDetail?.id || !baselineDraft || !draft || updateMutation.isPending) return;
-
-    const result = buildTicketUpdatePayload(baselineDraft, draft);
-    if (!result.ok) {
-      if (result.reason === 'no-changes') {
-        toast.info('No hay cambios para guardar.');
-        return;
-      }
-      toast.error(result.message);
+  const handleSaveTableEditing = async () => {
+    if (savingClaimRef.current || isSavingTable) return;
+    const originCompanyId = tableEditing.editingCompanyId;
+    if (!originCompanyId || originCompanyId !== companyId) {
+      tableEditing.cancelEditing();
+      toast.error('La edición ya no pertenece a la compañía activa.');
+      return;
+    }
+    if (Object.keys(tableEditing.validationErrors).length > 0) {
+      toast.error('Revisa los datos marcados antes de guardar.');
+      return;
+    }
+    if (tableEditing.dirtyTicketIds.length === 0) {
+      toast.info('No hay cambios para guardar.');
       return;
     }
 
+    savingClaimRef.current = true;
+    setIsSavingTable(true);
+    const dirtyIds = [...tableEditing.dirtyTicketIds];
+
     try {
-      await updateMutation.mutateAsync({
-        ticketId: selectedTicketDetail.id,
-        payload: result.payload,
+      const { savedIds, errors } = await saveHistoryTicketDrafts({
+        ticketIds: dirtyIds,
+        baselines: tableEditing.baselines,
+        drafts: tableEditing.drafts,
+        save: async (ticketId, payload) => {
+          await updateMutation.mutateAsync({
+            companyId: originCompanyId,
+            ticketId,
+            payload,
+          });
+        },
       });
-      const normalizedDraft = normalizeTicketEditDraft(draft);
-      setBaselineDraft(normalizedDraft);
-      setDraft(null);
-      toast.success('Cambios guardados.');
-    } catch (err) {
-      toast.error(extractMessage(err, 'No se pudieron guardar los cambios.'));
+
+      if (companyIdRef.current !== originCompanyId) return;
+      tableEditing.applySaveResults(savedIds, errors);
+      if (Object.keys(errors).length > 0) {
+        toast.error('Algunos tickets no pudieron guardarse. Revisa las filas marcadas.');
+      } else {
+        toast.success('Cambios guardados.');
+      }
+    } finally {
+      savingClaimRef.current = false;
+      setIsSavingTable(false);
     }
   };
 
-  const updateDraft = <K extends keyof TicketEditDraft>(key: K, value: TicketEditDraft[K]) => {
-    setDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
-  };
-
-  const handleDelete = () => {
-    if (!selectedTicketDetail?.id || deleteMutation.isPending) return;
-    deleteMutation.mutate(selectedTicketDetail.id);
+  const handleDelete = (ticketId: string) => {
+    if (!companyId || deleteMutation.isPending || tableEditing.isTableEditing) return;
+    deleteMutation.mutate({ ticketId, originCompanyId: companyId });
   };
 
   const kpiUnavailableLabel = (() => {
@@ -635,15 +549,24 @@ export default function HistoryPage() {
                   placeholder="Buscar por comercio, categoría..."
                   value={globalFilter}
                   onChange={(e) => setGlobalFilter(e.target.value)}
+                  disabled={tableEditing.isTableEditing}
                   className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground"
                 />
                 {globalFilter && (
-                  <button type="button" onClick={() => setGlobalFilter('')}>
+                  <button
+                    type="button"
+                    disabled={tableEditing.isTableEditing}
+                    onClick={() => setGlobalFilter('')}
+                  >
                     <X size={14} className="text-muted-foreground" />
                   </button>
                 )}
               </div>
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <Select
+                value={categoryFilter}
+                onValueChange={setCategoryFilter}
+                disabled={tableEditing.isTableEditing}
+              >
                 <SelectTrigger className="w-full sm:w-44 h-10 rounded-xl border-border">
                   <SelectValue placeholder="Categoría" />
                 </SelectTrigger>
@@ -654,7 +577,11 @@ export default function HistoryPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select
+                value={statusFilter}
+                onValueChange={setStatusFilter}
+                disabled={tableEditing.isTableEditing}
+              >
                 <SelectTrigger className="w-full sm:w-36 h-10 rounded-xl border-border">
                   <SelectValue placeholder="Estatus" />
                 </SelectTrigger>
@@ -673,6 +600,7 @@ export default function HistoryPage() {
                   variant={activePreset === 'last_30_days' ? 'default' : 'outline'}
                   className="rounded-xl h-9"
                   onClick={applyLastMonthPreset}
+                  disabled={tableEditing.isTableEditing}
                 >
                   Último mes
                 </Button>
@@ -681,6 +609,7 @@ export default function HistoryPage() {
                   variant={activePreset === 'last_12_months' ? 'default' : 'outline'}
                   className="rounded-xl h-9"
                   onClick={applyLastYearPreset}
+                  disabled={tableEditing.isTableEditing}
                 >
                   Último año
                 </Button>
@@ -695,6 +624,7 @@ export default function HistoryPage() {
                     type="date"
                     value={dateFromFilter}
                     onChange={(e) => setDateFromFilter(e.target.value)}
+                    disabled={tableEditing.isTableEditing}
                     className={cn(
                       'h-10 rounded-xl border-border',
                       dateRangeInvalid && 'border-destructive',
@@ -710,6 +640,7 @@ export default function HistoryPage() {
                     type="date"
                     value={dateToFilter}
                     onChange={(e) => setDateToFilter(e.target.value)}
+                    disabled={tableEditing.isTableEditing}
                     className={cn(
                       'h-10 rounded-xl border-border',
                       dateRangeInvalid && 'border-destructive',
@@ -726,6 +657,7 @@ export default function HistoryPage() {
                     variant="outline"
                     className="rounded-xl h-10"
                     onClick={handleClearFilters}
+                    disabled={tableEditing.isTableEditing}
                   >
                     Limpiar filtros
                   </Button>
@@ -736,359 +668,106 @@ export default function HistoryPage() {
                   La fecha inicial no puede ser posterior a la fecha final.
                 </p>
               )}
+              {tableEditing.isTableEditing && (
+                <p className="text-xs text-muted-foreground">
+                  Guarda o cancela los cambios para modificar los filtros.
+                </p>
+              )}
             </div>
           </div>
         </div>
 
         {/* Table */}
-        <div className="bg-card rounded-2xl border border-border/50 shadow-elegant overflow-hidden">
-          {ticketsQuery.isPending ? (
-            <div className="py-16 flex items-center justify-center">
-              <div className="flex items-center gap-2 text-muted-foreground text-sm">
-                <Loader2 size={16} className="animate-spin" />
-                Cargando tickets...
-              </div>
-            </div>
-          ) : ticketsQuery.isError ? (
-            <EmptyState
-              icon={<AlertCircle size={32} />}
-              title="No pudimos cargar los tickets"
-              description="Ocurrió un error al consultar el backend. Intenta nuevamente."
-              action={
-                <Button variant="outline" className="rounded-xl" onClick={() => ticketsQuery.refetch()}>
-                  Reintentar
-                </Button>
-              }
-            />
-          ) : table.getRowModel().rows.length === 0 ? (
-            <EmptyState
-              icon={<Receipt size={32} />}
-              title="No hay tickets para estos filtros."
-              description="Prueba otro rango de fechas, categoría o búsqueda. Limpiar filtros muestra de nuevo los tickets cargados."
-              action={
-                <Button
-                  variant="outline"
-                  className="rounded-xl"
-                  onClick={handleClearFilters}
-                >
-                  Limpiar filtros
-                </Button>
-              }
-            />
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    {table.getHeaderGroups().map((hg) => (
-                      <tr key={hg.id} className="border-b border-border/50">
-                        {hg.headers.map((header) => (
-                          <th key={header.id} className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                            {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
-                          </th>
-                        ))}
-                      </tr>
-                    ))}
-                  </thead>
-                  <tbody>
-                    {table.getRowModel().rows.map((row) => (
-                      <tr
-                        key={row.id}
-                        onClick={() => handleOpenSheet(row.original)}
-                        className="border-b border-border/30 hover:bg-surface-hover cursor-pointer transition-colors"
-                      >
-                        {row.getVisibleCells().map((cell) => (
-                          <td key={cell.id} className="px-4 py-3">
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Pagination */}
-              <div className="flex items-center justify-between px-4 py-3 border-t border-border/50">
-                <p className="text-sm text-muted-foreground">
-                  {table.getFilteredRowModel().rows.length} ticket{table.getFilteredRowModel().rows.length !== 1 ? 's' : ''}
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="rounded-lg"
-                    onClick={() => table.previousPage()}
-                    disabled={!table.getCanPreviousPage()}
-                  >
-                    <ChevronLeft size={14} />
-                  </Button>
-                  <span className="text-sm text-muted-foreground">
-                    {table.getState().pagination.pageIndex + 1} / {table.getPageCount()}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="rounded-lg"
-                    onClick={() => table.nextPage()}
-                    disabled={!table.getCanNextPage()}
-                  >
-                    <ChevronRight size={14} />
-                  </Button>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
+        <HistoryTicketTable
+          tickets={filteredData}
+          globalFilter={globalFilter}
+          onGlobalFilterChange={setGlobalFilter}
+          isLoading={ticketsQuery.isPending}
+          isError={ticketsQuery.isError}
+          onRetry={() => {
+            void ticketsQuery.refetch();
+          }}
+          isEditing={tableEditing.isTableEditing}
+          isSaving={isSavingTable}
+          drafts={tableEditing.drafts}
+          dirtyTicketIds={tableEditing.dirtyTicketIds}
+          validationErrors={tableEditing.validationErrors}
+          rowErrors={tableEditing.rowErrors}
+          deletingTicketId={deletingTicketId}
+          onStartEditing={handleStartTableEditing}
+          onUpdateDraft={tableEditing.updateDraftPatch}
+          onSave={() => {
+            void handleSaveTableEditing();
+          }}
+          onCancel={handleCancelTableEditing}
+          onOpen={handleOpenSheet}
+          onPreviewImage={handlePreviewImage}
+          onDelete={handleDelete}
+          onClearFilters={handleClearFilters}
+        />
       </div>
 
-      {/* Detail Sheet */}
-      <Sheet
-        open={Boolean(selectedTicketDetail)}
+      <HistoryTicketDrawer
+        ticket={detailView === 'drawer' ? selectedTicketDetail : null}
+        noteSources={[
+          detailQuery.data,
+          selectedTicketDetail
+            ? backendTicketById.get(selectedTicketDetail.id)
+            : undefined,
+          selectedTicketDetail,
+        ]}
+        imageLoading={detailQuery.isFetching || dailyReportQuery.isFetching}
+        detailFetching={detailQuery.isFetching}
+        detailError={detailQuery.isError}
+        onClose={handleCloseSheet}
+      />
+
+      <Dialog
+        open={detailView === 'image' && Boolean(selectedTicketDetail)}
         onOpenChange={(open) => {
           if (!open) handleCloseSheet();
         }}
       >
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-          {selectedTicketDetail && (
-            <div className="space-y-5">
-              <SheetHeader>
-                <div className="flex items-start justify-between gap-3">
-                  <SheetTitle className="flex items-center gap-2">
-                    <span className="text-foreground">{selectedTicketDetail.comercio}</span>
-                    <StatusBadge status={selectedTicketDetail.estatus} />
-                  </SheetTitle>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 shrink-0 rounded-lg"
-                    onClick={handleStartEdit}
-                    disabled={!selectedTicket || updateMutation.isPending}
-                    aria-label="Editar ticket"
-                  >
-                    <Edit3 size={14} className="mr-1.5" /> Editar
-                  </Button>
-                </div>
-              </SheetHeader>
-
-              {/* Imagen del ticket */}
-              <TicketImagePreview
-                imageUrl={selectedTicketDetail.imagenUrl}
-                alt={`Ticket de ${selectedTicketDetail.comercio}`}
-                loading={detailQuery.isFetching || dailyReportQuery.isFetching}
-              />
-
-              {/* Datos del ticket */}
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  ...(selectedTicketDetail.folio ? [{ label: 'Folio', value: selectedTicketDetail.folio }] : []),
-                  { label: 'Fecha', value: `${selectedTicketDetail.fecha} ${selectedTicketDetail.hora}` },
-                  { label: 'Subtotal', value: formatMXN(selectedTicketDetail.subtotal) },
-                  { label: 'IVA', value: formatMXN(selectedTicketDetail.iva) },
-                  { label: 'Total', value: formatMXN(selectedTicketDetail.total) },
-                  { label: 'Moneda', value: selectedTicketDetail.moneda },
-                  { label: 'Método de pago', value: selectedTicketDetail.metodoPago },
-                  { label: 'Tipo', value: selectedTicketDetail.tipo },
-                  { label: 'Estatus', value: selectedTicketDetail.estatus },
-                  { label: 'Revisión', value: selectedTicketDetail.reviewStatus },
-                ].map((f) => (
-                  <div key={f.label}>
-                    <p className="text-xs text-muted-foreground">{f.label}</p>
-                    <p className="text-sm font-medium text-foreground">{f.value}</p>
-                  </div>
-                ))}
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Categoría</p>
-                  <CategoryBadge category={selectedTicketDetail.categoria} />
-                </div>
+        <DialogContent className="sm:max-w-2xl">
+          {detailView === 'image' && selectedTicketDetail ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Ticket de {selectedTicketDetail.comercio}</DialogTitle>
+              </DialogHeader>
+              <div className="max-h-[75vh] overflow-y-auto rounded-2xl">
+                <TicketImagePreview
+                  imageUrl={selectedTicketDetail.imagenUrl}
+                  alt={`Ticket de ${selectedTicketDetail.comercio}`}
+                  loading={detailQuery.isFetching || dailyReportQuery.isFetching}
+                  plain
+                />
               </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
-              <TicketNotes
-                title="Productos detectados"
-                sources={[detailQuery.data, selectedTicketDetail]}
-              />
-
-              {/* Formulario de edición */}
-              {editing && draft ? (
-                <div className="space-y-3 rounded-xl border border-border/50 bg-secondary/30 p-4">
-                  <p className="text-xs font-medium text-foreground">Editar ticket</p>
-
-                  {editReadonlyFields.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg bg-background/70 p-3">
-                      {editReadonlyFields.map((field) => (
-                        <div key={field.label} className="space-y-0.5">
-                          <p className="text-xs text-muted-foreground">{field.label}</p>
-                          <p className="text-sm font-medium text-foreground">{field.value}</p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">Tipo</Label>
-                    <Select
-                      value={draft.type}
-                      onValueChange={(v) => updateDraft('type', v as BackendTicketType)}
-                    >
-                      <SelectTrigger className="h-9 rounded-lg text-sm bg-background">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TYPE_OPTIONS.map((o) => (
-                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">Fecha</Label>
-                    <Input
-                      type="date"
-                      value={draft.date}
-                      onChange={(e) => updateDraft('date', e.target.value)}
-                      className="h-9 rounded-lg text-sm bg-background"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">Monto total</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={draft.amount}
-                      onChange={(e) => updateDraft('amount', e.target.value)}
-                      className="h-9 rounded-lg text-sm bg-background"
-                      placeholder="0.00"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">Categoría</Label>
-                    <Input
-                      value={draft.category}
-                      onChange={(e) => updateDraft('category', e.target.value)}
-                      className="h-9 rounded-lg text-sm bg-background"
-                      placeholder="Ej: Restaurantes y Alimentos"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">Método de pago</Label>
-                    <Select
-                      value={draft.paymentMethod}
-                      onValueChange={(v) => updateDraft('paymentMethod', v as BackendPaymentMethod)}
-                    >
-                      <SelectTrigger className="h-9 rounded-lg text-sm bg-background">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PAYMENT_OPTIONS.map((o) => (
-                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">Estatus</Label>
-                    <Select
-                      value={draft.status}
-                      onValueChange={(v) => updateDraft('status', v as BackendTicketStatus)}
-                    >
-                      <SelectTrigger className="h-9 rounded-lg text-sm bg-background">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {BACKEND_STATUS_OPTIONS.map((o) => (
-                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">Revisión</Label>
-                    <Select
-                      value={draft.reviewStatus}
-                      onValueChange={(v) => updateDraft('reviewStatus', v as BackendTicketReviewStatus)}
-                    >
-                      <SelectTrigger className="h-9 rounded-lg text-sm bg-background">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {REVIEW_STATUS_OPTIONS.map((o) => (
-                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="flex gap-2 pt-1">
-                    <Button
-                      className="flex-1 h-9 rounded-xl bg-gradient-primary text-primary-foreground transition-all hover:shadow-md hover:ring-2 hover:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none disabled:hover:ring-0"
-                      onClick={handleSaveEdit}
-                      disabled={updateMutation.isPending || !canSaveEdit}
-                    >
-                      {updateMutation.isPending
-                        ? <Loader2 size={14} className="mr-2 animate-spin" />
-                        : <Save size={14} className="mr-2" />}
-                      {updateMutation.isPending ? 'Guardando...' : canSaveEdit ? 'Guardar cambios' : 'Sin cambios'}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="h-9 rounded-xl"
-                      onClick={handleCancelEdit}
-                      disabled={updateMutation.isPending}
-                    >
-                      <XCircle size={14} className="mr-2" /> Cancelar
-                    </Button>
-                  </div>
-                  {editValidationMessage ? (
-                    <p className="text-xs text-destructive">{editValidationMessage}</p>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  <Button
-                    variant="outline"
-                    className="rounded-xl"
-                    onClick={handleStartEdit}
-                    disabled={!canEdit || updateMutation.isPending}
-                  >
-                    <Edit3 size={14} className="mr-2" /> Editar
-                  </Button>
-                  {!canEdit && detailQuery.isLoading && (
-                    <p className="text-xs text-muted-foreground">Cargando datos para editar...</p>
-                  )}
-                  {!canEdit && detailQuery.isError && (
-                    <p className="text-xs text-muted-foreground">No se pudo cargar el ticket para editar.</p>
-                  )}
-                  <Button
-                    variant="outline"
-                    className="rounded-xl text-destructive hover:text-destructive"
-                    onClick={handleDelete}
-                    disabled={deleteMutation.isPending || editing}
-                  >
-                    {deleteMutation.isPending
-                      ? <Loader2 size={14} className="mr-2 animate-spin" />
-                      : <Trash2 size={14} className="mr-2" />}
-                    Eliminar
-                  </Button>
-                </div>
-              )}
-
-              {detailQuery.isFetching && (
-                <p className="text-xs text-muted-foreground">Actualizando...</p>
-              )}
-              {detailQuery.isError && (
-                <p className="text-xs text-destructive">No se pudo cargar el detalle completo.</p>
-              )}
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
+      <AlertDialog open={showCancelConfirmation} onOpenChange={setShowCancelConfirmation}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Descartar cambios sin guardar?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Los valores editados volverán a su estado original. No se enviará ninguna solicitud.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Continuar editando</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                tableEditing.cancelEditing();
+                setShowCancelConfirmation(false);
+              }}
+            >
+              Descartar cambios
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppLayout>
   );
 }

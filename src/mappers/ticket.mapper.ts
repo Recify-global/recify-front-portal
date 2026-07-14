@@ -12,6 +12,7 @@ import {
   getTicketFolio,
   getTicketImageUrl,
 } from '@/utils/ticket-display';
+import { HISTORY_TIMEZONE } from '@/utils/financial-kpis';
 
 const STATUS_MAP: Record<BackendTicketStatus, UiTicket['estatus']> = {
   processed: 'analizado',
@@ -25,15 +26,30 @@ const CATEGORY_BY_TYPE: Record<BackendTicket['type'], string> = {
   egreso: 'Otros Gastos',
 };
 
-function pad(n: number): string {
-  return String(n).padStart(2, '0');
-}
-
 function splitDate(iso: string): { fecha: string; hora: string } {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return { fecha: 'Sin fecha', hora: '--:--' };
-  const fecha = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  const hora = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: HISTORY_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(d);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value;
+  const year = get('year');
+  const month = get('month');
+  const day = get('day');
+  const hour = get('hour');
+  const minute = get('minute');
+  if (!year || !month || !day || !hour || !minute) {
+    return { fecha: 'Sin fecha', hora: '--:--' };
+  }
+  const fecha = `${year}-${month}-${day}`;
+  const hora = `${hour}:${minute}`;
   return { fecha, hora };
 }
 
@@ -74,8 +90,8 @@ function normalizeStatus(value: unknown): BackendTicketStatus {
 export function mapBackendTicket(t: BackendTicket): UiTicket {
   const { fecha, hora } = splitDate(asString(t.date) ?? '');
   const total = Math.max(0, asNumber(t.amount) ?? 0);
-  const subtotalFromApi = asNumber(t.rawData?.subtotal);
-  const taxFromApi = asNumber(t.rawData?.tax);
+  const subtotalFromApi = asNumber(t.subtotal) ?? asNumber(t.rawData?.subtotal);
+  const taxFromApi = asNumber(t.tax) ?? asNumber(t.rawData?.tax);
   const subtotal = subtotalFromApi ?? (taxFromApi !== null ? Math.max(0, total - taxFromApi) : total);
   const iva = taxFromApi ?? Math.max(0, total - subtotal);
   const categoria = asString(t.category) ?? CATEGORY_BY_TYPE[t.type] ?? 'Sin categoría';
@@ -84,7 +100,7 @@ export function mapBackendTicket(t: BackendTicket): UiTicket {
     asString(t.rawData?.vendor) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.merchantName) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.merchant) ??
-    categoria;
+    'Sin comercio';
   const moneda =
     asString((t.rawData as Record<string, unknown> | undefined)?.currency) ??
     asString((t.rawData as Record<string, unknown> | undefined)?.moneda) ??
