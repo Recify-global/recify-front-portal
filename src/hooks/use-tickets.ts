@@ -46,21 +46,22 @@ export function useDashboardDailyReport(
 
 /** Edición manual vía PATCH /dashboard/daily-report/:ticketId (contrato más completo). */
 export function useUpdateDashboardTicket() {
-  const { companyId } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: ({
+      companyId,
       ticketId,
       payload,
     }: {
+      companyId: string;
       ticketId: string;
       payload: DashboardDailyReportTicketUpdate;
     }) => {
       if (!companyId) return Promise.reject(new Error('No hay compañía activa.'));
       return updateDashboardDailyReportTicket(companyId, ticketId, payload);
     },
-    onSuccess: async (_data, { ticketId }) => {
+    onSuccess: async (_data, { companyId, ticketId }) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['tickets', companyId] }),
         queryClient.invalidateQueries({ queryKey: ['ticket', companyId, ticketId] }),

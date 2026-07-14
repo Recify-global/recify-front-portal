@@ -64,6 +64,7 @@ export interface DashboardDailyReportTicketUpdate {
   amount?: number;
   category?: string;
   paymentMethod?: BackendPaymentMethod;
+  vendor?: string;
   status?: BackendTicketStatus;
   reviewStatus?: BackendTicketReviewStatus;
 }
