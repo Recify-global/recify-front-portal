@@ -1,5 +1,9 @@
 import type { ApiEnvelope, ApiValidationIssue } from '@/types/api';
-import { clearAuthSession, getStoredToken } from '@/auth/storage';
+import { getStoredToken } from '@/auth/storage';
+import {
+  isAuthSessionClosing,
+  terminateAuthSession,
+} from '@/auth/session-cleanup';
 
 const API_PREFIX = '/api/v1';
 
@@ -49,6 +53,10 @@ export async function apiRequest<T>(path: string, opts: RequestOptions = {}): Pr
   }
 
   const authEnabled = opts.auth !== false;
+  if (authEnabled && isAuthSessionClosing()) {
+    throw new ApiRequestError('Tu sesión ya no está activa.', 401);
+  }
+
   let sentToken: string | null = null;
   if (authEnabled) {
     sentToken = getStoredToken();
@@ -85,11 +93,10 @@ export async function apiRequest<T>(path: string, opts: RequestOptions = {}): Pr
   }
 
   if (!response.ok) {
-    // Si el backend rechaza el token que mandamos, limpiamos sesión local.
-    // Así `ProtectedRoute` y `useAuth` reaccionan al cambio y el usuario
-    // es enviado a /auth en lugar de quedar atrapado con un token inválido.
+    // Un 401 usa el mismo cleanup idempotente que el logout manual.
+    // Un 403 conserva la sesión: falta de permisos no equivale a expiración.
     if (response.status === 401 && authEnabled && sentToken) {
-      clearAuthSession();
+      await terminateAuthSession();
     }
 
     const message = parsed?.message ?? `Request failed with status ${response.status}`;

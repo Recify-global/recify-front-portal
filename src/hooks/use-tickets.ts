@@ -12,6 +12,7 @@ import type {
   DashboardDailyReportTicketUpdate,
 } from '@/types/dashboard';
 import type { TicketsListParams } from '@/types/ticket';
+import { isAuthSessionClosing } from '@/auth/session-cleanup';
 import { useAuth } from './use-auth';
 
 export function useTickets(params: TicketsListParams = {}) {
@@ -53,15 +54,18 @@ export function useUpdateDashboardTicket() {
       companyId,
       ticketId,
       payload,
+      signal,
     }: {
       companyId: string;
       ticketId: string;
       payload: DashboardDailyReportTicketUpdate;
+      signal?: AbortSignal;
     }) => {
       if (!companyId) return Promise.reject(new Error('No hay compañía activa.'));
-      return updateDashboardDailyReportTicket(companyId, ticketId, payload);
+      return updateDashboardDailyReportTicket(companyId, ticketId, payload, { signal });
     },
     onSuccess: async (_data, { companyId, ticketId }) => {
+      if (isAuthSessionClosing()) return;
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['tickets', companyId] }),
         queryClient.invalidateQueries({ queryKey: ['ticket', companyId, ticketId] }),

@@ -3,6 +3,7 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import {
   getStoredCompanyId,
   getStoredToken,
+  getStoredUser,
   subscribeAuthChanges,
 } from '@/auth/storage';
 
@@ -12,9 +13,10 @@ interface ProtectedRouteProps {
 }
 
 function readSnapshot() {
+  const user = getStoredUser();
   return {
-    token: getStoredToken(),
-    companyId: getStoredCompanyId(),
+    token: user ? getStoredToken() : null,
+    companyId: user ? getStoredCompanyId() : null,
   };
 }
 

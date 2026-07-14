@@ -36,6 +36,10 @@ import type {
 import { Upload, Camera, FileImage, Loader2, CheckCircle2, Edit3, Save, Plus, Receipt, XCircle, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import { ApiRequestError } from '@/api/http';
+import {
+  createIndividualUploadFlow,
+  type ActiveUploadContext,
+} from '@/utils/individual-upload-flow';
 
 type UploadState = 'idle' | 'uploaded' | 'analyzing' | 'done';
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -74,25 +78,77 @@ export default function UploadPage() {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | undefined>(undefined);
+  const [hasPersistedTicket, setHasPersistedTicket] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const previewUrlRef = useRef<string | undefined>(undefined);
+  const companyIdRef = useRef<string | null>(null);
+  const previousCompanyIdRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  const saveClaimRef = useRef(false);
+  const uploadFlowRef = useRef(createIndividualUploadFlow());
   const { token, companyId } = useAuth();
   const preprocessMutation = usePreprocessTicket();
   const uploadMutation = useUploadTicket();
   const updateMutation = useUpdateDashboardTicket();
 
+  companyIdRef.current = companyId;
   const isBusy = preprocessMutation.isPending || uploadMutation.isPending || updateMutation.isPending;
   const editValidationMessage = useMemo(() => getTicketEditValidationMessage(draft), [draft]);
   const hasEditChanges = useMemo(() => hasTicketEditChanges(editBaseline, draft), [editBaseline, draft]);
   const canSaveEdit = Boolean(draft && editBaseline && hasEditChanges && !editValidationMessage);
   const editing = Boolean(draft);
 
+  const replacePreview = useCallback((nextPreview: string | undefined) => {
+    const previousPreview = previewUrlRef.current;
+    if (previousPreview && previousPreview !== nextPreview) {
+      URL.revokeObjectURL(previousPreview);
+    }
+    previewUrlRef.current = nextPreview;
+    setPreviewUrl(nextPreview);
+  }, []);
+
+  const clearUploadState = useCallback(() => {
+    uploadFlowRef.current.cancel();
+    saveClaimRef.current = false;
+    replacePreview(undefined);
+    setState('idle');
+    setTicket(null);
+    setAnalysisRaw(null);
+    setEditBaseline(null);
+    setDraft(null);
+    setSelectedFile(null);
+    setHasPersistedTicket(false);
+    preprocessMutation.reset();
+    uploadMutation.reset();
+    updateMutation.reset();
+  }, [preprocessMutation, replacePreview, updateMutation, uploadMutation]);
+
   useEffect(() => {
+    const previousCompanyId = previousCompanyIdRef.current;
+    previousCompanyIdRef.current = companyId;
+    if (previousCompanyId === null || previousCompanyId === companyId) return;
+
+    const hadActiveUpload = Boolean(uploadFlowRef.current.getActive());
+    clearUploadState();
+    if (hadActiveUpload) {
+      toast.info('El análisis se canceló porque cambiaste de compañía.');
+    }
+  }, [clearUploadState, companyId]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const uploadFlow = uploadFlowRef.current;
     return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      mountedRef.current = false;
+      uploadFlow.cancel();
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = undefined;
+      }
     };
-  }, [previewUrl]);
+  }, []);
 
   const formatMXN = useCallback(
     (n: number) => `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
@@ -104,6 +160,16 @@ export default function UploadPage() {
     if (err instanceof Error) return err.message || fallback;
     return fallback;
   };
+
+  const isAbortLike = (err: unknown) => {
+    if (err instanceof DOMException && err.name === 'AbortError') return true;
+    return err instanceof Error && /aborted|aborterror|canceled|cancelled/i.test(err.message);
+  };
+
+  const isCurrentFlow = (context: ActiveUploadContext, signal?: AbortSignal) =>
+    mountedRef.current &&
+    !signal?.aborted &&
+    uploadFlowRef.current.isCurrent(context, companyIdRef.current);
 
   const validateSession = () => {
     if (!token) {
@@ -133,13 +199,25 @@ export default function UploadPage() {
     return true;
   };
 
-  const runPreprocess = async (file: File, imageUrlOverride?: string) => {
-    if (!validateSession()) return;
+  const runPreprocess = async (
+    file: File,
+    context: ActiveUploadContext,
+    imageUrlOverride?: string,
+  ) => {
+    const controller = uploadFlowRef.current.createController(context);
+    if (!controller || !isCurrentFlow(context, controller.signal)) return;
+
     setState('analyzing');
     try {
-      const response = await preprocessMutation.mutateAsync({ file });
+      const response = await preprocessMutation.mutateAsync({
+        companyId: context.companyId,
+        file,
+        signal: controller.signal,
+      });
+      if (!isCurrentFlow(context, controller.signal)) return;
+
       const mapped = mapPreprocessTicket(response.ticket, {
-        imageUrl: imageUrlOverride ?? previewUrl,
+        imageUrl: imageUrlOverride ?? previewUrlRef.current,
         fallbackId: `preview-${Date.now()}`,
         ocrText: response.ocrText,
       });
@@ -151,8 +229,11 @@ export default function UploadPage() {
       setState('done');
       toast.success('Ticket analizado correctamente.');
     } catch (err) {
+      if (!isCurrentFlow(context, controller.signal) || isAbortLike(err)) return;
       setState('uploaded');
       toast.error(extractError(err, 'No se pudo analizar el ticket.'));
+    } finally {
+      uploadFlowRef.current.releaseController(controller);
     }
   };
 
@@ -160,20 +241,22 @@ export default function UploadPage() {
     if (isBusy) return;
     if (!validateSession()) return;
     if (!validateFile(file)) return;
+    if (!companyId) return;
 
     const nextFile = file as File;
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    const context = uploadFlowRef.current.begin(companyId);
     const nextPreview = URL.createObjectURL(nextFile);
 
-    setPreviewUrl(nextPreview);
+    replacePreview(nextPreview);
     setSelectedFile(nextFile);
     setTicket(null);
     setAnalysisRaw(null);
     setEditBaseline(null);
     setDraft(null);
+    setHasPersistedTicket(false);
     setState('uploaded');
 
-    await runPreprocess(nextFile, nextPreview);
+    await runPreprocess(nextFile, context, nextPreview);
   };
 
   const handleDrag = useCallback(
@@ -222,36 +305,74 @@ export default function UploadPage() {
   };
 
   const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] ?? null;
+    const input = e.currentTarget;
+    const file = input.files?.[0] ?? null;
     await handleNewFile(file);
-    e.currentTarget.value = '';
+    input.value = '';
   };
 
   const handleSave = async () => {
-    if (isBusy) return;
+    if (isBusy || saveClaimRef.current || hasPersistedTicket) return;
     if (!validateSession()) return;
     if (!validateFile(selectedFile)) return;
 
+    const context = uploadFlowRef.current.getActive();
+    if (!context || context.companyId !== companyId) {
+      clearUploadState();
+      toast.info('El análisis se canceló porque cambiaste de compañía.');
+      return;
+    }
+
+    const controller = uploadFlowRef.current.createController(context);
+    if (!controller) return;
+
+    saveClaimRef.current = true;
+    const intendedDraft = editBaseline;
     try {
-      const response = await uploadMutation.mutateAsync({ file: selectedFile as File });
+      const response = await uploadMutation.mutateAsync({
+        companyId: context.companyId,
+        file: selectedFile as File,
+        signal: controller.signal,
+      });
+      if (!isCurrentFlow(context, controller.signal)) return;
+
       let persistedTicket = response.ticket;
       let mapped = mapBackendTicket(persistedTicket);
-      const intendedDraft = editBaseline;
+      let patchFailed = false;
 
       if (intendedDraft) {
         const result = buildTicketUpdatePayload(createDraftFromTicket(persistedTicket), intendedDraft);
         if (result.ok) {
-          persistedTicket = await updateMutation.mutateAsync({
-            ticketId: persistedTicket._id,
-            payload: result.payload,
-          });
-          mapped = mapBackendTicket(persistedTicket);
+          const payload = { ...result.payload };
+          delete payload.reviewStatus;
+
+          if (Object.keys(payload).length > 0) {
+            const patchController = uploadFlowRef.current.createController(context);
+            if (!patchController || !isCurrentFlow(context, patchController.signal)) return;
+
+            try {
+              persistedTicket = await updateMutation.mutateAsync({
+                companyId: context.companyId,
+                ticketId: persistedTicket._id,
+                payload,
+                signal: patchController.signal,
+              });
+              if (!isCurrentFlow(context, patchController.signal)) return;
+              mapped = mapBackendTicket(persistedTicket);
+            } catch (err) {
+              if (!isCurrentFlow(context, patchController.signal) || isAbortLike(err)) return;
+              patchFailed = true;
+            } finally {
+              uploadFlowRef.current.releaseController(patchController);
+            }
+          }
         }
       }
 
+      if (!isCurrentFlow(context, controller.signal)) return;
       const nextTicket = {
         ...mapped,
-        imagenUrl: mapped.imagenUrl ?? response.imageUrl ?? previewUrl,
+        imagenUrl: mapped.imagenUrl ?? response.imageUrl ?? previewUrlRef.current,
       };
       setTicket(nextTicket);
       setAnalysisRaw(persistedTicket);
@@ -259,9 +380,19 @@ export default function UploadPage() {
       setEditBaseline(nextBaseline);
       setDraft(null);
       setState('done');
-      toast.success('Ticket guardado correctamente.');
+      setHasPersistedTicket(true);
+      uploadFlowRef.current.complete(context);
+      if (patchFailed) {
+        toast.warning('El ticket se guardó, pero algunos cambios no pudieron aplicarse.');
+      } else {
+        toast.success('Ticket guardado correctamente.');
+      }
     } catch (err) {
+      if (!isCurrentFlow(context, controller.signal) || isAbortLike(err)) return;
       toast.error(extractError(err, 'No se pudo guardar el ticket.'));
+    } finally {
+      uploadFlowRef.current.releaseController(controller);
+      saveClaimRef.current = false;
     }
   };
 
@@ -270,20 +401,15 @@ export default function UploadPage() {
       toast.error('Primero selecciona una imagen.');
       return;
     }
-    await runPreprocess(selectedFile);
+    if (!validateSession() || !companyId) return;
+
+    const context = uploadFlowRef.current.begin(companyId);
+    setHasPersistedTicket(false);
+    await runPreprocess(selectedFile, context);
   };
 
   const reset = () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setState('idle');
-    setTicket(null);
-    setAnalysisRaw(null);
-    setEditBaseline(null);
-    setDraft(null);
-    setSelectedFile(null);
-    setPreviewUrl(undefined);
-    preprocessMutation.reset();
-    uploadMutation.reset();
+    clearUploadState();
   };
 
   const ticketFields = useMemo(
@@ -712,14 +838,16 @@ export default function UploadPage() {
                   <Button
                     className="flex-1 h-11 rounded-xl bg-gradient-primary text-primary-foreground hover:opacity-90"
                     onClick={handleSave}
-                    disabled={isBusy || editing}
+                    disabled={isBusy || editing || hasPersistedTicket}
                   >
                     {uploadMutation.isPending ? (
                       <Loader2 size={16} className="mr-2 animate-spin" />
+                    ) : hasPersistedTicket ? (
+                      <CheckCircle2 size={16} className="mr-2" />
                     ) : (
                       <Save size={16} className="mr-2" />
                     )}
-                    Guardar ticket
+                    {hasPersistedTicket ? 'Ticket guardado' : 'Guardar ticket'}
                   </Button>
                   <Button
                     variant="outline"

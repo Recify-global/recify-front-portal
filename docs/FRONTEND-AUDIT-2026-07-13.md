@@ -3,19 +3,19 @@
 ## Resumen ejecutivo
 
 - Rama: `KPIBranch`
-- Commit base: `bd1d946 update_portal_kpis`
-- Scope: frontend Recify (`Recify-Front`), incluyendo working tree local de Histórico/edición inline sin commit
+- Commit base de este fix: `78c3265 docs: add frontend security audit and refresh backend gaps`
+- Scope: frontend Recify (`Recify-Front`), incluyendo los fixes locales sin commit de `FRONT-P0-001` y `FRONT-P1-001`
 - Archivos revisados: auth, HTTP, guards, hooks, services, mappers, utils, History, Upload, batch, cámara, KPIs, edición inline, docs
 - P0: 1
-- P1: 8
+- P1: 9
 - P2: 10
 - P3: 4
-- Estado general: arquitectura multitenant sólida en Histórico y batch; el flujo individual de Upload y el logout dejan riesgos reales de mezcla o filtrado de datos. No se corrigió código en esta fase.
+- Estado general: el aislamiento del upload individual y la limpieza de sesión/caché fueron corregidos en código y pruebas automatizadas; ambos quedan pendientes de QA runtime.
 
 ## Arquitectura actual
 
-- Auth: `src/auth/storage.ts` + `src/hooks/use-auth.ts`; JWT y usuario en `localStorage`; `ProtectedRoute` exige token y `companyId`
-- HTTP: `src/api/http.ts` (`fetch` centralizado, Bearer, 401 limpia sesión); rutas en `src/api/endpoints.ts`
+- Auth: `src/auth/storage.ts` + `src/hooks/use-auth.ts`; JWT y usuario en `localStorage`; perfil persistido con validación mínima; `ProtectedRoute` exige perfil, token y `companyId`
+- HTTP: `src/api/http.ts` (`fetch` centralizado, Bearer, 401 usa cleanup idempotente de sesión; 403 conserva sesión); rutas en `src/api/endpoints.ts`
 - Queries: React Query con `companyId` en keys de tickets, detalle, daily-report y KPIs
 - Mutations: upload, PATCH daily-report, delete; History captura `originCompanyId`
 - Multitenancy: selector valida pertenencia; History limpia drawer/drafts; batch aborta/limpia al cambiar compañía
@@ -34,7 +34,8 @@ UI → hook → service → apiRequest → endpoints → mapper → React Query 
 ### FRONT-P0-001 — Upload individual puede persistir trabajo de compañía A bajo compañía B
 
 - Severidad: P0
-- Estado: Abierto
+- Estado anterior: Abierto
+- Estado: 🔎 Corregido en código; pendiente QA runtime
 - Área: Multitenancy / Upload
 - Evidencia: `UploadPage` conserva `ticket`, `selectedFile`, `previewUrl` y drafts locales sin reset al cambiar `companyId`. `useUploadTicket` usa el `companyId` activo al momento del `mutate`. Batch sí limpia cola al cambiar compañía; Upload no.
 - Archivo: `src/pages/UploadPage.tsx`, `src/hooks/use-upload-ticket.ts`
@@ -42,13 +43,20 @@ UI → hook → service → apiRequest → endpoints → mapper → React Query 
 - Riesgo: ticket/imagen de A se escribe en B
 - Escenario reproducible: usuario con dos compañías; analizar en A; cambiar selector; guardar sin reanalizar
 - Fix mínimo recomendado: reset + abort al cambiar compañía; capturar `originCompanyId` al seleccionar archivo; bloquear save si el origen ≠ compañía activa
+- Fix aplicado: contexto `{ companyId, generation }` capturado al aceptar el archivo; `AbortController` por operación; guards stale; limpieza total al cambiar compañía; claim síncrono anti doble click; compañía de origen explícita en preprocess, upload, PATCH e invalidación
+- Archivos: `src/pages/UploadPage.tsx`, `src/hooks/use-upload-ticket.ts`, `src/hooks/use-tickets.ts`, `src/services/dashboard.service.ts`, `src/utils/individual-upload-flow.ts`
+- Tests: 20 pruebas nuevas en `individual-upload-flow.test.ts`, `upload-ticket-hooks.test.tsx` y `upload-page-isolation.test.tsx`; suite completa: 64/64
+- QA: no ejecutado en navegador conectado; pendientes los casos Network A→B
+- Estado final: 🔎 Corregido en código; pendiente QA runtime
+- Fecha: 13 de julio de 2026
 - Backend requerido: no (mitigación frontend obligatoria; backend ya debe validar membership)
 - QA requerido: cambio de compañía durante preprocess y durante save
 
 ### FRONT-P1-001 — React Query no se limpia en logout
 
 - Severidad: P1
-- Estado: Abierto
+- Estado anterior: Abierto
+- Estado: 🔎 Corregido en código; pendiente QA runtime
 - Área: Sesión / caché
 - Evidencia: `logout` solo llama `clearAuthSession()` y navega; no hay `queryClient.clear()` ni `removeQueries` en el repo. `QueryClient` es singleton en `App.tsx`.
 - Archivo: `src/hooks/use-auth.ts`, `src/App.tsx`
@@ -56,13 +64,20 @@ UI → hook → service → apiRequest → endpoints → mapper → React Query 
 - Riesgo: flash de tickets/KPIs del usuario o compañía anterior
 - Escenario reproducible: ver Histórico, logout, login con otra cuenta que comparta compañía o navegue rápido a Histórico
 - Fix mínimo recomendado: `queryClient.clear()` (y cancelar queries) en logout; opcionalmente al login exitoso
+- Causa: el QueryClient real no estaba conectado al ciclo de sesión; el 401 limpiaba únicamente storage y `getStoredUser` permitía una sesión parcial con perfil inválido
+- Fix: `SessionCacheBoundary` registra la instancia del provider; logout manual y 401 comparten un coordinador idempotente que cancela queries, limpia QueryCache/MutationCache, elimina las tres keys auth y luego navega con `replace`; 403 no termina sesión; callbacks tardíos de upload, batch e Histórico no muestran toasts ni invalidan durante el cierre
+- Archivos: `src/App.tsx`, `src/api/http.ts`, `src/auth/SessionCacheBoundary.tsx`, `src/auth/session-cleanup.ts`, `src/auth/storage.ts`, `src/guards/ProtectedRoute.tsx`, `src/hooks/use-auth.ts`, `src/hooks/use-tickets.ts`, `src/hooks/use-upload-ticket.ts`, `src/components/recify/BatchUploadDialog.tsx`, `src/pages/HistoryPage.tsx`
+- Tests: 13 pruebas nuevas de cleanup, storage, logout, 401/403, response tardía, segundo usuario, login, cambio de compañía y guard; suite completa: 77/77
+- QA: no ejecutado en navegador conectado; pendientes logout con drawer/query/mutation, Back, segundo usuario y Network 401/403
+- Estado final: 🔎 Corregido en código; pendiente QA runtime
+- Fecha: 13 de julio de 2026
 - Backend requerido: no
 - QA requerido: logout/login en misma pestaña con datos cacheados
 
 ### FRONT-P1-002 — Respuesta tardía de preprocess individual sin guard de compañía
 
 - Severidad: P1
-- Estado: Abierto
+- Estado: 🔎 Mitigado dentro de FRONT-P0-001; pendiente QA runtime
 - Área: Asincronía / Upload
 - Evidencia: `runPreprocess` aplica `setTicket` / `setState('done')` sin `AbortController`, sin `companyIdRef` y sin chequeo stale. El servicio sí acepta `signal`, pero Upload no lo pasa.
 - Archivo: `src/pages/UploadPage.tsx`
@@ -131,7 +146,7 @@ UI → hook → service → apiRequest → endpoints → mapper → React Query 
 ### FRONT-P1-008 — Upload post-save PATCH sin `companyId` explícito
 
 - Severidad: P1
-- Estado: Abierto
+- Estado: 🔎 Mitigado dentro de FRONT-P0-001; pendiente QA runtime
 - Área: Mutaciones / Upload
 - Evidencia: `updateMutation.mutateAsync({ ticketId, payload })` omite `companyId` que ahora exige `useUpdateDashboardTicket` (working tree/History). La corrección de campos post-upload puede fallar o comportarse de forma inconsistente.
 - Archivo: `src/pages/UploadPage.tsx` (handleSave)
@@ -324,7 +339,6 @@ Ver FRONT-P1-005.
 ## Deuda arquitectónica
 
 - Dual fetch tickets + daily-report para imágenes
-- Upload individual sin el mismo hardening que batch
 - Invalidaciones inconsistentes entre upload/batch/history
 - Documento backend desactualizado respecto a `/dashboard/kpis` (corregido en esta auditoría documental)
 - Helpers financieros (`resolveMostUsedPaymentMethod`) parcialmente no usados por el path KPI actual
@@ -333,15 +347,15 @@ Ver FRONT-P1-005.
 
 | ID | Severidad | Área | Resumen | Backend | Complejidad | Estado |
 |---|---|---|---|---:|---:|---|
-| FRONT-P0-001 | P0 | Multitenant | Upload A→B write | No | Media | Abierto |
-| FRONT-P1-001 | P1 | Sesión | Cache tras logout | No | Baja | Abierto |
-| FRONT-P1-002 | P1 | Upload | Preprocess stale | No | Media | Abierto |
+| FRONT-P0-001 | P0 | Multitenant | Upload A→B write | No | Media | Corregido; pendiente QA |
+| FRONT-P1-001 | P1 | Sesión | Cache tras logout | No | Baja | Corregido; pendiente QA |
+| FRONT-P1-002 | P1 | Upload | Preprocess stale | No | Media | Corregido; pendiente QA |
 | FRONT-P1-003 | P1 | Auth | JWT en localStorage | Parcial | Alta | Abierto |
 | FRONT-P1-004 | P1 | Imágenes | `//` URL bypass | No | Baja | Abierto |
 | FRONT-P1-005 | P1 | Delete | Sin confirmación | No | Baja | Abierto |
 | FRONT-P1-006 | P1 | Errores | Toast crudo | No | Baja | Abierto |
 | FRONT-P1-007 | P1 | Cache | KPIs stale | No | Baja | Abierto |
-| FRONT-P1-008 | P1 | Upload | PATCH sin companyId | No | Baja | Abierto |
+| FRONT-P1-008 | P1 | Upload | PATCH sin companyId | No | Baja | Corregido; pendiente QA |
 | FRONT-P1-009 | P1 | KPIs | Incluye duplicate/failed | Sí | Media | Abierto |
 | FRONT-P2-001 | P2 | Auth | companyId DevTools | Sí ACL | Baja | Pendiente verificación |
 | FRONT-P2-002 | P2 | Upload | Invalidación stale company | No | Baja | Abierto |
@@ -362,7 +376,7 @@ Ver FRONT-P1-005.
 ## Orden recomendado de corrección
 
 1. FRONT-P0-001 (+ FRONT-P1-002, FRONT-P1-008 en el mismo ticket de Upload)
-2. FRONT-P1-001 (logout cache)
+2. QA runtime de FRONT-P0-001 y FRONT-P1-001
 3. FRONT-P1-004 (URL `//`)
 4. FRONT-P1-005 (confirm delete)
 5. FRONT-P1-007 + FRONT-P2-008 (invalidaciones)
@@ -381,16 +395,18 @@ Ver FRONT-P1-005.
 
 ## Checks sugeridos
 
-- TypeScript: no ejecutado en esta fase (sin cambios de código)
-- ESLint: no ejecutado
-- Tests: no ejecutados
-- Build: no ejecutado
-- QA manual: no ejecutado; hallazgos basados en revisión estática + lectura de contratos backend locales
+- TypeScript: `npx tsc --noEmit` aprobado
+- ESLint dirigido: aprobado sin errores ni warnings
+- ESLint global: falla por 3 errores preexistentes fuera del scope (`command.tsx`, `textarea.tsx`, `tailwind.config.ts`)
+- Tests: `npm run test` aprobado, 77/77
+- Build: `npm run build` aprobado; warnings preexistentes de Browserslist/chunk
+- QA manual: no ejecutado; FRONT-P0-001 y FRONT-P1-001 quedan pendientes de verificación en navegador conectado
 
 ## Limitaciones de la auditoría
 
-- Casos no probados: reproducción browser de A→B upload, logout flash, delete accidental, Network real
+- Casos no probados: QA browser/Network de A→B upload, logout/segundo usuario/401/403 y delete accidental
 - Backend inspeccionado en lectura local (`recify-back-api`) para contrastar contratos; no se modificó
 - Runtime/navegadores: no probados en esta fase
 - `npm audit` no implica explotabilidad confirmada en Recify
-- Working tree incluye features de edición inline aún sin commit; la auditoría las considera parte del frontend actual
+- FRONT-P0-001 cuenta con cobertura automatizada, pero no se declara cerrado sin QA runtime A→B
+- FRONT-P1-001 cuenta con cobertura automatizada, pero no se declara cerrado sin QA runtime de logout y cambio de usuario
