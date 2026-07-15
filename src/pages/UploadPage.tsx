@@ -7,6 +7,7 @@ import { TicketNotes } from '@/components/recify/TicketNotes';
 import { CameraCaptureDialog } from '@/components/recify/CameraCaptureDialog';
 import { BatchUploadDialog } from '@/components/recify/BatchUploadDialog';
 import { TicketScanAnimation } from '@/components/recify/TicketScanAnimation';
+import { InvoiceUploadResult } from '@/components/recify/InvoiceUploadResult';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/hooks/use-auth';
 import { usePreprocessTicket, useUploadTicket } from '@/hooks/use-upload-ticket';
+import { useUploadInvoice } from '@/hooks/use-invoices';
 import { useUpdateDashboardTicket } from '@/hooks/use-tickets';
 import { mapBackendTicket, mapPreprocessTicket } from '@/mappers/ticket.mapper';
 import {
@@ -33,12 +35,19 @@ import type {
   BackendTicketType,
   UiTicket,
 } from '@/types/ticket';
-import { Upload, Camera, FileImage, Loader2, CheckCircle2, Edit3, Save, Plus, Receipt, XCircle, Layers } from 'lucide-react';
+import type { UploadInvoiceResponse } from '@/types/invoice';
+import { Upload, Camera, FileImage, FileText, Loader2, CheckCircle2, Edit3, Save, Plus, Receipt, XCircle, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import { ApiRequestError } from '@/api/http';
+import {
+  createIndividualUploadFlow,
+  type ActiveUploadContext,
+} from '@/utils/individual-upload-flow';
 
 type UploadState = 'idle' | 'uploaded' | 'analyzing' | 'done';
+type UploadMode = 'ticket' | 'invoice';
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const PDF_MIME_TYPE = 'application/pdf';
 const MAX_SIZE_BYTES = 10 * 1024 * 1024;
 
 const PAYMENT_OPTIONS: { value: BackendPaymentMethod; label: string }[] = [
@@ -67,6 +76,8 @@ const TYPE_OPTIONS: { value: BackendTicketType; label: string }[] = [
 
 export default function UploadPage() {
   const [state, setState] = useState<UploadState>('idle');
+  const [uploadMode, setUploadMode] = useState<UploadMode>('ticket');
+  const [invoiceResult, setInvoiceResult] = useState<UploadInvoiceResponse | null>(null);
   const [ticket, setTicket] = useState<UiTicket | null>(null);
   const [analysisRaw, setAnalysisRaw] = useState<unknown>(null);
   const [editBaseline, setEditBaseline] = useState<TicketEditDraft | null>(null);
@@ -74,25 +85,86 @@ export default function UploadPage() {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | undefined>(undefined);
+  const [hasPersistedTicket, setHasPersistedTicket] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const previewUrlRef = useRef<string | undefined>(undefined);
+  const companyIdRef = useRef<string | null>(null);
+  const previousCompanyIdRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  const saveClaimRef = useRef(false);
+  const uploadFlowRef = useRef(createIndividualUploadFlow());
   const { token, companyId } = useAuth();
   const preprocessMutation = usePreprocessTicket();
   const uploadMutation = useUploadTicket();
   const updateMutation = useUpdateDashboardTicket();
+  const invoiceMutation = useUploadInvoice();
 
+<<<<<<< HEAD
+  const isBusy =
+    preprocessMutation.isPending ||
+    uploadMutation.isPending ||
+    updateMutation.isPending ||
+    invoiceMutation.isPending;
+=======
+  companyIdRef.current = companyId;
   const isBusy = preprocessMutation.isPending || uploadMutation.isPending || updateMutation.isPending;
+>>>>>>> f8e33be7b9d6cedd5387f44c8ca5c56a2637c3bf
   const editValidationMessage = useMemo(() => getTicketEditValidationMessage(draft), [draft]);
   const hasEditChanges = useMemo(() => hasTicketEditChanges(editBaseline, draft), [editBaseline, draft]);
   const canSaveEdit = Boolean(draft && editBaseline && hasEditChanges && !editValidationMessage);
   const editing = Boolean(draft);
 
+  const replacePreview = useCallback((nextPreview: string | undefined) => {
+    const previousPreview = previewUrlRef.current;
+    if (previousPreview && previousPreview !== nextPreview) {
+      URL.revokeObjectURL(previousPreview);
+    }
+    previewUrlRef.current = nextPreview;
+    setPreviewUrl(nextPreview);
+  }, []);
+
+  const clearUploadState = useCallback(() => {
+    uploadFlowRef.current.cancel();
+    saveClaimRef.current = false;
+    replacePreview(undefined);
+    setState('idle');
+    setTicket(null);
+    setAnalysisRaw(null);
+    setEditBaseline(null);
+    setDraft(null);
+    setSelectedFile(null);
+    setHasPersistedTicket(false);
+    preprocessMutation.reset();
+    uploadMutation.reset();
+    updateMutation.reset();
+  }, [preprocessMutation, replacePreview, updateMutation, uploadMutation]);
+
   useEffect(() => {
+    const previousCompanyId = previousCompanyIdRef.current;
+    previousCompanyIdRef.current = companyId;
+    if (previousCompanyId === null || previousCompanyId === companyId) return;
+
+    const hadActiveUpload = Boolean(uploadFlowRef.current.getActive());
+    clearUploadState();
+    if (hadActiveUpload) {
+      toast.info('El análisis se canceló porque cambiaste de compañía.');
+    }
+  }, [clearUploadState, companyId]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const uploadFlow = uploadFlowRef.current;
     return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      mountedRef.current = false;
+      uploadFlow.cancel();
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = undefined;
+      }
     };
-  }, [previewUrl]);
+  }, []);
 
   const formatMXN = useCallback(
     (n: number) => `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
@@ -104,6 +176,16 @@ export default function UploadPage() {
     if (err instanceof Error) return err.message || fallback;
     return fallback;
   };
+
+  const isAbortLike = (err: unknown) => {
+    if (err instanceof DOMException && err.name === 'AbortError') return true;
+    return err instanceof Error && /aborted|aborterror|canceled|cancelled/i.test(err.message);
+  };
+
+  const isCurrentFlow = (context: ActiveUploadContext, signal?: AbortSignal) =>
+    mountedRef.current &&
+    !signal?.aborted &&
+    uploadFlowRef.current.isCurrent(context, companyIdRef.current);
 
   const validateSession = () => {
     if (!token) {
@@ -123,7 +205,7 @@ export default function UploadPage() {
       return false;
     }
     if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-      toast.error('Formato no permitido. Usa JPG, PNG, WEBP o GIF.');
+      toast.error('Formato no permitido. Usa JPG, PNG, WEBP o GIF (o PDF para facturas).');
       return false;
     }
     if (file.size > MAX_SIZE_BYTES) {
@@ -133,13 +215,79 @@ export default function UploadPage() {
     return true;
   };
 
+<<<<<<< HEAD
+  const extractInvoiceError = (err: unknown): string => {
+    if (err instanceof ApiRequestError) {
+      switch (err.status) {
+        case 400:
+          return err.message || 'El archivo no es un PDF válido.';
+        case 409:
+          return 'Esta factura ya existe: hay otra con el mismo folio fiscal.';
+        case 422:
+          return 'No pudimos leer los datos del CFDI. Intenta con un PDF legible de una página.';
+        case 429:
+          return 'Alcanzaste el límite de subidas. Espera unos minutos e intenta de nuevo.';
+        default:
+          return err.message || 'No se pudo procesar la factura.';
+      }
+    }
+    if (err instanceof Error) return err.message || 'No se pudo procesar la factura.';
+    return 'No se pudo procesar la factura.';
+  };
+
+  const runInvoiceUpload = async (file: File) => {
+    if (!validateSession()) return;
+    if (file.size > MAX_SIZE_BYTES) {
+      toast.error('El archivo supera el máximo de 10 MB.');
+      return;
+    }
+
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(undefined);
+    setSelectedFile(file);
+    setUploadMode('invoice');
+    setInvoiceResult(null);
+    setTicket(null);
+    setAnalysisRaw(null);
+    setEditBaseline(null);
+    setDraft(null);
+    setState('analyzing');
+
+    try {
+      const response = await invoiceMutation.mutateAsync({ file });
+      setInvoiceResult(response);
+      setState('done');
+      toast.success('Factura procesada correctamente.');
+    } catch (err) {
+      setState('idle');
+      setSelectedFile(null);
+      toast.error(extractInvoiceError(err));
+    }
+  };
+
   const runPreprocess = async (file: File, imageUrlOverride?: string) => {
     if (!validateSession()) return;
+=======
+  const runPreprocess = async (
+    file: File,
+    context: ActiveUploadContext,
+    imageUrlOverride?: string,
+  ) => {
+    const controller = uploadFlowRef.current.createController(context);
+    if (!controller || !isCurrentFlow(context, controller.signal)) return;
+
+>>>>>>> f8e33be7b9d6cedd5387f44c8ca5c56a2637c3bf
     setState('analyzing');
     try {
-      const response = await preprocessMutation.mutateAsync({ file });
+      const response = await preprocessMutation.mutateAsync({
+        companyId: context.companyId,
+        file,
+        signal: controller.signal,
+      });
+      if (!isCurrentFlow(context, controller.signal)) return;
+
       const mapped = mapPreprocessTicket(response.ticket, {
-        imageUrl: imageUrlOverride ?? previewUrl,
+        imageUrl: imageUrlOverride ?? previewUrlRef.current,
         fallbackId: `preview-${Date.now()}`,
         ocrText: response.ocrText,
       });
@@ -151,29 +299,43 @@ export default function UploadPage() {
       setState('done');
       toast.success('Ticket analizado correctamente.');
     } catch (err) {
+      if (!isCurrentFlow(context, controller.signal) || isAbortLike(err)) return;
       setState('uploaded');
       toast.error(extractError(err, 'No se pudo analizar el ticket.'));
+    } finally {
+      uploadFlowRef.current.releaseController(controller);
     }
   };
 
   const handleNewFile = async (file: File | null) => {
     if (isBusy) return;
     if (!validateSession()) return;
+
+    // Los PDF son facturas CFDI: van directo al flujo de facturas.
+    if (file && file.type === PDF_MIME_TYPE) {
+      await runInvoiceUpload(file);
+      return;
+    }
+
     if (!validateFile(file)) return;
+    if (!companyId) return;
 
     const nextFile = file as File;
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    const context = uploadFlowRef.current.begin(companyId);
     const nextPreview = URL.createObjectURL(nextFile);
 
-    setPreviewUrl(nextPreview);
+    replacePreview(nextPreview);
     setSelectedFile(nextFile);
+    setUploadMode('ticket');
+    setInvoiceResult(null);
     setTicket(null);
     setAnalysisRaw(null);
     setEditBaseline(null);
     setDraft(null);
+    setHasPersistedTicket(false);
     setState('uploaded');
 
-    await runPreprocess(nextFile, nextPreview);
+    await runPreprocess(nextFile, context, nextPreview);
   };
 
   const handleDrag = useCallback(
@@ -222,36 +384,74 @@ export default function UploadPage() {
   };
 
   const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] ?? null;
+    const input = e.currentTarget;
+    const file = input.files?.[0] ?? null;
     await handleNewFile(file);
-    e.currentTarget.value = '';
+    input.value = '';
   };
 
   const handleSave = async () => {
-    if (isBusy) return;
+    if (isBusy || saveClaimRef.current || hasPersistedTicket) return;
     if (!validateSession()) return;
     if (!validateFile(selectedFile)) return;
 
+    const context = uploadFlowRef.current.getActive();
+    if (!context || context.companyId !== companyId) {
+      clearUploadState();
+      toast.info('El análisis se canceló porque cambiaste de compañía.');
+      return;
+    }
+
+    const controller = uploadFlowRef.current.createController(context);
+    if (!controller) return;
+
+    saveClaimRef.current = true;
+    const intendedDraft = editBaseline;
     try {
-      const response = await uploadMutation.mutateAsync({ file: selectedFile as File });
+      const response = await uploadMutation.mutateAsync({
+        companyId: context.companyId,
+        file: selectedFile as File,
+        signal: controller.signal,
+      });
+      if (!isCurrentFlow(context, controller.signal)) return;
+
       let persistedTicket = response.ticket;
       let mapped = mapBackendTicket(persistedTicket);
-      const intendedDraft = editBaseline;
+      let patchFailed = false;
 
       if (intendedDraft) {
         const result = buildTicketUpdatePayload(createDraftFromTicket(persistedTicket), intendedDraft);
         if (result.ok) {
-          persistedTicket = await updateMutation.mutateAsync({
-            ticketId: persistedTicket._id,
-            payload: result.payload,
-          });
-          mapped = mapBackendTicket(persistedTicket);
+          const payload = { ...result.payload };
+          delete payload.reviewStatus;
+
+          if (Object.keys(payload).length > 0) {
+            const patchController = uploadFlowRef.current.createController(context);
+            if (!patchController || !isCurrentFlow(context, patchController.signal)) return;
+
+            try {
+              persistedTicket = await updateMutation.mutateAsync({
+                companyId: context.companyId,
+                ticketId: persistedTicket._id,
+                payload,
+                signal: patchController.signal,
+              });
+              if (!isCurrentFlow(context, patchController.signal)) return;
+              mapped = mapBackendTicket(persistedTicket);
+            } catch (err) {
+              if (!isCurrentFlow(context, patchController.signal) || isAbortLike(err)) return;
+              patchFailed = true;
+            } finally {
+              uploadFlowRef.current.releaseController(patchController);
+            }
+          }
         }
       }
 
+      if (!isCurrentFlow(context, controller.signal)) return;
       const nextTicket = {
         ...mapped,
-        imagenUrl: mapped.imagenUrl ?? response.imageUrl ?? previewUrl,
+        imagenUrl: mapped.imagenUrl ?? response.imageUrl ?? previewUrlRef.current,
       };
       setTicket(nextTicket);
       setAnalysisRaw(persistedTicket);
@@ -259,9 +459,25 @@ export default function UploadPage() {
       setEditBaseline(nextBaseline);
       setDraft(null);
       setState('done');
+<<<<<<< HEAD
       toast.success('Ticket guardado correctamente.');
+      if (response.matchedInvoice) {
+        toast.info('Este ticket quedó vinculado automáticamente a una factura.');
+=======
+      setHasPersistedTicket(true);
+      uploadFlowRef.current.complete(context);
+      if (patchFailed) {
+        toast.warning('El ticket se guardó, pero algunos cambios no pudieron aplicarse.');
+      } else {
+        toast.success('Ticket guardado correctamente.');
+>>>>>>> f8e33be7b9d6cedd5387f44c8ca5c56a2637c3bf
+      }
     } catch (err) {
+      if (!isCurrentFlow(context, controller.signal) || isAbortLike(err)) return;
       toast.error(extractError(err, 'No se pudo guardar el ticket.'));
+    } finally {
+      uploadFlowRef.current.releaseController(controller);
+      saveClaimRef.current = false;
     }
   };
 
@@ -270,12 +486,19 @@ export default function UploadPage() {
       toast.error('Primero selecciona una imagen.');
       return;
     }
-    await runPreprocess(selectedFile);
+    if (!validateSession() || !companyId) return;
+
+    const context = uploadFlowRef.current.begin(companyId);
+    setHasPersistedTicket(false);
+    await runPreprocess(selectedFile, context);
   };
 
   const reset = () => {
+<<<<<<< HEAD
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setState('idle');
+    setUploadMode('ticket');
+    setInvoiceResult(null);
     setTicket(null);
     setAnalysisRaw(null);
     setEditBaseline(null);
@@ -284,6 +507,10 @@ export default function UploadPage() {
     setPreviewUrl(undefined);
     preprocessMutation.reset();
     uploadMutation.reset();
+    invoiceMutation.reset();
+=======
+    clearUploadState();
+>>>>>>> f8e33be7b9d6cedd5387f44c8ca5c56a2637c3bf
   };
 
   const ticketFields = useMemo(
@@ -359,9 +586,9 @@ export default function UploadPage() {
     <AppLayout>
       <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Subir ticket</h1>
+          <h1 className="text-2xl font-bold text-foreground">Subir ticket o factura</h1>
           <p className="text-muted-foreground mt-1">
-            Captura o sube una imagen de tu ticket para analizarlo
+            Captura la foto de un ticket o sube el PDF de una factura (CFDI) para analizarlos
           </p>
         </div>
 
@@ -371,7 +598,7 @@ export default function UploadPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp,image/gif"
+              accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
               className="hidden"
               onChange={handleFileInputChange}
             />
@@ -397,18 +624,24 @@ export default function UploadPage() {
                     <Upload size={32} />
                   </div>
                   <div>
-                    <p className="font-medium text-foreground">Arrastra tu ticket aquí</p>
+                    <p className="font-medium text-foreground">Arrastra tu ticket o factura aquí</p>
                     <p className="text-sm text-muted-foreground mt-1">
                       o haz clic para seleccionar archivo
                     </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">PNG, JPG, WEBP o GIF hasta 10 MB</p>
+                  <p className="text-xs text-muted-foreground">
+                    Ticket: PNG, JPG, WEBP o GIF · Factura: PDF de una página — hasta 10 MB
+                  </p>
                 </div>
               )}
 
               {state === 'uploaded' && (
                 <div className="text-center space-y-3 animate-fade-in">
-                  <FileImage size={48} className="text-primary mx-auto" />
+                  {uploadMode === 'invoice' ? (
+                    <FileText size={48} className="text-primary mx-auto" />
+                  ) : (
+                    <FileImage size={48} className="text-primary mx-auto" />
+                  )}
                   <p className="text-sm font-medium text-foreground">
                     {selectedFile?.name ?? 'ticket.jpg'}
                   </p>
@@ -419,7 +652,9 @@ export default function UploadPage() {
               {state === 'analyzing' && (
                 <div className="animate-fade-in text-center space-y-4">
                   <TicketScanAnimation />
-                  <p className="font-medium text-foreground animate-pulse-soft">Analizando…</p>
+                  <p className="font-medium text-foreground animate-pulse-soft">
+                    {uploadMode === 'invoice' ? 'Procesando factura…' : 'Analizando…'}
+                  </p>
                 </div>
               )}
 
@@ -428,7 +663,11 @@ export default function UploadPage() {
                   <div className="p-3 rounded-full bg-accent text-success mx-auto w-fit">
                     <CheckCircle2 size={32} />
                   </div>
-                  <p className="font-medium text-foreground">Ticket analizado correctamente</p>
+                  <p className="font-medium text-foreground">
+                    {uploadMode === 'invoice'
+                      ? 'Factura procesada correctamente'
+                      : 'Ticket analizado correctamente'}
+                  </p>
                   <p className="text-sm text-muted-foreground">Información extraída con éxito</p>
                 </div>
               )}
@@ -473,7 +712,7 @@ export default function UploadPage() {
 
             <BatchUploadDialog open={batchOpen} onOpenChange={setBatchOpen} />
 
-            {state === 'done' && (
+            {state === 'done' && uploadMode === 'ticket' && (
               <Button
                 onClick={handleReanalyze}
                 className="w-full h-11 rounded-xl bg-gradient-primary text-primary-foreground hover:opacity-90"
@@ -712,14 +951,16 @@ export default function UploadPage() {
                   <Button
                     className="flex-1 h-11 rounded-xl bg-gradient-primary text-primary-foreground hover:opacity-90"
                     onClick={handleSave}
-                    disabled={isBusy || editing}
+                    disabled={isBusy || editing || hasPersistedTicket}
                   >
                     {uploadMutation.isPending ? (
                       <Loader2 size={16} className="mr-2 animate-spin" />
+                    ) : hasPersistedTicket ? (
+                      <CheckCircle2 size={16} className="mr-2" />
                     ) : (
                       <Save size={16} className="mr-2" />
                     )}
-                    Guardar ticket
+                    {hasPersistedTicket ? 'Ticket guardado' : 'Guardar ticket'}
                   </Button>
                   <Button
                     variant="outline"
@@ -733,15 +974,29 @@ export default function UploadPage() {
               </>
             )}
 
+            {state === 'done' && uploadMode === 'invoice' && invoiceResult && (
+              <>
+                <InvoiceUploadResult key={invoiceResult.invoice._id} response={invoiceResult} />
+                <Button
+                  variant="outline"
+                  className="w-full h-11 rounded-xl"
+                  onClick={reset}
+                  disabled={isBusy}
+                >
+                  <Plus size={16} className="mr-2" /> Subir otro archivo
+                </Button>
+              </>
+            )}
+
             {state === 'idle' && (
               <div className="bg-card rounded-2xl border border-border/50 p-8 shadow-elegant flex flex-col items-center justify-center min-h-[340px] text-center">
                 <div className="p-4 rounded-2xl bg-accent text-accent-foreground mb-4">
                   <Receipt size={32} />
                 </div>
-                <h3 className="font-semibold text-foreground mb-1">Sin ticket cargado</h3>
+                <h3 className="font-semibold text-foreground mb-1">Sin archivo cargado</h3>
                 <p className="text-sm text-muted-foreground max-w-xs">
-                  Sube una foto o imagen de un ticket para que nuestra IA extraiga la información
-                  automáticamente
+                  Sube la foto de un ticket o el PDF de una factura para que nuestra IA extraiga
+                  la información automáticamente
                 </p>
               </div>
             )}

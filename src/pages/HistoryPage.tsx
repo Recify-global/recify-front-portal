@@ -45,6 +45,7 @@ import {
 } from '@/hooks/use-history-table-editing';
 import { useFinancialKpis } from '@/hooks/use-financial-kpis';
 import { useAuth } from '@/hooks/use-auth';
+import { isAuthSessionClosing } from '@/auth/session-cleanup';
 import { deleteTicket } from '@/services/tickets.service';
 import {
   detectActivePreset,
@@ -119,7 +120,9 @@ export default function HistoryPage() {
       setLastKnownImageUrl(null);
       if (previousCompanyIdRef.current && isTableEditing) {
         cancelEditing();
-        toast.info('La edición se canceló al cambiar de compañía.');
+        if (companyId && !isAuthSessionClosing()) {
+          toast.info('La edición se canceló al cambiar de compañía.');
+        }
       }
     }
     previousCompanyIdRef.current = companyId;
@@ -313,6 +316,7 @@ export default function HistoryPage() {
       setDeletingTicketId(ticketId);
     },
     onSuccess: async (_data, { originCompanyId }) => {
+      if (isAuthSessionClosing()) return;
       toast.success('Ticket eliminado.');
       setSelectedTicket(null);
       await Promise.all([
@@ -323,9 +327,11 @@ export default function HistoryPage() {
       ]);
     },
     onError: () => {
+      if (isAuthSessionClosing()) return;
       toast.error('No fue posible eliminar el ticket.');
     },
     onSettled: () => {
+      if (isAuthSessionClosing()) return;
       setDeletingTicketId(null);
     },
   });
@@ -408,7 +414,7 @@ export default function HistoryPage() {
         },
       });
 
-      if (companyIdRef.current !== originCompanyId) return;
+      if (isAuthSessionClosing() || companyIdRef.current !== originCompanyId) return;
       tableEditing.applySaveResults(savedIds, errors);
       if (Object.keys(errors).length > 0) {
         toast.error('Algunos tickets no pudieron guardarse. Revisa las filas marcadas.');

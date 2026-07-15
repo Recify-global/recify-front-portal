@@ -27,6 +27,7 @@ import {
   type BatchItemStatus,
 } from '@/hooks/use-batch-upload';
 import { cn } from '@/lib/utils';
+import { isAuthSessionClosing } from '@/auth/session-cleanup';
 
 interface BatchUploadDialogProps {
   open: boolean;
@@ -119,6 +120,7 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
     setSavingBusy(true);
     try {
       const result = await saveAll();
+      if (isAuthSessionClosing()) return;
       result.persistedCompanyIds.forEach((id) => invalidateCompanyTickets(id));
       if (result.ok > 0) {
         toast.success(`${result.ok} ticket(s) guardado(s).`);
@@ -127,7 +129,7 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
         toast.error(`${result.failed} ticket(s) no se pudieron guardar.`);
       }
     } finally {
-      setSavingBusy(false);
+      if (!isAuthSessionClosing()) setSavingBusy(false);
     }
   };
 
@@ -136,6 +138,7 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
     setSavingBusy(true);
     try {
       const result = await saveItem(id);
+      if (isAuthSessionClosing()) return;
       if (result.persisted) {
         invalidateCompanyTickets(result.companyId);
         toast.success(
@@ -147,7 +150,7 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
         toast.error('No se pudo guardar el ticket.');
       }
     } finally {
-      setSavingBusy(false);
+      if (!isAuthSessionClosing()) setSavingBusy(false);
     }
   };
 
