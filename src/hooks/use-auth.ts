@@ -1,15 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { loginRequest, registerRequest } from '@/services/auth.service';
 import type {
   AuthResponse,
-  AuthUser,
   LoginRequest,
   RegisterRequest,
 } from '@/types/auth';
 import {
-  clearAuthSession,
   getStoredCompanyId,
   getStoredToken,
   getStoredUser,
@@ -17,24 +15,40 @@ import {
   setAuthSession,
   subscribeAuthChanges,
 } from '@/auth/storage';
+import {
+  markAuthSessionActive,
+  terminateAuthSession,
+} from '@/auth/session-cleanup';
 
 export { getStoredToken, getStoredUser, getStoredCompanyId } from '@/auth/storage';
 
 function persistSession(data: AuthResponse): void {
   setAuthSession({ token: data.token, user: data.user });
+  markAuthSessionActive();
+}
+
+function readSessionSnapshot() {
+  const user = getStoredUser();
+  if (!user) {
+    return { token: null, user: null, companyId: null };
+  }
+  return {
+    token: getStoredToken(),
+    user,
+    companyId: getStoredCompanyId(),
+  };
 }
 
 export function useAuth() {
-  const [token, setToken] = useState<string | null>(() => getStoredToken());
-  const [user, setUser] = useState<AuthUser | null>(() => getStoredUser());
-  const [companyId, setCompanyId] = useState<string | null>(() => getStoredCompanyId());
+  const [session, setSession] = useState(readSessionSnapshot);
+  const logoutClaimRef = useRef<Promise<void> | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     const sync = () => {
-      setToken(getStoredToken());
-      setUser(getStoredUser());
-      setCompanyId(getStoredCompanyId());
+      const nextSession = readSessionSnapshot();
+      if (nextSession.token) markAuthSessionActive();
+      setSession(nextSession);
     };
     return subscribeAuthChanges(sync);
   }, []);
@@ -49,21 +63,25 @@ export function useAuth() {
     onSuccess: (data) => persistSession(data),
   });
 
-  const logout = useCallback(() => {
-    clearAuthSession();
-    navigate('/auth', { replace: true });
+  const logout = useCallback((): Promise<void> => {
+    if (logoutClaimRef.current) return logoutClaimRef.current;
+
+    const task = terminateAuthSession().then(() => {
+      navigate('/auth', { replace: true });
+    });
+    logoutClaimRef.current = task;
+    return task;
   }, [navigate]);
 
   const setActiveCompany = useCallback((nextCompanyId: string) => {
     persistActiveCompany(nextCompanyId);
-    setCompanyId(getStoredCompanyId());
   }, []);
 
   return {
-    token,
-    user,
-    companyId,
-    isAuthenticated: Boolean(token),
+    token: session.token,
+    user: session.user,
+    companyId: session.companyId,
+    isAuthenticated: Boolean(session.token),
     login,
     register,
     logout,

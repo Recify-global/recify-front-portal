@@ -9,11 +9,13 @@ import HistoryPage from "./pages/HistoryPage";
 import InvoicesPage from "./pages/InvoicesPage";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./guards/ProtectedRoute";
+import { SessionCacheBoundary } from "./auth/SessionCacheBoundary";
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
+    <SessionCacheBoundary />
     <TooltipProvider>
       <Toaster />
       <Sonner />

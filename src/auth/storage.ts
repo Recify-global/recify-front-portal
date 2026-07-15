@@ -40,6 +40,21 @@ function safeRemove(key: string): void {
   }
 }
 
+function isStoredAuthUser(value: unknown): value is AuthUser {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const user = value as Record<string, unknown>;
+  return (
+    typeof user._id === 'string' &&
+    user._id.length > 0 &&
+    typeof user.name === 'string' &&
+    typeof user.email === 'string' &&
+    (user.role === 'admin' || user.role === 'accountant' || user.role === 'viewer') &&
+    (user.status === 'active' || user.status === 'inactive' || user.status === 'suspended') &&
+    Array.isArray(user.companies) &&
+    user.companies.every((companyId) => typeof companyId === 'string' && companyId.length > 0)
+  );
+}
+
 export function getStoredToken(): string | null {
   const value = safeGet(AUTH_STORAGE_KEYS.token);
   return value && value.length > 0 ? value : null;
@@ -52,17 +67,22 @@ export function getStoredCompanyId(): string | null {
 
 export function getStoredUser(): AuthUser | null {
   const raw = safeGet(AUTH_STORAGE_KEYS.user);
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object') return null;
-    return parsed as AuthUser;
-  } catch {
-    // Si el JSON está corrupto no reventamos la app: limpiamos silenciosamente
-    // esa entrada para que la siguiente sesión quede consistente.
-    safeRemove(AUTH_STORAGE_KEYS.user);
+  if (!raw) {
+    if (safeGet(AUTH_STORAGE_KEYS.token) || safeGet(AUTH_STORAGE_KEYS.companyId)) {
+      clearAuthSession();
+    }
     return null;
   }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (isStoredAuthUser(parsed) && safeGet(AUTH_STORAGE_KEYS.token)) return parsed;
+  } catch {
+    // El cleanup completo ocurre debajo.
+  }
+  // Un perfil inválido no puede convivir con token/company válidos: el guard
+  // no debe reconstruir una sesión parcial desde storage corrupto.
+  clearAuthSession();
+  return null;
 }
 
 export function pickPrimaryCompanyId(user: AuthUser | null | undefined): string | null {

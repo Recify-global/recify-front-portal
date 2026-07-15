@@ -69,9 +69,11 @@ export async function updateDashboardDailyReportTicket(
   companyId: string,
   ticketId: string,
   payload: DashboardDailyReportTicketUpdate,
+  opts: { signal?: AbortSignal } = {},
 ): Promise<BackendTicket> {
   return apiRequest<BackendTicket>(endpoints.dashboard.dailyReportTicket(companyId, ticketId), {
     method: 'PATCH',
     body: payload,
+    signal: opts.signal,
   });
 }
