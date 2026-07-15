@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import AuthPage from "./pages/AuthPage";
 import UploadPage from "./pages/UploadPage";
 import HistoryPage from "./pages/HistoryPage";
+import InvoicesPage from "./pages/InvoicesPage";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./guards/ProtectedRoute";
 
@@ -23,6 +24,7 @@ const App = () => (
           <Route element={<ProtectedRoute />}>
             <Route path="/app/upload" element={<UploadPage />} />
             <Route path="/app/history" element={<HistoryPage />} />
+            <Route path="/app/invoices" element={<InvoicesPage />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

@@ -1,4 +1,4 @@
-import { Upload, History, Settings, HelpCircle } from 'lucide-react';
+import { Upload, History, FileText, Settings, HelpCircle } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { RecifyLogo } from './RecifyLogo';
 import { CompanySelector } from './CompanySelector';
@@ -17,6 +17,7 @@ import {
 const mainNav = [
   { title: 'Subir ticket', url: '/app/upload', icon: Upload },
   { title: 'Histórico', url: '/app/history', icon: History },
+  { title: 'Facturas', url: '/app/invoices', icon: FileText },
 ];
 
 const secondaryNav = [
