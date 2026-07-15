@@ -59,6 +59,7 @@ function tableProps(overrides: Partial<React.ComponentProps<typeof HistoryTicket
     onSave: vi.fn(),
     onCancel: vi.fn(),
     onOpen: vi.fn(),
+    onPreviewImage: vi.fn(),
     onDelete: vi.fn(),
     onClearFilters: vi.fn(),
     ...overrides,
@@ -75,30 +76,49 @@ describe('History presentation', () => {
       .toBe('Sin comercio');
   });
 
+  it('reads top-level tax when rawData is absent', () => {
+    const mapped = mapBackendTicket({
+      ...backendTicket,
+      amount: 861,
+      tax: 29.99,
+      rawData: undefined,
+    });
+    expect(mapped.iva).toBe(29.99);
+    expect(mapped.subtotal).toBeCloseTo(831.01);
+  });
+
+  it('prefers top-level tax over rawData tax', () => {
+    const mapped = mapBackendTicket({ ...backendTicket, tax: 29.99 });
+    expect(mapped.iva).toBe(29.99);
+  });
+
   it('renders every required table column without review', () => {
     render(<HistoryTicketTable {...tableProps()} />);
     [
       'Comercio',
-      'Fecha y hora',
+      'Fecha',
       'Total',
-      'Subtotal',
       'IVA',
-      'Moneda',
       'Método de pago',
       'Tipo',
       'Estatus',
       'Categoría',
-      'Productos o notas',
       'Acciones',
     ].forEach((heading) => {
       expect(screen.getByRole('columnheader', { name: new RegExp(`^${heading}$`, 'i') }))
         .toBeInTheDocument();
     });
+    [
+      'Subtotal',
+      'Moneda',
+      'Productos o notas',
+    ].forEach((heading) => {
+      expect(screen.queryByRole('columnheader', { name: new RegExp(`^${heading}$`, 'i') }))
+        .not.toBeInTheDocument();
+    });
     expect(screen.queryByText(/Revisi[oó]n|Revisado/i)).not.toBeInTheDocument();
     expect(screen.getByText('$497.00')).toBeInTheDocument();
     expect(screen.getByText('Tarjeta')).toBeInTheDocument();
-    expect(screen.getByText(/<b>Café<\/b>/)).toBeInTheDocument();
-    expect(document.querySelector('b')).toBeNull();
   });
 
   it('starts global editing with only the visible ticket IDs', () => {

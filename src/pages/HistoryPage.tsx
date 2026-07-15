@@ -4,6 +4,13 @@ import { MetricCard } from '@/components/recify/MetricCard';
 import { SkeletonCard } from '@/components/recify/SkeletonCard';
 import { HistoryTicketTable } from '@/components/recify/HistoryTicketTable';
 import { HistoryTicketDrawer } from '@/components/recify/HistoryTicketDrawer';
+import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -86,6 +93,7 @@ export default function HistoryPage() {
   const [globalFilter, setGlobalFilter] = useState('');
   const [selectedTicket, setSelectedTicket] = useState<UiTicket | null>(null);
   const [selectedTicketCompanyId, setSelectedTicketCompanyId] = useState<string | null>(null);
+  const [detailView, setDetailView] = useState<'drawer' | 'image'>('drawer');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFromFilter, setDateFromFilter] = useState(initialDateRange.dateFrom);
@@ -148,6 +156,8 @@ export default function HistoryPage() {
         rawData: dailyTicket.rawData ?? ticket.rawData,
         vendor: dailyTicket.vendor ?? ticket.vendor,
         imageUrl: dailyTicket.imageUrl ?? ticket.imageUrl,
+        tax: dailyTicket.tax ?? ticket.tax,
+        subtotal: dailyTicket.subtotal ?? ticket.subtotal,
       };
     });
   }, [dailyReportQuery.data?.tickets, ticketsQuery.data?.data]);
@@ -226,6 +236,8 @@ export default function HistoryPage() {
         rawData: detailQuery.data.rawData ?? currentBackendTicket?.rawData,
         vendor: detailQuery.data.vendor ?? currentBackendTicket?.vendor,
         imageUrl: detailQuery.data.imageUrl ?? currentBackendTicket?.imageUrl,
+        tax: detailQuery.data.tax ?? currentBackendTicket?.tax,
+        subtotal: detailQuery.data.subtotal ?? currentBackendTicket?.subtotal,
       };
       const mapped = mapBackendTicket(mergedDetail);
       const currentListTicket = tickets.find(
@@ -325,6 +337,14 @@ export default function HistoryPage() {
   });
 
   const handleOpenSheet = (ticket: UiTicket) => {
+    setDetailView('drawer');
+    setSelectedTicket(ticket);
+    setSelectedTicketCompanyId(companyId);
+    setLastKnownImageUrl(ticket.imagenUrl ?? null);
+  };
+
+  const handlePreviewImage = (ticket: UiTicket) => {
+    setDetailView('image');
     setSelectedTicket(ticket);
     setSelectedTicketCompanyId(companyId);
     setLastKnownImageUrl(ticket.imagenUrl ?? null);
@@ -687,13 +707,14 @@ export default function HistoryPage() {
           }}
           onCancel={handleCancelTableEditing}
           onOpen={handleOpenSheet}
+          onPreviewImage={handlePreviewImage}
           onDelete={handleDelete}
           onClearFilters={handleClearFilters}
         />
       </div>
 
       <HistoryTicketDrawer
-        ticket={selectedTicketDetail}
+        ticket={detailView === 'drawer' ? selectedTicketDetail : null}
         noteSources={[
           detailQuery.data,
           selectedTicketDetail
@@ -706,6 +727,31 @@ export default function HistoryPage() {
         detailError={detailQuery.isError}
         onClose={handleCloseSheet}
       />
+
+      <Dialog
+        open={detailView === 'image' && Boolean(selectedTicketDetail)}
+        onOpenChange={(open) => {
+          if (!open) handleCloseSheet();
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          {detailView === 'image' && selectedTicketDetail ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Ticket de {selectedTicketDetail.comercio}</DialogTitle>
+              </DialogHeader>
+              <div className="max-h-[75vh] overflow-y-auto rounded-2xl">
+                <TicketImagePreview
+                  imageUrl={selectedTicketDetail.imagenUrl}
+                  alt={`Ticket de ${selectedTicketDetail.comercio}`}
+                  loading={detailQuery.isFetching || dailyReportQuery.isFetching}
+                  plain
+                />
+              </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={showCancelConfirmation} onOpenChange={setShowCancelConfirmation}>
         <AlertDialogContent>

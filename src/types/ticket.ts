@@ -28,6 +28,9 @@ export interface BackendTicket {
   type: BackendTicketType;
   date: string;
   amount: number;
+  /** GET /tickets lo entrega en el nivel superior; rawData.tax es el fallback. */
+  tax?: number | null;
+  subtotal?: number | null;
   category?: string;
   paymentMethod: BackendPaymentMethod;
   status: BackendTicketStatus;
