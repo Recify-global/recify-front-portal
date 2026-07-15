@@ -101,16 +101,12 @@ export default function UploadPage() {
   const updateMutation = useUpdateDashboardTicket();
   const invoiceMutation = useUploadInvoice();
 
-<<<<<<< HEAD
+  companyIdRef.current = companyId;
   const isBusy =
     preprocessMutation.isPending ||
     uploadMutation.isPending ||
     updateMutation.isPending ||
     invoiceMutation.isPending;
-=======
-  companyIdRef.current = companyId;
-  const isBusy = preprocessMutation.isPending || uploadMutation.isPending || updateMutation.isPending;
->>>>>>> f8e33be7b9d6cedd5387f44c8ca5c56a2637c3bf
   const editValidationMessage = useMemo(() => getTicketEditValidationMessage(draft), [draft]);
   const hasEditChanges = useMemo(() => hasTicketEditChanges(editBaseline, draft), [editBaseline, draft]);
   const canSaveEdit = Boolean(draft && editBaseline && hasEditChanges && !editValidationMessage);
@@ -130,6 +126,8 @@ export default function UploadPage() {
     saveClaimRef.current = false;
     replacePreview(undefined);
     setState('idle');
+    setUploadMode('ticket');
+    setInvoiceResult(null);
     setTicket(null);
     setAnalysisRaw(null);
     setEditBaseline(null);
@@ -139,7 +137,8 @@ export default function UploadPage() {
     preprocessMutation.reset();
     uploadMutation.reset();
     updateMutation.reset();
-  }, [preprocessMutation, replacePreview, updateMutation, uploadMutation]);
+    invoiceMutation.reset();
+  }, [invoiceMutation, preprocessMutation, replacePreview, updateMutation, uploadMutation]);
 
   useEffect(() => {
     const previousCompanyId = previousCompanyIdRef.current;
@@ -215,7 +214,6 @@ export default function UploadPage() {
     return true;
   };
 
-<<<<<<< HEAD
   const extractInvoiceError = (err: unknown): string => {
     if (err instanceof ApiRequestError) {
       switch (err.status) {
@@ -242,8 +240,8 @@ export default function UploadPage() {
       return;
     }
 
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(undefined);
+    uploadFlowRef.current.cancel();
+    replacePreview(undefined);
     setSelectedFile(file);
     setUploadMode('invoice');
     setInvoiceResult(null);
@@ -251,6 +249,7 @@ export default function UploadPage() {
     setAnalysisRaw(null);
     setEditBaseline(null);
     setDraft(null);
+    setHasPersistedTicket(false);
     setState('analyzing');
 
     try {
@@ -265,9 +264,6 @@ export default function UploadPage() {
     }
   };
 
-  const runPreprocess = async (file: File, imageUrlOverride?: string) => {
-    if (!validateSession()) return;
-=======
   const runPreprocess = async (
     file: File,
     context: ActiveUploadContext,
@@ -276,7 +272,6 @@ export default function UploadPage() {
     const controller = uploadFlowRef.current.createController(context);
     if (!controller || !isCurrentFlow(context, controller.signal)) return;
 
->>>>>>> f8e33be7b9d6cedd5387f44c8ca5c56a2637c3bf
     setState('analyzing');
     try {
       const response = await preprocessMutation.mutateAsync({
@@ -459,18 +454,15 @@ export default function UploadPage() {
       setEditBaseline(nextBaseline);
       setDraft(null);
       setState('done');
-<<<<<<< HEAD
-      toast.success('Ticket guardado correctamente.');
-      if (response.matchedInvoice) {
-        toast.info('Este ticket quedó vinculado automáticamente a una factura.');
-=======
       setHasPersistedTicket(true);
       uploadFlowRef.current.complete(context);
       if (patchFailed) {
         toast.warning('El ticket se guardó, pero algunos cambios no pudieron aplicarse.');
       } else {
         toast.success('Ticket guardado correctamente.');
->>>>>>> f8e33be7b9d6cedd5387f44c8ca5c56a2637c3bf
+      }
+      if (response.matchedInvoice) {
+        toast.info('Este ticket quedó vinculado automáticamente a una factura.');
       }
     } catch (err) {
       if (!isCurrentFlow(context, controller.signal) || isAbortLike(err)) return;
@@ -494,23 +486,7 @@ export default function UploadPage() {
   };
 
   const reset = () => {
-<<<<<<< HEAD
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setState('idle');
-    setUploadMode('ticket');
-    setInvoiceResult(null);
-    setTicket(null);
-    setAnalysisRaw(null);
-    setEditBaseline(null);
-    setDraft(null);
-    setSelectedFile(null);
-    setPreviewUrl(undefined);
-    preprocessMutation.reset();
-    uploadMutation.reset();
-    invoiceMutation.reset();
-=======
     clearUploadState();
->>>>>>> f8e33be7b9d6cedd5387f44c8ca5c56a2637c3bf
   };
 
   const ticketFields = useMemo(
