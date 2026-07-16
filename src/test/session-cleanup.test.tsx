@@ -125,6 +125,132 @@ describe('session cache cleanup', () => {
     unregister();
   });
 
+  it('does not clear a newer session if login completes during delayed cleanup', async () => {
+    seedSession();
+    let releaseCleanup!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    const unregister = registerSessionCacheCleanup(() => gate);
+
+    const cleanupPromise = terminateAuthSession();
+    setAuthSession({
+      token: 'token-b',
+      user: {
+        ...userA,
+        _id: 'user-b',
+        email: 'b@recify.test',
+        companies: ['company-b'],
+      },
+    });
+    markAuthSessionActive();
+
+    releaseCleanup();
+    await cleanupPromise;
+
+    expect(getStoredToken()).toBe('token-b');
+    expect(getStoredUser()?._id).toBe('user-b');
+    expect(getStoredCompanyId()).toBe('company-b');
+    unregister();
+  });
+
+  it('does not clear React Query cache for a newer session during delayed cleanup', async () => {
+    seedSession();
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(['tickets', 'company-a'], ['secret-a']);
+    let releaseCleanup!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionCacheBoundary />
+      </QueryClientProvider>,
+    );
+
+    const cleanupPromise = terminateAuthSession();
+    setAuthSession({
+      token: 'token-b',
+      user: {
+        ...userA,
+        _id: 'user-b',
+        email: 'b@recify.test',
+        companies: ['company-b'],
+      },
+    });
+    markAuthSessionActive();
+    queryClient.setQueryData(['tickets', 'company-b'], ['secret-b']);
+
+    releaseCleanup();
+    await cleanupPromise;
+
+    expect(getStoredToken()).toBe('token-b');
+    expect(queryClient.getQueryData(['tickets', 'company-b'])).toEqual(['secret-b']);
+  });
+
+  it('allows a new cleanup after login B invalidates the previous closing generation', async () => {
+    seedSession();
+    let releaseCleanup!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    const unregister = registerSessionCacheCleanup(() => gate);
+
+    const cleanupA = terminateAuthSession();
+    setAuthSession({
+      token: 'token-b',
+      user: {
+        ...userA,
+        _id: 'user-b',
+        email: 'b@recify.test',
+        companies: ['company-b'],
+      },
+    });
+    markAuthSessionActive();
+    releaseCleanup();
+    await cleanupA;
+
+    expect(getStoredToken()).toBe('token-b');
+
+    await terminateAuthSession();
+
+    expect(getStoredToken()).toBeNull();
+    expect(getStoredCompanyId()).toBeNull();
+    unregister();
+  });
+
+  it('does not deduplicate cleanup across different session generations', async () => {
+    seedSession();
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const cleanupSpy = vi.fn(() => firstGate);
+    const unregister = registerSessionCacheCleanup(cleanupSpy);
+
+    const cleanupA = terminateAuthSession();
+    setAuthSession({
+      token: 'token-b',
+      user: {
+        ...userA,
+        _id: 'user-b',
+        email: 'b@recify.test',
+        companies: ['company-b'],
+      },
+    });
+    markAuthSessionActive();
+
+    const cleanupB = terminateAuthSession();
+    expect(cleanupB).not.toBe(cleanupA);
+    releaseFirst();
+    await Promise.all([cleanupA, cleanupB]);
+
+    expect(cleanupSpy).toHaveBeenCalledTimes(2);
+    expect(getStoredToken()).toBeNull();
+    unregister();
+  });
+
   it('starts a new user with no cache from the previous session', async () => {
     seedSession();
     const queryClient = new QueryClient();
@@ -193,6 +319,41 @@ describe('HTTP auth status cleanup', () => {
     )).toBe(true);
     expect(cacheCleanup).toHaveBeenCalledOnce();
     expect(getStoredToken()).toBeNull();
+    unregister();
+  });
+
+  it('preserves session B when a 401 cleanup is interrupted by login B', async () => {
+    seedSession();
+    let releaseCleanup!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    const unregister = registerSessionCacheCleanup(() => gate);
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ message: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )));
+
+    const request = apiRequest('/companies');
+    await waitFor(() => expect(getStoredToken()).toBe('token-a'));
+
+    setAuthSession({
+      token: 'token-b',
+      user: {
+        ...userA,
+        _id: 'user-b',
+        email: 'b@recify.test',
+        companies: ['company-b'],
+      },
+    });
+    markAuthSessionActive();
+    releaseCleanup();
+    await request.catch(() => undefined);
+
+    expect(getStoredToken()).toBe('token-b');
+    expect(getStoredCompanyId()).toBe('company-b');
     unregister();
   });
 

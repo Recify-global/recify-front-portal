@@ -1,6 +1,10 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { registerSessionCacheCleanup } from '@/auth/session-cleanup';
+import {
+  getActiveClosingGeneration,
+  registerSessionCacheCleanup,
+  shouldFinalizeSessionCleanup,
+} from '@/auth/session-cleanup';
 
 /**
  * Conecta el coordinador de sesión con la misma instancia de QueryClient
@@ -11,12 +15,15 @@ export function SessionCacheBoundary() {
 
   useEffect(() => {
     return registerSessionCacheCleanup(async () => {
-      try {
-        await queryClient.cancelQueries();
-      } finally {
-        // clear() elimina QueryCache y MutationCache.
-        queryClient.clear();
-      }
+      const closingGeneration = getActiveClosingGeneration();
+      if (closingGeneration === null) return;
+      if (!shouldFinalizeSessionCleanup(closingGeneration)) return;
+
+      await queryClient.cancelQueries();
+      if (!shouldFinalizeSessionCleanup(closingGeneration)) return;
+
+      // clear() elimina QueryCache y MutationCache.
+      queryClient.clear();
     });
   }, [queryClient]);
 

@@ -62,9 +62,9 @@ unmerged ni marcadores, porque `f8e33be` ya era ancestro de `origin/main`.
   `queryClient.clear()`, cleanup selectivo de storage, cleanup idempotente,
   dedupe de `401`, `403` sin logout y navegación con `replace`.
 - Los hooks de upload de factura no invalidan caché durante cierre de sesión.
-- La carrera adicional “cleanup A termina después de login B” permanece como hallazgo
-  heredado `MAIN-MERGE-P1-001`. El patch externo de session generation no se aplicó,
-  conforme a la restricción del ticket.
+- La carrera “cleanup A termina después de login B” quedó mitigada con
+  `authSessionGeneration` y guards en storage, caché y navegación
+  (`MAIN-MERGE-P1-001`, corregido 15-jul-2026).
 - Regresión introducida por main: ninguna después del hardening del upload PDF.
 
 ### Seguridad general
@@ -101,7 +101,7 @@ unmerged ni marcadores, porque `f8e33be` ya era ancestro de `origin/main`.
 | KAN36-RACE-003 | Upload PDF | A responde después de cambiar a B | Guard añadido + test | Protegido |
 | KAN36-RACE-004 | Upload | Doble click antes del render | `saveClaimRef` / `invoiceClaimRef` | Protegido |
 | KAN36-RACE-005 | Auth | Varios 401 | `cleanupInFlight` | Protegido |
-| MAIN-MERGE-P1-001 | Auth | Logout A seguido de login B | Sin session generation en esta rama | P1 heredado |
+| MAIN-MERGE-P1-001 | Auth | Logout A seguido de login B | `authSessionGeneration` + guards | Protegido en código |
 | KAN36-RACE-006 | Histórico | Detalle A responde después de B | IDs y `companyId` verificados | Protegido |
 | KAN36-RACE-007 | Imágenes | Error viejo después de URL nueva | Estado asociado a URL | Protegido |
 | KAN36-RACE-008 | KPIs | Request vieja después de filtros nuevos | Query key incluye compañía/rango | Protegido |
@@ -132,6 +132,17 @@ unmerged ni marcadores, porque `f8e33be` ya era ancestro de `origin/main`.
 - Evidencia: `window.open(fileUrl)` aceptaba cualquier string del response.
 - Fix: `resolveInvoiceFileUrl` permite únicamente HTTPS absoluto.
 - QA: test unitario cubre HTTPS, HTTP, `javascript:`, `data:` y URL relativa.
+
+### MAIN-MERGE-P1-001 — Cleanup tardío de A puede borrar sesión B
+
+- Severidad: P1, **corregido en código** (15-jul-2026).
+- Área: auth / sesión / race condition.
+- Archivos: `storage.ts`, `session-cleanup.ts`, `SessionCacheBoundary.tsx`,
+  `use-auth.ts`, tests de sesión/logout.
+- Fix: `authSessionGeneration` incrementa en cada `setAuthSession`; el cleanup captura
+  la generación al iniciar y solo limpia storage, caché y navegación si sigue coincidiendo.
+- Tests: 6 nuevos (logout/401 + login B, caché B, dedupe por generación, navegación).
+- QA runtime: pendiente.
 
 ### KAN36-P2-001 — `uuid` frontend no refleja nulabilidad documentada
 
@@ -201,7 +212,7 @@ Los hallazgos heredados `FRONT-P1-003` a `FRONT-P3-004` siguen referenciados en
 
 ## Próximos tickets
 
-1. Aplicar y reauditar session generation para `MAIN-MERGE-P1-001`.
+1. QA runtime de `MAIN-MERGE-P1-001`, `FRONT-P0-001` y `FRONT-P1-001`.
 2. Corregir nulabilidad de UUID y añadir pruebas contractuales.
 3. Implementar paginación/filtros backend en Facturas.
 4. Añadir generación a cámara.

@@ -16,6 +16,13 @@ export const AUTH_STORAGE_KEYS = {
 
 export const AUTH_EVENT = 'recify:auth-changed';
 
+/** Incrementa en cada `setAuthSession`; el cleanup solo borra si coincide. */
+let authSessionGeneration = 0;
+
+export function getAuthSessionGeneration(): number {
+  return authSessionGeneration;
+}
+
 function safeGet(key: string): string | null {
   try {
     return localStorage.getItem(key);
@@ -98,6 +105,7 @@ export interface PersistSessionInput {
 }
 
 export function setAuthSession({ token, user }: PersistSessionInput): void {
+  authSessionGeneration += 1;
   safeSet(AUTH_STORAGE_KEYS.token, token);
   try {
     safeSet(AUTH_STORAGE_KEYS.user, JSON.stringify(user));
