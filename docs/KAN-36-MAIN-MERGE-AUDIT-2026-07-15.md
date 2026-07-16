@@ -190,6 +190,44 @@ unmerged ni marcadores, porque `f8e33be` ya era ancestro de `origin/main`.
 Los hallazgos heredados `FRONT-P1-003` a `FRONT-P3-004` siguen referenciados en
 `FRONTEND-AUDIT-2026-07-13.md`; no se corrigieron en este merge.
 
+## Presets de fecha — 15 de julio de 2026
+
+- Presets anteriores: `Último mes` y `Último año`.
+- Presets actuales: `7 días`, `15 días`, `30 días`, `60 días`, `90 días` y
+  `Último año`.
+- `Último mes` se eliminó de la UI y fue sustituido por el inequívoco `30 días`.
+- Fuente de verdad: `DATE_PRESETS` y `dateRangeForPreset()` en
+  `src/utils/financial-kpis.ts`.
+- Semántica: rangos inclusivos; N días significa hoy y los N−1 días anteriores.
+- Zona horaria: fechas civiles en `America/Chihuahua`; KPIs convierten a inicio/fin
+  del día con offset `-06:00`.
+- Default: `Último año` continúa como rango móvil de 12 meses.
+- Histórico y KPIs comparten `dateFromFilter`/`dateToFilter`. Las queries de tickets,
+  daily report y KPIs incluyen compañía y ambas fechas en sus query keys.
+- Fechas manuales: conservadas; un rango no reconocido deja todos los presets sin
+  marcar, y seleccionar un preset reemplaza ambas fechas.
+- Accesibilidad/responsive: botones semánticos con `aria-pressed`, focus del componente
+  Button y contenedor `flex-wrap`.
+- Tests: cálculos fijos de 7/15/30/60/90 días, detección, zona horaria y requests/query
+  keys compartidas.
+- QA browser/Network: pendiente.
+
+## Eliminación de notas del análisis — 15 de julio de 2026
+
+- Se retiraron las dos secciones `TicketNotes` del resultado de preprocess en
+  `UploadPage`.
+- Se eliminó el estado exclusivo `analysisRaw`, sus setters y el import sin uso.
+- `mapPreprocessTicket` ya no copia `notes`/`notas` al estado `rawData` del preview.
+- El draft editable ya era una allowlist sin notas y permanece así.
+- El upload continúa enviando únicamente el archivo multipart.
+- El PATCH posterior continúa construido mediante allowlist y no contiene `notes`,
+  `null`, string vacío ni `undefined`.
+- `TicketNotes`, `formatTicketNotes` y el soporte remoto `rawData.notes` se conservan
+  para Histórico/Drawer; no cambió el contrato backend.
+- Tests: preprocess con notas no las renderiza; no hay textarea; upload/PATCH continúan
+  sin propiedades de notas.
+- QA con OCR/backend real: pendiente.
+
 ## Checks
 
 - TypeScript: ✅ `npx tsc --noEmit`.
@@ -197,7 +235,7 @@ Los hallazgos heredados `FRONT-P1-003` a `FRONT-P3-004` siguen referenciados en
 - ESLint global: ⚠️ solo 3 errores históricos (`command.tsx`, `textarea.tsx`,
   `tailwind.config.ts`) y 7 warnings históricos de Fast Refresh.
 - Tests dirigidos: ✅ 24/24 antes del full run.
-- Tests completos: ✅ 81/81, 11 archivos.
+- Tests completos actuales: ✅ 94/94, 12 archivos.
 - Build: ✅ Vite production build.
 - `git diff --check`: ✅.
 - Marcadores de conflicto: ✅ ninguno en `src` o `docs`.

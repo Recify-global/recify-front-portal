@@ -48,11 +48,13 @@ import { useAuth } from '@/hooks/use-auth';
 import { isAuthSessionClosing } from '@/auth/session-cleanup';
 import { deleteTicket } from '@/services/tickets.service';
 import {
+  DATE_PRESETS,
+  dateRangeForPreset,
   detectActivePreset,
   formatMxn,
   isValidDateRange,
   last12MonthsRange,
-  last30DaysRange,
+  type DatePresetId,
 } from '@/utils/financial-kpis';
 import { selectTicketImageUrl } from '@/utils/ticket-image';
 import { cn } from '@/lib/utils';
@@ -128,8 +130,18 @@ export default function HistoryPage() {
     previousCompanyIdRef.current = companyId;
   }, [cancelEditing, companyId, isTableEditing]);
 
-  const ticketsQuery = useTickets({ page: 1, limit: 100 });
-  const dailyReportQuery = useDashboardDailyReport({ page: 1, limit: 100 });
+  const ticketsQuery = useTickets({
+    page: 1,
+    limit: 100,
+    dateFrom: dateFromFilter,
+    dateTo: dateToFilter,
+  });
+  const dailyReportQuery = useDashboardDailyReport({
+    page: 1,
+    limit: 100,
+    dateFrom: dateFromFilter,
+    dateTo: dateToFilter,
+  });
   const selectedTicketIdForQuery =
     selectedTicketCompanyId === companyId ? selectedTicket?.id : null;
   const detailQuery = useTicket(selectedTicketIdForQuery);
@@ -202,14 +214,8 @@ export default function HistoryPage() {
     );
   };
 
-  const applyLastMonthPreset = () => {
-    const range = last30DaysRange(periodReference);
-    setDateFromFilter(range.dateFrom);
-    setDateToFilter(range.dateTo);
-  };
-
-  const applyLastYearPreset = () => {
-    const range = last12MonthsRange(periodReference);
+  const applyDatePreset = (preset: DatePresetId) => {
+    const range = dateRangeForPreset(preset, periodReference);
     setDateFromFilter(range.dateFrom);
     setDateToFilter(range.dateTo);
   };
@@ -455,7 +461,7 @@ export default function HistoryPage() {
         return 'No fue posible cargar esta métrica.';
       case 'empty':
         return financialKpis.periodLabel === 'Selecciona un período'
-          ? 'Usa Último mes, Último año o un rango de fechas.'
+          ? 'Usa un preset o selecciona un rango de fechas.'
           : 'Período sin movimientos.';
       default:
         return 'No fue posible cargar esta métrica.';
@@ -600,25 +606,20 @@ export default function HistoryPage() {
               </Select>
             </div>
             <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant={activePreset === 'last_30_days' ? 'default' : 'outline'}
-                  className="rounded-xl h-9"
-                  onClick={applyLastMonthPreset}
-                  disabled={tableEditing.isTableEditing}
-                >
-                  Último mes
-                </Button>
-                <Button
-                  type="button"
-                  variant={activePreset === 'last_12_months' ? 'default' : 'outline'}
-                  className="rounded-xl h-9"
-                  onClick={applyLastYearPreset}
-                  disabled={tableEditing.isTableEditing}
-                >
-                  Último año
-                </Button>
+              <div className="flex flex-wrap gap-2" aria-label="Rangos rápidos de fecha">
+                {DATE_PRESETS.map((preset) => (
+                  <Button
+                    key={preset.id}
+                    type="button"
+                    variant={activePreset === preset.id ? 'default' : 'outline'}
+                    className="rounded-xl min-h-9"
+                    onClick={() => applyDatePreset(preset.id)}
+                    disabled={tableEditing.isTableEditing}
+                    aria-pressed={activePreset === preset.id}
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
               </div>
               <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
                 <div className="space-y-1.5 w-full sm:w-40">

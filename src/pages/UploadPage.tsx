@@ -3,7 +3,6 @@ import { AppLayout } from '@/components/recify/AppLayout';
 import { StatusBadge } from '@/components/recify/StatusBadge';
 import { CategoryBadge } from '@/components/recify/CategoryBadge';
 import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
-import { TicketNotes } from '@/components/recify/TicketNotes';
 import { CameraCaptureDialog } from '@/components/recify/CameraCaptureDialog';
 import { BatchUploadDialog } from '@/components/recify/BatchUploadDialog';
 import { TicketScanAnimation } from '@/components/recify/TicketScanAnimation';
@@ -79,7 +78,6 @@ export default function UploadPage() {
   const [uploadMode, setUploadMode] = useState<UploadMode>('ticket');
   const [invoiceResult, setInvoiceResult] = useState<UploadInvoiceResponse | null>(null);
   const [ticket, setTicket] = useState<UiTicket | null>(null);
-  const [analysisRaw, setAnalysisRaw] = useState<unknown>(null);
   const [editBaseline, setEditBaseline] = useState<TicketEditDraft | null>(null);
   const [draft, setDraft] = useState<TicketEditDraft | null>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -131,7 +129,6 @@ export default function UploadPage() {
     setUploadMode('ticket');
     setInvoiceResult(null);
     setTicket(null);
-    setAnalysisRaw(null);
     setEditBaseline(null);
     setDraft(null);
     setSelectedFile(null);
@@ -257,7 +254,6 @@ export default function UploadPage() {
     setUploadMode('invoice');
     setInvoiceResult(null);
     setTicket(null);
-    setAnalysisRaw(null);
     setEditBaseline(null);
     setDraft(null);
     setHasPersistedTicket(false);
@@ -316,7 +312,6 @@ export default function UploadPage() {
       });
       const nextBaseline = createDraftFromAnalyzedTicket(response.ticket, mapped);
       setTicket(mapped);
-      setAnalysisRaw(response.ticket);
       setEditBaseline(nextBaseline);
       setDraft(null);
       setState('done');
@@ -352,7 +347,6 @@ export default function UploadPage() {
     setUploadMode('ticket');
     setInvoiceResult(null);
     setTicket(null);
-    setAnalysisRaw(null);
     setEditBaseline(null);
     setDraft(null);
     setHasPersistedTicket(false);
@@ -477,7 +471,6 @@ export default function UploadPage() {
         imagenUrl: mapped.imagenUrl ?? response.imageUrl ?? previewUrlRef.current,
       };
       setTicket(nextTicket);
-      setAnalysisRaw(persistedTicket);
       const nextBaseline = createDraftFromTicket(persistedTicket);
       setEditBaseline(nextBaseline);
       setDraft(null);
@@ -906,10 +899,6 @@ export default function UploadPage() {
                         </div>
                       </div>
 
-                      <div className="pt-1">
-                        <TicketNotes title="Productos detectados" sources={[analysisRaw, ticket]} />
-                      </div>
-
                       <div className="flex flex-col sm:flex-row gap-2 pt-1">
                         <Button
                           className="flex-1 h-10 rounded-xl bg-gradient-primary text-primary-foreground transition-all hover:shadow-md hover:ring-2 hover:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none disabled:hover:ring-0"
@@ -942,9 +931,6 @@ export default function UploadPage() {
                             <p className="text-sm font-medium text-foreground">{field.value}</p>
                           </div>
                         ))}
-                      </div>
-                      <div className="mt-3 pt-3 border-t border-border/50">
-                        <TicketNotes title="Productos detectados" sources={[analysisRaw, ticket]} />
                       </div>
                     </>
                   )}

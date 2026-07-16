@@ -90,6 +90,7 @@ const preprocessTicket = {
   paymentMethod: 'card',
   status: 'processed',
   reviewStatus: 'revisado',
+  notes: 'Nota de análisis que no debe mostrarse',
   rawData: {
     products: [{ name: 'Café seguro', total: 100 }],
     notes: 'Nota conservada',
@@ -200,6 +201,9 @@ describe('UploadPage tenant isolation', () => {
 
     expect(screen.getAllByText('Comercio A').length).toBeGreaterThan(0);
     expect(mocks.toastSuccess).toHaveBeenCalledWith('Ticket analizado correctamente.');
+    expect(screen.queryByText(/Nota de análisis que no debe mostrarse/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Nota conservada/i)).not.toBeInTheDocument();
+    expect(document.querySelector('textarea')).toBeNull();
   });
 
   it('uses company A through preprocess, upload, PATCH and prevents double save', async () => {
@@ -233,7 +237,7 @@ describe('UploadPage tenant isolation', () => {
     expect(patchPayload).not.toHaveProperty('rawData');
     expect(patchPayload).not.toHaveProperty('products');
     expect(patchPayload).not.toHaveProperty('notes');
-    expect(screen.getAllByText(/Café seguro/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Nota conservada/i)).not.toBeInTheDocument();
   });
 
   it('aborts preprocess, revokes preview and ignores a late A response after A to B', async () => {

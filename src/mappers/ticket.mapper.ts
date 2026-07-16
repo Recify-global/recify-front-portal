@@ -168,7 +168,6 @@ export function mapPreprocessTicket(
       tax: asNumber(raw.tax) ?? asNumber(raw.iva),
       imageUrl: meta.imageUrl,
       confidence: asNumber(raw.confidence) ?? asNumber(raw.confianza) ?? undefined,
-      notes: asString(raw.notes) ?? asString(raw.notas) ?? undefined,
       ocrText: meta.ocrText,
     },
     created_at: new Date().toISOString(),
