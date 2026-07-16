@@ -35,6 +35,8 @@ export interface BackendTicket {
   paymentMethod: BackendPaymentMethod;
   status: BackendTicketStatus;
   reviewStatus?: BackendTicketReviewStatus;
+  /** Factura CFDI vinculada (string u objeto si viene populado); null si no hay. */
+  invoiceId?: string | { _id: string; [key: string]: unknown } | null;
   rawData?: BackendTicketRawData;
   created_at: string;
   updated_at: string;

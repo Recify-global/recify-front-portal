@@ -1,0 +1,217 @@
+# Auditoría frontend del merge de main en KAN-36 — 15 de julio de 2026
+
+## Estado inicial
+
+- Rama original preservada: `KPIBranch` → `bd685fd`.
+- Rama estable: `KPIBranch-stable-main-sync-2026-07-15`.
+- Renombre: `KPIBranch-stable-main-sync-2026-07-15` → `KAN-36`.
+- HEAD estable / `PRE_MERGE_HEAD`: `f8e33be`.
+- `origin/main` / `MAIN_HEAD`: `e9023f4`.
+- `main` local: `e9023f4`, idéntica a `origin/main`.
+- Commits nuevos: `315bc1b`, `463b9b2`, `1de0fae`, `bf47567`, `99e4ca0`,
+  `42585c7`, `e9023f4`.
+- Working tree inicial: limpio, sin staged, untracked, stash ni operación abierta.
+- Ancestría: `f8e33be` y `da93d9a` ya eran ancestros de `origin/main`.
+
+## Cambios introducidos por main
+
+| Área | Cambio | Archivos | Impacto |
+|---|---|---|---|
+| Facturas | Listado, detalle, matching, delete y estados | `InvoicesPage.tsx`, componentes `Invoice*` | Funcionalidad nueva |
+| Upload | PDF CFDI en el flujo de upload | `UploadPage.tsx`, `upload.service.ts` | Comparte superficie crítica con upload tenant-safe |
+| Queries | Hooks y mutations de facturas | `use-invoices.ts` | Nuevas query keys tenant-scoped |
+| Routing | Ruta y navegación de facturas | `App.tsx`, `AppSidebar.tsx` | Nueva pantalla protegida |
+| Contratos | Tipos de factura y `ticket.invoiceId` | `invoice.ts`, `ticket.ts` | Contrato nuevo |
+| API | Endpoints tenant-scoped de facturas | `endpoints.ts`, `invoices.service.ts` | Rutas incluyen `companyId` |
+| URLs | Apertura del PDF firmado | `InvoicesPage.tsx`, `InvoiceUploadResult.tsx` | Se endureció a HTTPS |
+| Configuración | Main solo agregaba líneas vacías a `.env` | `.env` | Cambio descartado; valor local intacto |
+| Dependencias | Sin cambios | `package.json`, `package-lock.json` | Ninguno |
+
+Inventario: 17 archivos en el diff original, 9 agregados, 8 modificados, 0 eliminados,
+`+1591/-19`. No hubo cambios en Vite, TypeScript, ESLint, Tailwind ni dependencias.
+
+## Conflictos
+
+El merge `git merge --no-ff --no-commit origin/main` fue automático, sin entradas
+unmerged ni marcadores, porque `f8e33be` ya era ancestro de `origin/main`.
+
+| Archivo | KAN-36 | Main | Resolución |
+|---|---|---|---|
+| `UploadPage.tsx` | Upload ticket con generación y abort | Añade upload PDF | Integración de main + mismos guards para PDF |
+| `use-upload-ticket.ts` | Invalidación por compañía de origen | Añade invalidación de facturas | Main ya combinaba ambos lados correctamente |
+| `use-invoices.ts` | No existía | Hooks de facturas | Upload recibe `companyId` y `signal` explícitos |
+| `.env` | Valor local estable | Solo whitespace | Se preservó exactamente KAN-36 |
+
+## Seguridad
+
+### FRONT-P0-001
+
+- Estado: preservado y extendido al nuevo upload de factura.
+- Evidencia ticket: `originCompanyId`, `ActiveUploadContext`, generación,
+  `AbortController`, `companyIdRef`, `isCurrentFlow`, `saveClaimRef` e invalidaciones
+  por compañía de origen.
+- Evidencia factura: `runInvoiceUpload` inicia contexto con la compañía de origen,
+  pasa `companyId` y `AbortSignal`, ignora respuestas stale/abortadas y usa claim
+  síncrono contra doble ejecución.
+- Test nuevo: PDF iniciado en A, cambio A→B, abort y respuesta tardía ignorada.
+- Regresiones activas: ninguna P0 encontrada.
+
+### FRONT-P1-001
+
+- Estado base preservado: un solo `QueryClient`, `cancelQueries()`,
+  `queryClient.clear()`, cleanup selectivo de storage, cleanup idempotente,
+  dedupe de `401`, `403` sin logout y navegación con `replace`.
+- Los hooks de upload de factura no invalidan caché durante cierre de sesión.
+- La carrera adicional “cleanup A termina después de login B” permanece como hallazgo
+  heredado `MAIN-MERGE-P1-001`. El patch externo de session generation no se aplicó,
+  conforme a la restricción del ticket.
+- Regresión introducida por main: ninguna después del hardening del upload PDF.
+
+### Seguridad general
+
+- Multitenancy: query keys, endpoints y mutations de facturas incluyen `companyId`.
+- Auth: la ruta de facturas está dentro de `ProtectedRoute`; el backend sigue siendo la
+  autoridad y el frontend no introduce API keys.
+- XSS: datos OCR/factura se renderizan como texto JSX; no se añadió HTML crudo.
+- URLs: PDFs solo se abren si son URLs HTTPS absolutas; `noopener,noreferrer`.
+- Errores: persiste el patrón heredado `FRONT-P1-006` de mostrar algunos mensajes del
+  backend; no fue ampliado fuera de la funcionalidad nueva.
+- Secrets: búsqueda por patrones no encontró secretos en código.
+- Dependencias: no cambiaron.
+
+## Funcionalidad
+
+- Histórico: no fue modificado; columnas, drawer read-only, edición inline, imagen,
+  delete y estados se preservan por ancestría y tests.
+- KPIs: no fueron modificados; siguen usando endpoint backend, compañía y rango.
+- Upload: ticket, preview, OCR, persistencia, PATCH, batch y cámara preservados; PDF
+  añadido con aislamiento equivalente.
+- Imágenes: componente y modal existentes sin cambios; PDFs ahora validan protocolo.
+- Facturas: ruta, listado, filtros, detalle, matching, missing-ticket, unlink y delete.
+- Edición: tests de edición inline pasan.
+- Batch: generación, compañía de origen y aborts preservados.
+- Cámara: funcional; el race de reapertura indicado abajo queda para ticket posterior.
+
+## Race conditions
+
+| ID | Flujo | Escenario | Evidencia | Severidad |
+|---|---|---|---|---|
+| KAN36-RACE-001 | Upload | Preprocess anterior termina después de uno nuevo | Generación + `isCurrentFlow` | Protegido |
+| KAN36-RACE-002 | Upload | A→B durante upload/PATCH | Contexto de origen + abort + test | Protegido |
+| KAN36-RACE-003 | Upload PDF | A responde después de cambiar a B | Guard añadido + test | Protegido |
+| KAN36-RACE-004 | Upload | Doble click antes del render | `saveClaimRef` / `invoiceClaimRef` | Protegido |
+| KAN36-RACE-005 | Auth | Varios 401 | `cleanupInFlight` | Protegido |
+| MAIN-MERGE-P1-001 | Auth | Logout A seguido de login B | Sin session generation en esta rama | P1 heredado |
+| KAN36-RACE-006 | Histórico | Detalle A responde después de B | IDs y `companyId` verificados | Protegido |
+| KAN36-RACE-007 | Imágenes | Error viejo después de URL nueva | Estado asociado a URL | Protegido |
+| KAN36-RACE-008 | KPIs | Request vieja después de filtros nuevos | Query key incluye compañía/rango | Protegido |
+| KAN36-RACE-009 | Batch | Finalizador viejo modifica lote nuevo | `generationRef` + `isStale` | Protegido |
+| KAN36-P2-003 | Cámara | Stream viejo resuelve tras cerrar/reabrir | Solo comprueba `openRef`; no hay generación | P2 heredado |
+| KAN36-RACE-010 | Facturas | Upload A responde en B | Contexto, abort y stale guard | Protegido |
+| KAN36-P2-004 | Facturas | Mutation de match/delete termina tras A→B | Vista se limpia; toast/QA de callbacks pendiente | P2 / QA runtime |
+
+## Hallazgos
+
+### KAN36-P0-001 — Upload PDF no aislaba respuestas tardías
+
+- Severidad: P0, corregido antes de completar el merge.
+- Área: multitenancy / upload.
+- Archivo: `UploadPage.tsx`, `use-invoices.ts`.
+- Evidencia: main enviaba el PDF con la compañía capturada por closure, pero sin
+  generación, `AbortSignal` ni guard antes de actualizar UI.
+- Escenario: upload en A, cambio a B, respuesta A mostrada bajo B.
+- Impacto: fuga visual cross-tenant.
+- Fix: contexto de origen, controller, stale guard, session guard y claim síncrono.
+- QA: test automatizado pasa; falta QA browser con API real.
+
+### KAN36-P1-001 — PDF podía abrir protocolos no seguros
+
+- Severidad: P1, corregido antes de completar el merge.
+- Área: URLs.
+- Archivos: `invoice-display.ts`, `InvoicesPage.tsx`, `InvoiceUploadResult.tsx`.
+- Evidencia: `window.open(fileUrl)` aceptaba cualquier string del response.
+- Fix: `resolveInvoiceFileUrl` permite únicamente HTTPS absoluto.
+- QA: test unitario cubre HTTPS, HTTP, `javascript:`, `data:` y URL relativa.
+
+### KAN36-P2-001 — `uuid` frontend no refleja nulabilidad documentada
+
+- Severidad: P2, abierto.
+- Área: contrato de facturas.
+- Archivo: `types/invoice.ts`, `InvoicesPage.tsx`.
+- Evidencia: `uuid: string` y `uuid.toLowerCase()`, mientras el contrato permite UUID
+  nulo cuando OCR no lo obtiene.
+- Escenario: buscar por RFC con una factura sin UUID puede lanzar error.
+- Fix mínimo: modelar `string | null` y normalizar búsqueda/render.
+- QA: respuesta real de factura sin folio fiscal.
+
+### KAN36-P2-002 — Listado de facturas limitado a 100 y filtrado en cliente
+
+- Severidad: P2, abierto.
+- Área: facturas / paginación.
+- Archivo: `InvoicesPage.tsx`.
+- Evidencia: `useInvoices({ page: 1, limit: 100 })`; tabs y filtros operan sobre esa
+  primera página.
+- Impacto: conteos y resultados incompletos con más de 100 facturas.
+- Fix mínimo: paginación UI o filtros server-side.
+- QA: compañía con más de 100 facturas.
+
+### KAN36-P2-003 — Cámara puede aceptar stream de una apertura anterior
+
+- Severidad: P2 heredado, abierto.
+- Área: cámara.
+- Archivo: `CameraCaptureDialog.tsx`.
+- Evidencia: `getUserMedia()` tardío solo valida el booleano `openRef`; cerrar y reabrir
+  antes de resolver vuelve a dejarlo en `true`.
+- Fix mínimo: generación por apertura y stop del stream stale.
+- QA: mock de dos promises `getUserMedia`.
+
+### KAN36-P2-004 — Callbacks tardíos de mutations de factura requieren QA
+
+- Severidad: P2, abierto.
+- Área: facturas / race.
+- Archivos: `InvoiceMatchPanel.tsx`, `InvoicesPage.tsx`.
+- Evidencia: la vista se cierra en cambio de compañía y backend recibe companyId, pero
+  callbacks async pueden emitir toast después del cambio.
+- Impacto: feedback stale; no se demostró lectura/escritura cross-tenant.
+- Fix mínimo: contexto/generación de compañía en acciones de factura.
+- QA: cambiar A→B durante match, unlink y delete.
+
+Los hallazgos heredados `FRONT-P1-003` a `FRONT-P3-004` siguen referenciados en
+`FRONTEND-AUDIT-2026-07-13.md`; no se corrigieron en este merge.
+
+## Checks
+
+- TypeScript: ✅ `npx tsc --noEmit`.
+- ESLint dirigido: ✅ sin errores en archivos modificados y áreas críticas.
+- ESLint global: ⚠️ solo 3 errores históricos (`command.tsx`, `textarea.tsx`,
+  `tailwind.config.ts`) y 7 warnings históricos de Fast Refresh.
+- Tests dirigidos: ✅ 24/24 antes del full run.
+- Tests completos: ✅ 81/81, 11 archivos.
+- Build: ✅ Vite production build.
+- `git diff --check`: ✅.
+- Marcadores de conflicto: ✅ ninguno en `src` o `docs`.
+
+## Limitaciones
+
+- No se ejecutó QA browser con dos compañías y backend real.
+- No se reprodujo runtime de auth A→B ni mutations de matching A→B.
+- No se validó una factura real sin UUID.
+- No se verificó paginación con más de 100 facturas.
+- Backend no fue modificado ni ejecutado.
+
+## Próximos tickets
+
+1. Aplicar y reauditar session generation para `MAIN-MERGE-P1-001`.
+2. Corregir nulabilidad de UUID y añadir pruebas contractuales.
+3. Implementar paginación/filtros backend en Facturas.
+4. Añadir generación a cámara.
+5. Añadir guards runtime a match/unlink/delete de facturas.
+6. QA browser A→B de upload, auth, facturas, batch, cámara e imágenes.
+
+## Veredicto
+
+⚠️ Merge completado con hallazgos o QA runtime pendiente.
+
+No quedan P0/P1 nuevos activos. Los dos hallazgos bloqueantes introducidos por main
+fueron corregidos y cubiertos. Los P2 y el P1 heredado quedan documentados para tickets
+posteriores.

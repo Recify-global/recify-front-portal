@@ -18,9 +18,14 @@ export function useUploadTicket() {
       }
       return uploadTicket(companyId, file, { signal });
     },
-    onSuccess: (_data, { companyId }) => {
+    onSuccess: (data, { companyId }) => {
       if (isAuthSessionClosing()) return;
       queryClient.invalidateQueries({ queryKey: ['tickets', companyId] });
+      // El upload de ticket puede auto-vincular una factura existente.
+      if (data.matchedInvoice) {
+        queryClient.invalidateQueries({ queryKey: ['invoices', companyId] });
+        queryClient.invalidateQueries({ queryKey: ['invoice', companyId] });
+      }
     },
   });
 }

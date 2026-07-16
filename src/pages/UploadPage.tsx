@@ -7,6 +7,7 @@ import { TicketNotes } from '@/components/recify/TicketNotes';
 import { CameraCaptureDialog } from '@/components/recify/CameraCaptureDialog';
 import { BatchUploadDialog } from '@/components/recify/BatchUploadDialog';
 import { TicketScanAnimation } from '@/components/recify/TicketScanAnimation';
+import { InvoiceUploadResult } from '@/components/recify/InvoiceUploadResult';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/hooks/use-auth';
 import { usePreprocessTicket, useUploadTicket } from '@/hooks/use-upload-ticket';
+import { useUploadInvoice } from '@/hooks/use-invoices';
 import { useUpdateDashboardTicket } from '@/hooks/use-tickets';
 import { mapBackendTicket, mapPreprocessTicket } from '@/mappers/ticket.mapper';
 import {
@@ -33,7 +35,8 @@ import type {
   BackendTicketType,
   UiTicket,
 } from '@/types/ticket';
-import { Upload, Camera, FileImage, Loader2, CheckCircle2, Edit3, Save, Plus, Receipt, XCircle, Layers } from 'lucide-react';
+import type { UploadInvoiceResponse } from '@/types/invoice';
+import { Upload, Camera, FileImage, FileText, Loader2, CheckCircle2, Edit3, Save, Plus, Receipt, XCircle, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import { ApiRequestError } from '@/api/http';
 import {
@@ -42,7 +45,9 @@ import {
 } from '@/utils/individual-upload-flow';
 
 type UploadState = 'idle' | 'uploaded' | 'analyzing' | 'done';
+type UploadMode = 'ticket' | 'invoice';
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const PDF_MIME_TYPE = 'application/pdf';
 const MAX_SIZE_BYTES = 10 * 1024 * 1024;
 
 const PAYMENT_OPTIONS: { value: BackendPaymentMethod; label: string }[] = [
@@ -71,6 +76,8 @@ const TYPE_OPTIONS: { value: BackendTicketType; label: string }[] = [
 
 export default function UploadPage() {
   const [state, setState] = useState<UploadState>('idle');
+  const [uploadMode, setUploadMode] = useState<UploadMode>('ticket');
+  const [invoiceResult, setInvoiceResult] = useState<UploadInvoiceResponse | null>(null);
   const [ticket, setTicket] = useState<UiTicket | null>(null);
   const [analysisRaw, setAnalysisRaw] = useState<unknown>(null);
   const [editBaseline, setEditBaseline] = useState<TicketEditDraft | null>(null);
@@ -87,14 +94,20 @@ export default function UploadPage() {
   const previousCompanyIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const saveClaimRef = useRef(false);
+  const invoiceClaimRef = useRef(false);
   const uploadFlowRef = useRef(createIndividualUploadFlow());
   const { token, companyId } = useAuth();
   const preprocessMutation = usePreprocessTicket();
   const uploadMutation = useUploadTicket();
   const updateMutation = useUpdateDashboardTicket();
+  const invoiceMutation = useUploadInvoice();
 
   companyIdRef.current = companyId;
-  const isBusy = preprocessMutation.isPending || uploadMutation.isPending || updateMutation.isPending;
+  const isBusy =
+    preprocessMutation.isPending ||
+    uploadMutation.isPending ||
+    updateMutation.isPending ||
+    invoiceMutation.isPending;
   const editValidationMessage = useMemo(() => getTicketEditValidationMessage(draft), [draft]);
   const hasEditChanges = useMemo(() => hasTicketEditChanges(editBaseline, draft), [editBaseline, draft]);
   const canSaveEdit = Boolean(draft && editBaseline && hasEditChanges && !editValidationMessage);
@@ -112,8 +125,11 @@ export default function UploadPage() {
   const clearUploadState = useCallback(() => {
     uploadFlowRef.current.cancel();
     saveClaimRef.current = false;
+    invoiceClaimRef.current = false;
     replacePreview(undefined);
     setState('idle');
+    setUploadMode('ticket');
+    setInvoiceResult(null);
     setTicket(null);
     setAnalysisRaw(null);
     setEditBaseline(null);
@@ -123,7 +139,8 @@ export default function UploadPage() {
     preprocessMutation.reset();
     uploadMutation.reset();
     updateMutation.reset();
-  }, [preprocessMutation, replacePreview, updateMutation, uploadMutation]);
+    invoiceMutation.reset();
+  }, [invoiceMutation, preprocessMutation, replacePreview, updateMutation, uploadMutation]);
 
   useEffect(() => {
     const previousCompanyId = previousCompanyIdRef.current;
@@ -189,7 +206,7 @@ export default function UploadPage() {
       return false;
     }
     if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-      toast.error('Formato no permitido. Usa JPG, PNG, WEBP o GIF.');
+      toast.error('Formato no permitido. Usa JPG, PNG, WEBP o GIF (o PDF para facturas).');
       return false;
     }
     if (file.size > MAX_SIZE_BYTES) {
@@ -197,6 +214,82 @@ export default function UploadPage() {
       return false;
     }
     return true;
+  };
+
+  const extractInvoiceError = (err: unknown): string => {
+    if (err instanceof ApiRequestError) {
+      switch (err.status) {
+        case 400:
+          return err.message || 'El archivo no es un PDF válido.';
+        case 409:
+          return 'Esta factura ya existe: hay otra con el mismo folio fiscal.';
+        case 422:
+          return 'No pudimos leer los datos del CFDI. Intenta con un PDF legible de una página.';
+        case 429:
+          return 'Alcanzaste el límite de subidas. Espera unos minutos e intenta de nuevo.';
+        default:
+          return err.message || 'No se pudo procesar la factura.';
+      }
+    }
+    if (err instanceof Error) return err.message || 'No se pudo procesar la factura.';
+    return 'No se pudo procesar la factura.';
+  };
+
+  const runInvoiceUpload = async (file: File) => {
+    if (invoiceClaimRef.current) return;
+    if (!validateSession()) return;
+    if (!companyId) return;
+    if (file.size > MAX_SIZE_BYTES) {
+      toast.error('El archivo supera el máximo de 10 MB.');
+      return;
+    }
+
+    invoiceClaimRef.current = true;
+    const context = uploadFlowRef.current.begin(companyId);
+    const controller = uploadFlowRef.current.createController(context);
+    if (!controller) {
+      invoiceClaimRef.current = false;
+      return;
+    }
+
+    replacePreview(undefined);
+    setSelectedFile(file);
+    setUploadMode('invoice');
+    setInvoiceResult(null);
+    setTicket(null);
+    setAnalysisRaw(null);
+    setEditBaseline(null);
+    setDraft(null);
+    setHasPersistedTicket(false);
+    setState('analyzing');
+
+    try {
+      const response = await invoiceMutation.mutateAsync({
+        companyId: context.companyId,
+        file,
+        signal: controller.signal,
+      });
+      if (!isCurrentFlow(context, controller.signal)) return;
+
+      setInvoiceResult(response);
+      setState('done');
+      toast.success('Factura procesada correctamente.');
+    } catch (err) {
+      if (!isCurrentFlow(context, controller.signal) || isAbortLike(err)) return;
+      setState('idle');
+      setSelectedFile(null);
+      toast.error(extractInvoiceError(err));
+    } finally {
+      uploadFlowRef.current.releaseController(controller);
+      const active = uploadFlowRef.current.getActive();
+      if (
+        active?.generation === context.generation &&
+        active.companyId === context.companyId
+      ) {
+        invoiceClaimRef.current = false;
+        uploadFlowRef.current.complete(context);
+      }
+    }
   };
 
   const runPreprocess = async (
@@ -240,6 +333,13 @@ export default function UploadPage() {
   const handleNewFile = async (file: File | null) => {
     if (isBusy) return;
     if (!validateSession()) return;
+
+    // Los PDF son facturas CFDI: van directo al flujo de facturas.
+    if (file && file.type === PDF_MIME_TYPE) {
+      await runInvoiceUpload(file);
+      return;
+    }
+
     if (!validateFile(file)) return;
     if (!companyId) return;
 
@@ -249,6 +349,8 @@ export default function UploadPage() {
 
     replacePreview(nextPreview);
     setSelectedFile(nextFile);
+    setUploadMode('ticket');
+    setInvoiceResult(null);
     setTicket(null);
     setAnalysisRaw(null);
     setEditBaseline(null);
@@ -387,6 +489,9 @@ export default function UploadPage() {
       } else {
         toast.success('Ticket guardado correctamente.');
       }
+      if (response.matchedInvoice) {
+        toast.info('Este ticket quedó vinculado automáticamente a una factura.');
+      }
     } catch (err) {
       if (!isCurrentFlow(context, controller.signal) || isAbortLike(err)) return;
       toast.error(extractError(err, 'No se pudo guardar el ticket.'));
@@ -485,9 +590,9 @@ export default function UploadPage() {
     <AppLayout>
       <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Subir ticket</h1>
+          <h1 className="text-2xl font-bold text-foreground">Subir ticket o factura</h1>
           <p className="text-muted-foreground mt-1">
-            Captura o sube una imagen de tu ticket para analizarlo
+            Captura la foto de un ticket o sube el PDF de una factura (CFDI) para analizarlos
           </p>
         </div>
 
@@ -497,7 +602,7 @@ export default function UploadPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp,image/gif"
+              accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
               className="hidden"
               onChange={handleFileInputChange}
             />
@@ -523,18 +628,24 @@ export default function UploadPage() {
                     <Upload size={32} />
                   </div>
                   <div>
-                    <p className="font-medium text-foreground">Arrastra tu ticket aquí</p>
+                    <p className="font-medium text-foreground">Arrastra tu ticket o factura aquí</p>
                     <p className="text-sm text-muted-foreground mt-1">
                       o haz clic para seleccionar archivo
                     </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">PNG, JPG, WEBP o GIF hasta 10 MB</p>
+                  <p className="text-xs text-muted-foreground">
+                    Ticket: PNG, JPG, WEBP o GIF · Factura: PDF de una página — hasta 10 MB
+                  </p>
                 </div>
               )}
 
               {state === 'uploaded' && (
                 <div className="text-center space-y-3 animate-fade-in">
-                  <FileImage size={48} className="text-primary mx-auto" />
+                  {uploadMode === 'invoice' ? (
+                    <FileText size={48} className="text-primary mx-auto" />
+                  ) : (
+                    <FileImage size={48} className="text-primary mx-auto" />
+                  )}
                   <p className="text-sm font-medium text-foreground">
                     {selectedFile?.name ?? 'ticket.jpg'}
                   </p>
@@ -545,7 +656,9 @@ export default function UploadPage() {
               {state === 'analyzing' && (
                 <div className="animate-fade-in text-center space-y-4">
                   <TicketScanAnimation />
-                  <p className="font-medium text-foreground animate-pulse-soft">Analizando…</p>
+                  <p className="font-medium text-foreground animate-pulse-soft">
+                    {uploadMode === 'invoice' ? 'Procesando factura…' : 'Analizando…'}
+                  </p>
                 </div>
               )}
 
@@ -554,7 +667,11 @@ export default function UploadPage() {
                   <div className="p-3 rounded-full bg-accent text-success mx-auto w-fit">
                     <CheckCircle2 size={32} />
                   </div>
-                  <p className="font-medium text-foreground">Ticket analizado correctamente</p>
+                  <p className="font-medium text-foreground">
+                    {uploadMode === 'invoice'
+                      ? 'Factura procesada correctamente'
+                      : 'Ticket analizado correctamente'}
+                  </p>
                   <p className="text-sm text-muted-foreground">Información extraída con éxito</p>
                 </div>
               )}
@@ -599,7 +716,7 @@ export default function UploadPage() {
 
             <BatchUploadDialog open={batchOpen} onOpenChange={setBatchOpen} />
 
-            {state === 'done' && (
+            {state === 'done' && uploadMode === 'ticket' && (
               <Button
                 onClick={handleReanalyze}
                 className="w-full h-11 rounded-xl bg-gradient-primary text-primary-foreground hover:opacity-90"
@@ -861,15 +978,29 @@ export default function UploadPage() {
               </>
             )}
 
+            {state === 'done' && uploadMode === 'invoice' && invoiceResult && (
+              <>
+                <InvoiceUploadResult key={invoiceResult.invoice._id} response={invoiceResult} />
+                <Button
+                  variant="outline"
+                  className="w-full h-11 rounded-xl"
+                  onClick={reset}
+                  disabled={isBusy}
+                >
+                  <Plus size={16} className="mr-2" /> Subir otro archivo
+                </Button>
+              </>
+            )}
+
             {state === 'idle' && (
               <div className="bg-card rounded-2xl border border-border/50 p-8 shadow-elegant flex flex-col items-center justify-center min-h-[340px] text-center">
                 <div className="p-4 rounded-2xl bg-accent text-accent-foreground mb-4">
                   <Receipt size={32} />
                 </div>
-                <h3 className="font-semibold text-foreground mb-1">Sin ticket cargado</h3>
+                <h3 className="font-semibold text-foreground mb-1">Sin archivo cargado</h3>
                 <p className="text-sm text-muted-foreground max-w-xs">
-                  Sube una foto o imagen de un ticket para que nuestra IA extraiga la información
-                  automáticamente
+                  Sube la foto de un ticket o el PDF de una factura para que nuestra IA extraiga
+                  la información automáticamente
                 </p>
               </div>
             )}

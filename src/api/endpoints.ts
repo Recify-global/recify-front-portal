@@ -14,6 +14,14 @@ export const endpoints = {
   upload: {
     preprocess: (companyId: string) => `/companies/${companyId}/upload/preprocess`,
     ticket: (companyId: string) => `/companies/${companyId}/upload/ticket`,
+    invoice: (companyId: string) => `/companies/${companyId}/upload/invoice`,
+  },
+  invoices: {
+    list: (companyId: string) => `/companies/${companyId}/invoices`,
+    byId: (companyId: string, id: string) => `/companies/${companyId}/invoices/${id}`,
+    matchCandidates: (companyId: string, id: string) =>
+      `/companies/${companyId}/invoices/${id}/match-candidates`,
+    match: (companyId: string, id: string) => `/companies/${companyId}/invoices/${id}/match`,
   },
   dashboard: {
     kpis: (companyId: string) => `/companies/${companyId}/dashboard/kpis`,

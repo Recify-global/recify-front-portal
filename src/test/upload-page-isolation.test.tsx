@@ -8,9 +8,11 @@ const mocks = vi.hoisted(() => ({
   companyId: 'company-a' as string | null,
   preprocess: vi.fn(),
   upload: vi.fn(),
+  invoiceUpload: vi.fn(),
   update: vi.fn(),
   resetPreprocess: vi.fn(),
   resetUpload: vi.fn(),
+  resetInvoiceUpload: vi.fn(),
   resetUpdate: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -43,6 +45,14 @@ vi.mock('@/hooks/use-tickets', () => ({
     mutateAsync: mocks.update,
     isPending: false,
     reset: mocks.resetUpdate,
+  }),
+}));
+
+vi.mock('@/hooks/use-invoices', () => ({
+  useUploadInvoice: () => ({
+    mutateAsync: mocks.invoiceUpload,
+    isPending: false,
+    reset: mocks.resetInvoiceUpload,
   }),
 }));
 
@@ -122,6 +132,13 @@ function uploadFile() {
   return file;
 }
 
+function uploadInvoiceFile() {
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+  const file = new File(['invoice'], 'invoice.pdf', { type: 'application/pdf' });
+  fireEvent.change(input, { target: { files: [file] } });
+  return file;
+}
+
 async function waitForAnalyzed() {
   await screen.findByRole('button', { name: 'Guardar ticket' });
 }
@@ -137,6 +154,19 @@ beforeEach(() => {
     ticket: persistedTicket,
     imageUrl: '/images/ticket-a.png',
     ocrText: 'Café seguro',
+  });
+  mocks.invoiceUpload.mockResolvedValue({
+    fileUrl: 'https://files.example/invoice.pdf',
+    ocrText: 'CFDI',
+    invoice: {
+      _id: 'invoice-a',
+      matchCandidates: [],
+    },
+    match: {
+      status: 'unmatched',
+      ticket: null,
+      candidates: [],
+    },
   });
   mocks.update.mockResolvedValue({
     ...persistedTicket,
@@ -223,13 +253,53 @@ describe('UploadPage tenant isolation', () => {
     expect(mocks.toastInfo).toHaveBeenCalledWith(
       'El análisis se canceló porque cambiaste de compañía.',
     );
-    expect(screen.getByText('Sin ticket cargado')).toBeInTheDocument();
+    expect(screen.getByText('Sin archivo cargado')).toBeInTheDocument();
 
     await act(async () => {
       pending.resolve({ ticket: preprocessTicket, ocrText: 'Café seguro' });
       await pending.promise;
     });
     expect(screen.queryByText('Comercio A')).not.toBeInTheDocument();
+    expect(mocks.toastError).not.toHaveBeenCalled();
+  });
+
+  it('aborts invoice upload and ignores a late A response after A to B', async () => {
+    const pending = deferred<unknown>();
+    mocks.invoiceUpload.mockReturnValueOnce(pending.promise);
+    const view = render(<UploadPage />);
+
+    const file = uploadInvoiceFile();
+    await waitFor(() => expect(mocks.invoiceUpload).toHaveBeenCalledOnce());
+    const invoiceInput = mocks.invoiceUpload.mock.calls[0]?.[0];
+    expect(invoiceInput).toEqual(
+      expect.objectContaining({
+        companyId: 'company-a',
+        file,
+        signal: expect.any(AbortSignal),
+      }),
+    );
+
+    mocks.companyId = 'company-b';
+    view.rerender(<UploadPage />);
+
+    await waitFor(() => expect(invoiceInput.signal.aborted).toBe(true));
+    expect(mocks.toastInfo).toHaveBeenCalledWith(
+      'El análisis se canceló porque cambiaste de compañía.',
+    );
+    expect(screen.getByText('Sin archivo cargado')).toBeInTheDocument();
+
+    await act(async () => {
+      pending.resolve({
+        fileUrl: 'https://files.example/invoice-a.pdf',
+        ocrText: 'CFDI A',
+        invoice: { _id: 'invoice-a', matchCandidates: [] },
+        match: { status: 'unmatched', ticket: null, candidates: [] },
+      });
+      await pending.promise;
+    });
+
+    expect(screen.queryByText('Factura procesada correctamente')).not.toBeInTheDocument();
+    expect(mocks.toastSuccess).not.toHaveBeenCalledWith('Factura procesada correctamente.');
     expect(mocks.toastError).not.toHaveBeenCalled();
   });
 
@@ -241,7 +311,7 @@ describe('UploadPage tenant isolation', () => {
     mocks.companyId = 'company-b';
     view.rerender(<UploadPage />);
 
-    await screen.findByText('Sin ticket cargado');
+    await screen.findByText('Sin archivo cargado');
     expect(screen.queryByRole('button', { name: 'Guardar ticket' })).not.toBeInTheDocument();
     expect(screen.queryByText('Comercio A')).not.toBeInTheDocument();
     expect(mocks.upload).not.toHaveBeenCalled();
@@ -274,7 +344,7 @@ describe('UploadPage tenant isolation', () => {
       });
       await pending.promise;
     });
-    expect(screen.getByText('Sin ticket cargado')).toBeInTheDocument();
+    expect(screen.getByText('Sin archivo cargado')).toBeInTheDocument();
     expect(mocks.update).not.toHaveBeenCalled();
     expect(mocks.toastSuccess).not.toHaveBeenCalledWith('Ticket guardado correctamente.');
   });
@@ -301,7 +371,7 @@ describe('UploadPage tenant isolation', () => {
       await pendingPatch.promise;
     });
     expect(mocks.update).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('Sin ticket cargado')).toBeInTheDocument();
+    expect(screen.getByText('Sin archivo cargado')).toBeInTheDocument();
   });
 
   it('does not PATCH when upload fails', async () => {
@@ -323,12 +393,12 @@ describe('UploadPage tenant isolation', () => {
 
     mocks.companyId = 'company-b';
     view.rerender(<UploadPage />);
-    await screen.findByText('Sin ticket cargado');
+    await screen.findByText('Sin archivo cargado');
 
     mocks.companyId = 'company-a';
     view.rerender(<UploadPage />);
 
-    expect(screen.getByText('Sin ticket cargado')).toBeInTheDocument();
+    expect(screen.getByText('Sin archivo cargado')).toBeInTheDocument();
     expect(screen.queryByText('Comercio A')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Guardar ticket' })).not.toBeInTheDocument();
   });
