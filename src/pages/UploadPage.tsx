@@ -206,7 +206,7 @@ export default function UploadPage() {
       return false;
     }
     if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-      toast.error('Formato no permitido. Usa JPG, PNG, WEBP o GIF (o PDF para facturas).');
+      toast.error('Formato no permitido. Usa PNG, JPG o PDF.');
       return false;
     }
     if (file.size > MAX_SIZE_BYTES) {
@@ -630,7 +630,7 @@ export default function UploadPage() {
                     </p>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Ticket: PNG, JPG, WEBP o GIF · Factura: PDF de una página — hasta 10 MB
+                    PNG, JPG o PDF · Máx. 10 MB
                   </p>
                 </div>
               )}
