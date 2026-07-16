@@ -3,6 +3,7 @@ import { AppLayout } from '@/components/recify/AppLayout';
 import { StatusBadge } from '@/components/recify/StatusBadge';
 import { CategoryBadge } from '@/components/recify/CategoryBadge';
 import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
+import { TicketImageDialog } from '@/components/recify/TicketImageDialog';
 import { CameraCaptureDialog } from '@/components/recify/CameraCaptureDialog';
 import { BatchUploadDialog } from '@/components/recify/BatchUploadDialog';
 import { TicketScanAnimation } from '@/components/recify/TicketScanAnimation';
@@ -83,6 +84,7 @@ export default function UploadPage() {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | undefined>(undefined);
+  const [imageDialogUrl, setImageDialogUrl] = useState<string | null>(null);
   const [hasPersistedTicket, setHasPersistedTicket] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
@@ -113,6 +115,7 @@ export default function UploadPage() {
 
   const replacePreview = useCallback((nextPreview: string | undefined) => {
     const previousPreview = previewUrlRef.current;
+    setImageDialogUrl((current) => (current ? nextPreview ?? null : null));
     if (previousPreview && previousPreview !== nextPreview) {
       URL.revokeObjectURL(previousPreview);
     }
@@ -746,6 +749,7 @@ export default function UploadPage() {
                   imageUrl={ticket.imagenUrl}
                   fallbackImageUrl={previewUrl}
                   alt={`Ticket de ${ticket.comercio}`}
+                  onView={setImageDialogUrl}
                 />
 
                 {/* Summary mini card */}
@@ -993,6 +997,15 @@ export default function UploadPage() {
           </div>
         </div>
       </div>
+      <TicketImageDialog
+        open={Boolean(imageDialogUrl && ticket)}
+        onOpenChange={(open) => {
+          if (!open) setImageDialogUrl(null);
+        }}
+        imageUrl={imageDialogUrl}
+        alt={ticket ? `Ticket de ${ticket.comercio}` : 'Imagen del ticket'}
+        title={ticket ? `Ticket de ${ticket.comercio}` : 'Imagen del ticket'}
+      />
     </AppLayout>
   );
 }

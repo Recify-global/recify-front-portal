@@ -17,7 +17,6 @@ vi.mock('@/hooks/use-auth', () => ({
 
 vi.mock('@/services/tickets.service', () => ({
   listTickets: mocks.listTickets,
-  getTicket: vi.fn(),
 }));
 
 vi.mock('@/services/dashboard.service', () => ({

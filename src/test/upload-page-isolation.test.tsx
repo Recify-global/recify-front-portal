@@ -206,6 +206,41 @@ describe('UploadPage tenant isolation', () => {
     expect(document.querySelector('textarea')).toBeNull();
   });
 
+  it('opens the active preview internally and replaces it when the file changes', async () => {
+    vi.mocked(URL.createObjectURL)
+      .mockReturnValueOnce('blob:ticket-a')
+      .mockReturnValueOnce('blob:ticket-b');
+    const openSpy = vi.spyOn(window, 'open');
+    const view = render(<UploadPage />);
+
+    uploadFile();
+    await waitForAnalyzed();
+    fireEvent.click(screen.getByRole('button', { name: 'Ver imagen completa' }));
+    expect(screen.getByRole('dialog', { name: 'Ticket de Comercio A' })).toBeInTheDocument();
+    expect(screen.getAllByAltText('Ticket de Comercio A').at(-1)).toHaveAttribute(
+      'src',
+      'blob:ticket-a',
+    );
+    expect(openSpy).not.toHaveBeenCalled();
+
+    uploadFile();
+    await waitFor(() => {
+      expect(mocks.preprocess).toHaveBeenCalledTimes(2);
+      expect(screen.getAllByAltText('Ticket de Comercio A').at(-1)).toHaveAttribute(
+        'src',
+        'blob:ticket-b',
+      );
+    });
+    expect(screen.getByRole('dialog', { name: 'Ticket de Comercio A' })).toBeInTheDocument();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:ticket-a');
+
+    mocks.companyId = 'company-b';
+    view.rerender(<UploadPage />);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:ticket-b');
+    openSpy.mockRestore();
+  });
+
   it('uses company A through preprocess, upload, PATCH and prevents double save', async () => {
     render(<UploadPage />);
     const file = uploadFile();

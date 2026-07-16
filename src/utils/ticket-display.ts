@@ -486,6 +486,12 @@ export function getTicketImageUrl(ticket: BackendTicket | null | undefined): str
   const rawData = asRecord(ticket.rawData);
 
   const candidates = [
+    topLevel?.imageUrl,
+    topLevel?.ticketImageUrl,
+    topLevel?.fileUrl,
+    topLevel?.receiptUrl,
+    topLevel?.publicUrl,
+    topLevel?.attachmentUrl,
     rawData?.imageUrl,
     rawData?.ticketImageUrl,
     rawData?.fileUrl,
@@ -493,12 +499,6 @@ export function getTicketImageUrl(ticket: BackendTicket | null | undefined): str
     rawData?.publicUrl,
     rawData?.attachmentUrl,
     rawData?.previewUrl,
-    topLevel?.imageUrl,
-    topLevel?.ticketImageUrl,
-    topLevel?.fileUrl,
-    topLevel?.receiptUrl,
-    topLevel?.publicUrl,
-    topLevel?.attachmentUrl,
   ];
 
   for (const candidate of candidates) {

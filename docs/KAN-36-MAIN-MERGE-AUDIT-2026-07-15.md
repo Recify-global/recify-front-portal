@@ -81,12 +81,13 @@ unmerged ni marcadores, porque `f8e33be` ya era ancestro de `origin/main`.
 
 ## Funcionalidad
 
-- Histórico: no fue modificado; columnas, drawer read-only, edición inline, imagen,
-  delete y estados se preservan por ancestría y tests.
+- Histórico: tabla, filtros, edición inline, imagen, delete y estados se preservaron;
+  el Drawer se eliminó posteriormente por decisión de producto.
 - KPIs: no fueron modificados; siguen usando endpoint backend, compañía y rango.
 - Upload: ticket, preview, OCR, persistencia, PATCH, batch y cámara preservados; PDF
   añadido con aislamiento equivalente.
-- Imágenes: componente y modal existentes sin cambios; PDFs ahora validan protocolo.
+- Imágenes: tickets usan un modal interno reutilizable; PDFs conservan su flujo
+  independiente con validación HTTPS.
 - Facturas: ruta, listado, filtros, detalle, matching, missing-ticket, unlink y delete.
 - Edición: tests de edición inline pasan.
 - Batch: generación, compañía de origen y aborts preservados.
@@ -222,11 +223,67 @@ Los hallazgos heredados `FRONT-P1-003` a `FRONT-P3-004` siguen referenciados en
 - El upload continúa enviando únicamente el archivo multipart.
 - El PATCH posterior continúa construido mediante allowlist y no contiene `notes`,
   `null`, string vacío ni `undefined`.
-- `TicketNotes`, `formatTicketNotes` y el soporte remoto `rawData.notes` se conservan
-  para Histórico/Drawer; no cambió el contrato backend.
+- `TicketNotes` se eliminó al quedar sin consumidores después de retirar el Drawer.
+  `formatTicketNotes` y el soporte remoto se conservan porque el mapper aún los usa;
+  no cambió el contrato backend.
 - Tests: preprocess con notas no las renderiza; no hay textarea; upload/PATCH continúan
   sin propiedades de notas.
 - QA con OCR/backend real: pendiente.
+
+## Drawer de Histórico y modal interno de imagen — 15 de julio de 2026
+
+- Se eliminó `HistoryTicketDrawer.tsx`, su apertura por fila, el botón “Consultar
+  ticket”, los estados de selección/detalle y la query `useTicket`.
+- Se eliminó también `TicketNotes.tsx` al confirmar que no tenía otros consumidores.
+- Histórico conserva `/tickets` y `dashboard/daily-report`; ya no solicita detalle
+  individual al seleccionar filas.
+- Se creó `TicketImageDialog.tsx` como único modal de imagen para Histórico y análisis.
+- `TicketImagePreview` dejó de renderizar enlaces `target="_blank"`: su acción entrega
+  la URL activa al modal, incluida la URL blob fallback.
+- El botón de tabla solo se habilita con una URL admitida por
+  `resolveTicketImageUrl`; sin URL segura muestra “Sin imagen”.
+- El helper común rechaza además referencias protocol-relative (`//host`) para evitar
+  que una ruta aparente se resuelva contra un host externo.
+- La selección de Histórico conserva ticket, compañía y URL segura. El cambio de
+  compañía cierra y limpia el modal.
+- El análisis reutiliza el blob existente, no crea una segunda URL y reemplaza/cierra
+  el modal antes de revocar el blob anterior.
+- Loading y error están asociados a la URL renderizada; callbacks tardíos de A no
+  alteran la imagen B.
+- Accesibilidad: `Dialog` con título, descripción, focus trap, Escape/backdrop estándar
+  y botón visible “Cerrar”. La imagen usa alt específico y `object-contain`.
+- Responsive: contenido limitado a `90vh`, imagen a `70vh` y scroll interno.
+- Tests actualizados: ausencia de fila interactiva/Drawer, botón con/sin imagen, URL
+  insegura, cierre accesible, fallback blob, callback stale, cambio de archivo y
+  cambio de compañía.
+- QA browser manual: pendiente.
+
+## Corrección de imágenes fallidas en modal — 15 de julio de 2026
+
+### Hallazgo QA runtime
+
+- Algunos tickets abrían el modal pero mostraban “No fue posible cargar la imagen”.
+- El helper aceptaba la URL; el fallo ocurría en la carga del `<img>` (403/URL vencida).
+
+### Causa confirmada
+
+- **Categoría:** C — URL firmada vencida en caché + prioridad incorrecta de fuentes.
+- **Evidencia:** el backend firma `imageUrl` al leer (`ticket.service`, `dailyReport.service`, TTL 1h). Histórico mezclaba `daily-report` **antes** que `/tickets`, pudiendo usar una firma más antigua cuando las queries se refrescaban en momentos distintos. `getTicketImageUrl` también prefería `rawData.imageUrl` sobre el `imageUrl` top-level ya firmado.
+- **Archivo responsable:** `HistoryPage.tsx`, `ticket-display.ts`, `ticket-image.ts`.
+- **¿Requiere backend?** No para el fix principal; el backend ya re-firma en lectura.
+
+### Fix aplicado
+
+- `mergeTicketImageUrl`: prioriza `ticket.imageUrl` (listado) sobre daily-report.
+- `getTicketImageUrl`: prioriza campos top-level firmados antes que `rawData`.
+- `resolveTicketImageUrl`: conserva la cadena HTTPS original (no re-serializa query firmada); rechaza `data:`, `file:`, `ftp:`; mantiene bloqueo de `token` de sesión, no de `X-Amz-Signature`.
+- Modal: botón **Reintentar** refetchea tickets + daily-report una vez y actualiza la URL si cambió.
+- Preview: resetea estado load/error al cambiar URL; callbacks asociados a la imagen activa.
+- Tests: URLs firmadas, merge, prioridad rawData, retry, esquemas bloqueados.
+
+### QA runtime pendiente
+
+- Repetir con tickets que antes fallaban (mínimo 3) y confirmar carga o error legítimo.
 
 ## Checks
 
@@ -234,8 +291,8 @@ Los hallazgos heredados `FRONT-P1-003` a `FRONT-P3-004` siguen referenciados en
 - ESLint dirigido: ✅ sin errores en archivos modificados y áreas críticas.
 - ESLint global: ⚠️ solo 3 errores históricos (`command.tsx`, `textarea.tsx`,
   `tailwind.config.ts`) y 7 warnings históricos de Fast Refresh.
-- Tests dirigidos: ✅ 24/24 antes del full run.
-- Tests completos actuales: ✅ 94/94, 12 archivos.
+- Tests dirigidos del modal/Histórico/Upload: ✅ 39/39.
+- Tests completos actuales: ✅ 105/105, 12 archivos.
 - Build: ✅ Vite production build.
 - `git diff --check`: ✅.
 - Marcadores de conflicto: ✅ ninguno en `src` o `docs`.
@@ -264,3 +321,7 @@ Los hallazgos heredados `FRONT-P1-003` a `FRONT-P3-004` siguen referenciados en
 No quedan P0/P1 nuevos activos. Los dos hallazgos bloqueantes introducidos por main
 fueron corregidos y cubiertos. Los P2 y el P1 heredado quedan documentados para tickets
 posteriores.
+
+### Veredicto del ticket de imágenes
+
+🔎 Fix implementado; falta repetir QA con imágenes reales que antes fallaban.
