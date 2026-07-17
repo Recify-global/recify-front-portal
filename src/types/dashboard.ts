@@ -67,6 +67,7 @@ export interface DashboardDailyReportTicketUpdate {
   vendor?: string;
   status?: BackendTicketStatus;
   reviewStatus?: BackendTicketReviewStatus;
+  isAccreditable?: boolean;
 }
 
 /**

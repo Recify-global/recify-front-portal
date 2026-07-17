@@ -60,6 +60,8 @@ function tableProps(overrides: Partial<React.ComponentProps<typeof HistoryTicket
     onPreviewImage: vi.fn(),
     onDelete: vi.fn(),
     onClearFilters: vi.fn(),
+    onToggleAccreditable: vi.fn(),
+    savingAccreditableIds: new Set<string>(),
     ...overrides,
   };
 }
@@ -101,9 +103,10 @@ describe('History presentation', () => {
       'Tipo',
       'Estatus',
       'Categoría',
+      'Acreditable',
       'Acciones',
     ].forEach((heading) => {
-      expect(screen.getByRole('columnheader', { name: new RegExp(`^${heading}$`, 'i') }))
+      expect(screen.getByRole('columnheader', { name: new RegExp(heading, 'i') }))
         .toBeInTheDocument();
     });
     [

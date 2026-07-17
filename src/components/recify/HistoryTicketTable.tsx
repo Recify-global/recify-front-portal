@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Edit3,
+  HelpCircle,
   Loader2,
   Receipt,
   Save,
@@ -23,6 +24,13 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import {
   Select,
   SelectContent,
@@ -85,6 +93,8 @@ interface HistoryTicketTableProps {
   onPreviewImage: (ticket: UiTicket) => void;
   onDelete: (ticketId: string) => void;
   onClearFilters: () => void;
+  onToggleAccreditable: (ticket: UiTicket, nextValue: boolean) => void;
+  savingAccreditableIds: ReadonlySet<string>;
 }
 
 function columnClass(columnId: string): string {
@@ -102,11 +112,13 @@ function columnClass(columnId: string): string {
     case 'tipo':
       return 'w-[9%]';
     case 'estatus':
-      return 'w-[10%]';
+      return 'w-[9%]';
     case 'categoria':
-      return 'w-[13%]';
-    case 'actions':
       return 'w-[11%]';
+    case 'isAccreditable':
+      return 'w-[9%]';
+    case 'actions':
+      return 'w-[10%]';
     default:
       return '';
   }
@@ -133,6 +145,8 @@ export function HistoryTicketTable({
   onPreviewImage,
   onDelete,
   onClearFilters,
+  onToggleAccreditable,
+  savingAccreditableIds,
 }: HistoryTicketTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const dirtyIds = useMemo(() => new Set(dirtyTicketIds), [dirtyTicketIds]);
@@ -330,6 +344,53 @@ export function HistoryTicketTable({
       },
     },
     {
+      id: 'isAccreditable',
+      accessorKey: 'isAccreditable',
+      header: () => (
+        <div className="flex items-center gap-1">
+          <span>Acreditable</span>
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="Qué significa Acreditable"
+                >
+                  <HelpCircle size={12} aria-hidden />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs">
+                Indica si este ticket puede utilizarse para un proceso de acreditación.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+      ),
+      enableSorting: false,
+      cell: ({ row }) => {
+        const checked = row.original.isAccreditable ?? false;
+        const saving = savingAccreditableIds.has(row.original.id);
+        return (
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={checked}
+              disabled={saving || isEditing}
+              aria-label={`Marcar ticket de ${row.original.comercio} como acreditable`}
+              onCheckedChange={(next) => {
+                if (saving || isEditing) return;
+                onToggleAccreditable(row.original, next);
+              }}
+            />
+            <span className="text-xs text-muted-foreground">
+              {checked ? 'Sí' : 'No'}
+            </span>
+            {saving ? <Loader2 size={12} className="animate-spin text-muted-foreground" /> : null}
+          </div>
+        );
+      },
+    },
+    {
       id: 'actions',
       header: 'Acciones',
       enableSorting: false,
@@ -367,7 +428,16 @@ export function HistoryTicketTable({
         );
       },
     },
-  ], [deletingTicketId, drafts, isEditing, onDelete, onPreviewImage, onUpdateDraft]);
+  ], [
+    savingAccreditableIds,
+    deletingTicketId,
+    drafts,
+    isEditing,
+    onDelete,
+    onPreviewImage,
+    onToggleAccreditable,
+    onUpdateDraft,
+  ]);
 
   const table = useReactTable({
     data: tickets,

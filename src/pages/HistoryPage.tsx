@@ -97,6 +97,9 @@ export default function HistoryPage() {
   const [isSavingTable, setIsSavingTable] = useState(false);
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
+  const [savingAccreditableIds, setSavingAccreditableIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [isImageRetrying, setIsImageRetrying] = useState(false);
 
   const { companyId } = useAuth();
@@ -104,6 +107,7 @@ export default function HistoryPage() {
   const companyIdRef = useRef(companyId);
   const previousCompanyIdRef = useRef(companyId);
   const savingClaimRef = useRef(false);
+  const savingAccreditableRef = useRef<Set<string>>(new Set());
   const imageRetryCountRef = useRef(0);
   const tableEditing = useHistoryTableEditing();
   const { cancelEditing, isTableEditing } = tableEditing;
@@ -114,6 +118,8 @@ export default function HistoryPage() {
     if (previousCompanyIdRef.current !== companyId) {
       setSelectedImage(null);
       imageRetryCountRef.current = 0;
+      savingAccreditableRef.current = new Set();
+      setSavingAccreditableIds(new Set());
       if (previousCompanyIdRef.current && isTableEditing) {
         cancelEditing();
         if (companyId && !isAuthSessionClosing()) {
@@ -161,6 +167,7 @@ export default function HistoryPage() {
         imageUrl: mergeTicketImageUrl(ticket, dailyTicket),
         tax: dailyTicket.tax ?? ticket.tax,
         subtotal: dailyTicket.subtotal ?? ticket.subtotal,
+        isAccreditable: ticket.isAccreditable ?? dailyTicket.isAccreditable ?? false,
       };
     });
   }, [dailyReportQuery.data?.tickets, ticketsQuery.data?.data]);
@@ -397,6 +404,70 @@ export default function HistoryPage() {
   const handleDelete = (ticketId: string) => {
     if (!companyId || deleteMutation.isPending || tableEditing.isTableEditing) return;
     deleteMutation.mutate({ ticketId, originCompanyId: companyId });
+  };
+
+  const handleToggleAccreditable = async (ticket: UiTicket, nextValue: boolean) => {
+    const originCompanyId = companyId;
+    const ticketId = ticket.id;
+    if (!originCompanyId || tableEditing.isTableEditing) return;
+    if (savingAccreditableRef.current.has(ticketId)) return;
+    if (ticket.isAccreditable === nextValue) return;
+
+    savingAccreditableRef.current.add(ticketId);
+    setSavingAccreditableIds(new Set(savingAccreditableRef.current));
+
+    try {
+      const updated = await updateMutation.mutateAsync({
+        companyId: originCompanyId,
+        ticketId,
+        payload: { isAccreditable: nextValue },
+      });
+      if (isAuthSessionClosing() || companyIdRef.current !== originCompanyId) return;
+
+      const confirmed =
+        typeof updated?.isAccreditable === 'boolean' ? updated.isAccreditable : nextValue;
+
+      // Patch both History sources immediately so a slower daily-report refetch
+      // cannot flash the previous value (tickets list is the merge priority).
+      queryClient.setQueriesData(
+        { queryKey: ['tickets', originCompanyId] },
+        (current: unknown) => {
+          if (!current || typeof current !== 'object') return current;
+          const page = current as { data?: Array<{ _id: string; isAccreditable?: boolean }> };
+          if (!Array.isArray(page.data)) return current;
+          return {
+            ...page,
+            data: page.data.map((row) =>
+              row._id === ticketId ? { ...row, isAccreditable: confirmed } : row,
+            ),
+          };
+        },
+      );
+      queryClient.setQueriesData(
+        { queryKey: ['dashboard-daily-report', originCompanyId] },
+        (current: unknown) => {
+          if (!current || typeof current !== 'object') return current;
+          const report = current as {
+            tickets?: Array<{ _id: string; isAccreditable?: boolean }>;
+          };
+          if (!Array.isArray(report.tickets)) return current;
+          return {
+            ...report,
+            tickets: report.tickets.map((row) =>
+              row._id === ticketId ? { ...row, isAccreditable: confirmed } : row,
+            ),
+          };
+        },
+      );
+    } catch {
+      if (isAuthSessionClosing() || companyIdRef.current !== originCompanyId) return;
+      toast.error('No se pudo actualizar si el ticket es acreditable.');
+    } finally {
+      savingAccreditableRef.current.delete(ticketId);
+      if (!isAuthSessionClosing()) {
+        setSavingAccreditableIds(new Set(savingAccreditableRef.current));
+      }
+    }
   };
 
   const kpiUnavailableLabel = (() => {
@@ -671,6 +742,10 @@ export default function HistoryPage() {
           onPreviewImage={handlePreviewImage}
           onDelete={handleDelete}
           onClearFilters={handleClearFilters}
+          onToggleAccreditable={(ticket, nextValue) => {
+            void handleToggleAccreditable(ticket, nextValue);
+          }}
+          savingAccreditableIds={savingAccreditableIds}
         />
       </div>
 

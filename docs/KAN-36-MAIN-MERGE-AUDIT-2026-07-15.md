@@ -325,3 +325,67 @@ posteriores.
 ### Veredicto del ticket de imágenes
 
 🔎 Fix implementado; falta repetir QA con imágenes reales que antes fallaban.
+
+---
+
+## Tickets acreditables en Histórico — 16 de julio de 2026
+
+### Decisión de producto
+
+- Campo canónico: `isAccreditable: boolean` (`true` = Sí, `false` = No).
+- Default y tickets antiguos: `false`.
+- Columna compacta **Acreditable** con ícono de ayuda y tooltip:
+  `Indica si este ticket puede utilizarse para un proceso de acreditación.`
+- Switch por fila con texto `Sí`/`No` y `aria-label` por comercio.
+- Persistencia vía PATCH existente `dashboard/daily-report/:ticketId`
+  (mismo body que tickets); payload mínimo `{ isAccreditable }`.
+
+### Estabilización 16-jul (asincronía del switch)
+
+**Causa:** el merge de Histórico priorizaba `daily-report.isAccreditable` sobre
+`/tickets`. Tras un PATCH, la invalidación refetchaba ambas fuentes a distinta
+velocidad: un daily-report stale con `false` podía sobrescribir un listado ya
+actualizado a `true` (parpadeo / sensación asíncrona). Además un solo
+`accreditableSavingId` bloqueaba *todas* las filas en el handler mientras la UI
+solo deshabilitaba una.
+
+**Fix:**
+- Prioridad: `ticket.isAccreditable ?? dailyTicket.isAccreditable ?? false`.
+- Switch controlado (`checked`), sin optimistic update: permanece en el valor
+  actual hasta confirmar el backend.
+- Pending por ticket con `Set` + ref síncrono (A y B independientes; finalizer
+  de A no libera B; doble click no dispara dos PATCH).
+- Tras éxito: `setQueriesData` en queries de `originCompanyId` con el valor
+  confirmado, además de la invalidación existente.
+- Cambio de compañía limpia el Set de pending.
+
+### Caché y carreras
+
+- Mutation reutiliza `useUpdateDashboardTicket` (invalidación por `companyId` de origen).
+- Durante el PATCH se deshabilita solo el switch de esa fila.
+- Tras éxito/error se compara `companyIdRef` con `originCompanyId` para no
+  toast/contaminar la compañía B.
+
+### Tests
+
+- `src/test/history-accreditable.test.tsx` — columna, pending sin cambio visual,
+  prioridad de merge, pending independiente, payload, A→B, error.
+- `history-inline-editing.test.tsx` actualizado con la nueva columna y props.
+
+### QA runtime
+
+- ✅ Evidencia local: PATCH `.../daily-report/:ticketId` 200 seguido de refetch
+  de `/tickets` y daily-report (tamaños de respuesta varían con true/false).
+- Suites automáticas: backend 47/47, frontend 123/123.
+
+### Auditoría final / cierre
+
+| Ítem | Estado |
+|---|---|
+| Prioridad `/tickets` → daily → false | ✅ |
+| Switch controlado, sin optimistic | ✅ |
+| Pending `Set` + ref por ticket | ✅ |
+| Cache por `originCompanyId` | ✅ |
+| TypeScript / tests / build | ✅ |
+| ESLint dirigido | ✅ (errores globales históricos ajenos) |
+| Veredicto | ✅ Default persistido y switch estable con QA runtime aprobado |

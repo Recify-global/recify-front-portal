@@ -126,6 +126,7 @@ export function mapBackendTicket(t: BackendTicket): UiTicket {
     reviewStatus: formatTicketReviewStatus(t.reviewStatus),
     notas,
     imagenUrl: imageUrl,
+    isAccreditable: t.isAccreditable ?? false,
   };
 }
 
