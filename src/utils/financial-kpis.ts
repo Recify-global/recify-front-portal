@@ -231,7 +231,23 @@ export function endOfCivilDayIso(dateKey: string, timeZone = HISTORY_TIMEZONE): 
   return `${dateKey}T23:59:59.999-06:00`;
 }
 
-export type DatePreset = 'last_30_days' | 'last_12_months' | null;
+export type DatePresetId =
+  | 'last_7_days'
+  | 'last_15_days'
+  | 'last_30_days'
+  | 'last_60_days'
+  | 'last_90_days'
+  | 'last_12_months';
+export type DatePreset = DatePresetId | null;
+
+export const DATE_PRESETS: ReadonlyArray<{ id: DatePresetId; label: string }> = [
+  { id: 'last_7_days', label: '7 días' },
+  { id: 'last_15_days', label: '15 días' },
+  { id: 'last_30_days', label: '30 días' },
+  { id: 'last_60_days', label: '60 días' },
+  { id: 'last_90_days', label: '90 días' },
+  { id: 'last_12_months', label: 'Último año' },
+];
 
 function shiftCivilDays(dateKey: string, days: number): string {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -254,12 +270,16 @@ function shiftCivilMonths(dateKey: string, months: number): string {
   )}`;
 }
 
-/**
- * Últimos 30 días incluyendo hoy (hoy − 29 días → hoy).
- */
-export function last30DaysRange(now = new Date()): { dateFrom: string; dateTo: string } {
+/** Rango inclusivo de N días civiles: hoy − (N − 1) días → hoy. */
+export function inclusiveDaysRange(
+  days: number,
+  now = new Date(),
+): { dateFrom: string; dateTo: string } {
+  if (!Number.isInteger(days) || days < 1) {
+    throw new Error('El rango debe contener al menos un día.');
+  }
   const toKey = civilDateInTimeZone(now);
-  const fromKey = shiftCivilDays(toKey, -29);
+  const fromKey = shiftCivilDays(toKey, -(days - 1));
   return { dateFrom: fromKey, dateTo: toKey };
 }
 
@@ -272,15 +292,30 @@ export function last12MonthsRange(now = new Date()): { dateFrom: string; dateTo:
   return { dateFrom: fromKey, dateTo: toKey };
 }
 
+export function dateRangeForPreset(
+  preset: DatePresetId,
+  now = new Date(),
+): { dateFrom: string; dateTo: string } {
+  if (preset === 'last_12_months') return last12MonthsRange(now);
+  const daysByPreset: Record<Exclude<DatePresetId, 'last_12_months'>, number> = {
+    last_7_days: 7,
+    last_15_days: 15,
+    last_30_days: 30,
+    last_60_days: 60,
+    last_90_days: 90,
+  };
+  return inclusiveDaysRange(daysByPreset[preset], now);
+}
+
 export function detectActivePreset(
   dateFrom: string,
   dateTo: string,
   now = new Date(),
 ): DatePreset {
-  const month = last30DaysRange(now);
-  if (dateFrom === month.dateFrom && dateTo === month.dateTo) return 'last_30_days';
-  const year = last12MonthsRange(now);
-  if (dateFrom === year.dateFrom && dateTo === year.dateTo) return 'last_12_months';
+  for (const preset of DATE_PRESETS) {
+    const range = dateRangeForPreset(preset.id, now);
+    if (dateFrom === range.dateFrom && dateTo === range.dateTo) return preset.id;
+  }
   return null;
 }
 

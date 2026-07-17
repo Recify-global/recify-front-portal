@@ -35,6 +35,11 @@ export interface BackendTicket {
   paymentMethod: BackendPaymentMethod;
   status: BackendTicketStatus;
   reviewStatus?: BackendTicketReviewStatus;
+  /**
+   * Flag manual desde Histórico. Tickets antiguos pueden omitirlo en el wire;
+   * el mapper normaliza con `?? false`.
+   */
+  isAccreditable?: boolean;
   /** Factura CFDI vinculada (string u objeto si viene populado); null si no hay. */
   invoiceId?: string | { _id: string; [key: string]: unknown } | null;
   rawData?: BackendTicketRawData;
@@ -81,4 +86,6 @@ export interface UiTicket {
   reviewStatus: string;
   notas: string;
   imagenUrl?: string;
+  /** Normalizado: siempre boolean en UI (default false). */
+  isAccreditable: boolean;
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FileImage, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { resolveTicketImageUrl } from '@/utils/ticket-image';
@@ -13,6 +13,9 @@ interface TicketImagePreviewProps {
   plain?: boolean;
   alt?: string;
   className?: string;
+  onView?: (imageUrl: string) => void;
+  onImageError?: () => void;
+  onImageLoad?: () => void;
 }
 
 export function TicketImagePreview({
@@ -22,6 +25,9 @@ export function TicketImagePreview({
   plain = false,
   alt = 'Imagen del ticket',
   className,
+  onView,
+  onImageError,
+  onImageLoad,
 }: TicketImagePreviewProps) {
   const primaryUrl = resolveTicketImageUrl(imageUrl);
   const fallbackUrl = resolveTicketImageUrl(fallbackImageUrl);
@@ -37,6 +43,12 @@ export function TicketImagePreview({
   const hadSource = Boolean(primaryUrl || fallbackUrl);
   const hasError = hadSource && !currentUrl;
   const isImageLoading = Boolean(currentUrl && loadedUrl !== currentUrl);
+
+  useEffect(() => {
+    setFailedPrimaryUrl(null);
+    setFailedFallbackUrl(null);
+    setLoadedUrl(null);
+  }, [imageUrl, fallbackImageUrl]);
 
   if (!currentUrl && loading) {
     return (
@@ -69,20 +81,8 @@ export function TicketImagePreview({
     );
   }
 
-  return (
-    <a
-      href={currentUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      title="Ver imagen completa"
-      aria-label="Ver imagen del ticket en nueva pestaña"
-      className={cn(
-        'group relative block w-full overflow-hidden rounded-2xl border border-border/50 bg-muted',
-        plain ? 'h-auto min-h-44' : 'h-44',
-        'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-        className,
-      )}
-    >
+  const content = (
+    <>
       {isImageLoading ? (
         <span className="absolute inset-0 z-10 flex items-center justify-center bg-muted">
           <Loader2 size={20} className="animate-spin text-muted-foreground" />
@@ -92,13 +92,17 @@ export function TicketImagePreview({
         key={currentUrl}
         src={currentUrl}
         alt={alt}
-        onLoad={() => setLoadedUrl(currentUrl)}
+        onLoad={() => {
+          setLoadedUrl(currentUrl);
+          onImageLoad?.();
+        }}
         onError={() => {
           if (currentUrl === primaryUrl) {
             setFailedPrimaryUrl(primaryUrl);
           } else {
             setFailedFallbackUrl(currentUrl);
           }
+          onImageError?.();
         }}
         className={cn(
           'w-full transition-all duration-200',
@@ -114,6 +118,31 @@ export function TicketImagePreview({
           </span>
         </span>
       )}
-    </a>
+    </>
   );
+
+  const previewClassName = cn(
+    'group relative block w-full rounded-2xl border border-border/50 bg-muted',
+    plain ? 'h-auto min-h-44 overflow-auto' : 'h-44 overflow-hidden',
+    className,
+  );
+
+  if (!plain && onView) {
+    return (
+      <button
+        type="button"
+        title="Ver imagen completa"
+        aria-label="Ver imagen completa"
+        className={cn(
+          previewClassName,
+          'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+        )}
+        onClick={() => onView(currentUrl)}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return <div className={previewClassName}>{content}</div>;
 }

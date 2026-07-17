@@ -25,10 +25,6 @@ export async function listTickets(
   return apiRequest<Paginated<BackendTicket>>(url);
 }
 
-export async function getTicket(companyId: string, id: string): Promise<BackendTicket> {
-  return apiRequest<BackendTicket>(endpoints.tickets.byId(companyId, id));
-}
-
 export async function updateTicket(
   companyId: string,
   id: string,

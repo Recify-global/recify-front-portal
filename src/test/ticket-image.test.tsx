@@ -1,10 +1,14 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
+import { TicketImageDialog } from '@/components/recify/TicketImageDialog';
 import {
   resolveTicketImageUrl,
   selectTicketImageUrl,
+  mergeTicketImageUrl,
 } from '@/utils/ticket-image';
+import { getTicketImageUrl } from '@/utils/ticket-display';
+import type { BackendTicket } from '@/types/ticket';
 
 afterEach(() => {
   cleanup();
@@ -28,16 +32,69 @@ describe('resolveTicketImageUrl', () => {
     );
   });
 
-  it('rejects dangerous schemes and token query params', () => {
+  it('rejects dangerous schemes and session token query params', () => {
     expect(resolveTicketImageUrl('javascript:alert(1)')).toBeNull();
+    expect(resolveTicketImageUrl('data:image/png;base64,abc')).toBeNull();
+    expect(resolveTicketImageUrl('file:///tmp/ticket.jpg')).toBeNull();
+    expect(resolveTicketImageUrl('ftp://files.example/ticket.jpg')).toBeNull();
+    expect(resolveTicketImageUrl('//evil.example/ticket.jpg')).toBeNull();
     expect(
       resolveTicketImageUrl('https://cdn.example.com/a.jpg?token=secret'),
     ).toBeNull();
+    expect(
+      resolveTicketImageUrl('https://user:pass@cdn.example.com/a.jpg'),
+    ).toBeNull();
+  });
+
+  it('accepts signed HTTPS URLs and preserves the full query string', () => {
+    const signed =
+      'https://storage.example.com/tickets/a.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA%2F20250715%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250715T000000Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=deadbeef';
+    expect(resolveTicketImageUrl(signed)).toBe(signed);
   });
 
   it('returns null for empty or undefined values', () => {
     expect(resolveTicketImageUrl(undefined)).toBeNull();
     expect(resolveTicketImageUrl('')).toBeNull();
+  });
+});
+
+describe('mergeTicketImageUrl', () => {
+  it('prefers the tickets list URL over daily-report cache', () => {
+    expect(
+      mergeTicketImageUrl(
+        { imageUrl: 'https://cdn.example.com/fresh.jpg' },
+        { imageUrl: 'https://cdn.example.com/stale.jpg' },
+      ),
+    ).toBe('https://cdn.example.com/fresh.jpg');
+  });
+
+  it('falls back to daily-report when the list has no image', () => {
+    expect(
+      mergeTicketImageUrl(
+        { imageUrl: null },
+        { imageUrl: 'https://cdn.example.com/daily.jpg' },
+      ),
+    ).toBe('https://cdn.example.com/daily.jpg');
+  });
+});
+
+describe('getTicketImageUrl', () => {
+  it('prefers top-level signed imageUrl over stale rawData', () => {
+    const ticket = {
+      _id: 'ticket-a',
+      companyId: 'company-a',
+      type: 'egreso',
+      date: '2026-04-14T12:00:00.000Z',
+      amount: 100,
+      paymentMethod: 'card',
+      status: 'processed',
+      reviewStatus: 'revisado',
+      imageUrl: 'https://cdn.example.com/signed.jpg',
+      rawData: { imageUrl: 'https://cdn.example.com/stale.jpg' },
+      created_at: '2026-04-14T12:00:00.000Z',
+      updated_at: '2026-04-14T12:00:00.000Z',
+    } satisfies BackendTicket;
+    expect(getTicketImageUrl(ticket)).toBe('https://cdn.example.com/signed.jpg');
   });
 });
 
@@ -128,5 +185,87 @@ describe('TicketImagePreview', () => {
       'src',
       'https://cdn.example.com/next.jpg',
     );
+  });
+
+  it('ignores a late error from the previous image', () => {
+    const view = render(
+      <TicketImagePreview imageUrl="https://cdn.example.com/a.jpg" alt="Ticket A" />,
+    );
+    const staleImage = screen.getByAltText('Ticket A');
+    view.rerender(
+      <TicketImagePreview imageUrl="https://cdn.example.com/b.jpg" alt="Ticket B" />,
+    );
+    fireEvent.error(staleImage);
+    expect(screen.getByAltText('Ticket B')).toHaveAttribute(
+      'src',
+      'https://cdn.example.com/b.jpg',
+    );
+    expect(screen.queryByText('No fue posible cargar la imagen.')).not.toBeInTheDocument();
+  });
+
+  it('opens internally with the active fallback and never renders an external link', () => {
+    const onView = vi.fn();
+    render(
+      <TicketImagePreview
+        imageUrl="https://cdn.example.com/broken.jpg"
+        fallbackImageUrl="blob:http://localhost/local-preview"
+        alt="Ticket"
+        onView={onView}
+      />,
+    );
+    fireEvent.error(screen.getByAltText('Ticket'));
+    fireEvent.click(screen.getByRole('button', { name: 'Ver imagen completa' }));
+    expect(onView).toHaveBeenCalledWith('blob:http://localhost/local-preview');
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+});
+
+describe('TicketImageDialog', () => {
+  it('shows a safe image with accessible close controls', () => {
+    const onOpenChange = vi.fn();
+    render(
+      <TicketImageDialog
+        open
+        onOpenChange={onOpenChange}
+        imageUrl="https://cdn.example.com/ticket.jpg"
+        alt="Ticket de Café Central"
+        title="Ticket de Café Central"
+      />,
+    );
+    expect(screen.getByRole('dialog', { name: 'Ticket de Café Central' })).toBeInTheDocument();
+    expect(screen.getByAltText('Ticket de Café Central')).toHaveAttribute(
+      'src',
+      'https://cdn.example.com/ticket.jpg',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('does not open for an unsafe URL', () => {
+    render(
+      <TicketImageDialog
+        open
+        onOpenChange={vi.fn()}
+        imageUrl="javascript:alert(1)"
+        alt="Ticket"
+      />,
+    );
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('shows a retry action after a load failure', () => {
+    const onRetry = vi.fn();
+    render(
+      <TicketImageDialog
+        open
+        onOpenChange={vi.fn()}
+        imageUrl="https://cdn.example.com/broken.jpg"
+        alt="Ticket"
+        onRetry={onRetry}
+      />,
+    );
+    fireEvent.error(screen.getByAltText('Ticket'));
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });

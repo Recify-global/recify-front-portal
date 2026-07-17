@@ -8,6 +8,7 @@ import type {
   RegisterRequest,
 } from '@/types/auth';
 import {
+  getAuthSessionGeneration,
   getStoredCompanyId,
   getStoredToken,
   getStoredUser,
@@ -17,6 +18,7 @@ import {
 } from '@/auth/storage';
 import {
   markAuthSessionActive,
+  shouldFinalizeSessionCleanup,
   terminateAuthSession,
 } from '@/auth/session-cleanup';
 
@@ -66,9 +68,16 @@ export function useAuth() {
   const logout = useCallback((): Promise<void> => {
     if (logoutClaimRef.current) return logoutClaimRef.current;
 
-    const task = terminateAuthSession().then(() => {
-      navigate('/auth', { replace: true });
-    });
+    const closingGeneration = getAuthSessionGeneration();
+    const task = terminateAuthSession()
+      .then(() => {
+        if (shouldFinalizeSessionCleanup(closingGeneration)) {
+          navigate('/auth', { replace: true });
+        }
+      })
+      .finally(() => {
+        logoutClaimRef.current = null;
+      });
     logoutClaimRef.current = task;
     return task;
   }, [navigate]);

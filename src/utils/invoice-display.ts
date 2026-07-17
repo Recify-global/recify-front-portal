@@ -91,3 +91,14 @@ export function isHighConfidenceScore(score: number): boolean {
 export function ticketHasInvoice(ticket: Pick<BackendTicket, 'invoiceId'>): boolean {
   return Boolean(ticket.invoiceId);
 }
+
+/** Acepta únicamente URLs HTTPS absolutas para PDFs firmados. */
+export function resolveInvoiceFileUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}

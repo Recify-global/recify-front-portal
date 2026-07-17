@@ -1,7 +1,6 @@
 import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HistoryTicketTable } from '@/components/recify/HistoryTicketTable';
-import { HistoryTicketDrawer } from '@/components/recify/HistoryTicketDrawer';
 import {
   saveHistoryTicketDrafts,
   useHistoryTableEditing,
@@ -58,10 +57,11 @@ function tableProps(overrides: Partial<React.ComponentProps<typeof HistoryTicket
     onUpdateDraft: vi.fn(),
     onSave: vi.fn(),
     onCancel: vi.fn(),
-    onOpen: vi.fn(),
     onPreviewImage: vi.fn(),
     onDelete: vi.fn(),
     onClearFilters: vi.fn(),
+    onToggleAccreditable: vi.fn(),
+    savingAccreditableIds: new Set<string>(),
     ...overrides,
   };
 }
@@ -103,9 +103,10 @@ describe('History presentation', () => {
       'Tipo',
       'Estatus',
       'Categoría',
+      'Acreditable',
       'Acciones',
     ].forEach((heading) => {
-      expect(screen.getByRole('columnheader', { name: new RegExp(`^${heading}$`, 'i') }))
+      expect(screen.getByRole('columnheader', { name: new RegExp(heading, 'i') }))
         .toBeInTheDocument();
     });
     [
@@ -128,31 +129,35 @@ describe('History presentation', () => {
     expect(onStartEditing).toHaveBeenCalledWith(['ticket-a']);
   });
 
-  it('keeps the drawer read-only without review UI', () => {
-    render(
-      <HistoryTicketDrawer
-        ticket={uiTicket}
-        noteSources={[backendTicket]}
-        onClose={vi.fn()}
+  it('does not make rows interactive after removing the drawer', () => {
+    const onPreviewImage = vi.fn();
+    const { container } = render(
+      <HistoryTicketTable {...tableProps({ onPreviewImage })} />,
+    );
+    const row = container.querySelector('tbody tr');
+    expect(row).not.toHaveClass('cursor-pointer');
+    fireEvent.click(screen.getByText('Café Central'));
+    expect(onPreviewImage).not.toHaveBeenCalled();
+    expect(screen.queryByTitle('Consultar ticket')).not.toBeInTheDocument();
+  });
+
+  it('opens only the image action and disables it without a safe image', () => {
+    const onPreviewImage = vi.fn();
+    const withImage = { ...uiTicket, imagenUrl: 'https://cdn.example.com/ticket.jpg' };
+    const view = render(
+      <HistoryTicketTable
+        {...tableProps({ tickets: [withImage], onPreviewImage })}
       />,
     );
-    [
-      'Fecha y hora',
-      'Subtotal',
-      'IVA',
-      'Total',
-      'Moneda',
-      'Método de pago',
-      'Tipo',
-      'Estatus',
-      'Categoría',
-      'Productos y notas detectadas',
-      'Sin imagen',
-    ].forEach((text) => {
-      expect(screen.getByText(text)).toBeInTheDocument();
-    });
-    expect(screen.queryByText(/Revisi[oó]n|Revisado|Editar ticket/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Ver imagen'));
+    expect(onPreviewImage).toHaveBeenCalledWith(withImage);
+
+    view.rerender(
+      <HistoryTicketTable
+        {...tableProps({ onPreviewImage })}
+      />,
+    );
+    expect(screen.getByTitle('Sin imagen')).toBeDisabled();
   });
 });
 

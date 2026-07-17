@@ -15,7 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Edit3,
-  Eye,
+  HelpCircle,
   Loader2,
   Receipt,
   Save,
@@ -24,6 +24,13 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import {
   Select,
   SelectContent,
@@ -37,6 +44,7 @@ import { StatusBadge } from './StatusBadge';
 import { cn } from '@/lib/utils';
 import { formatMxn } from '@/utils/financial-kpis';
 import { formatTicketDateTime } from '@/utils/ticket-display';
+import { resolveTicketImageUrl } from '@/utils/ticket-image';
 import type { HistoryTicketEditDraft } from '@/utils/ticket-edit';
 import type {
   BackendPaymentMethod,
@@ -82,10 +90,11 @@ interface HistoryTicketTableProps {
   onUpdateDraft: (ticketId: string, patch: Partial<HistoryTicketEditDraft>) => void;
   onSave: () => void;
   onCancel: () => void;
-  onOpen: (ticket: UiTicket) => void;
   onPreviewImage: (ticket: UiTicket) => void;
   onDelete: (ticketId: string) => void;
   onClearFilters: () => void;
+  onToggleAccreditable: (ticket: UiTicket, nextValue: boolean) => void;
+  savingAccreditableIds: ReadonlySet<string>;
 }
 
 function columnClass(columnId: string): string {
@@ -103,11 +112,13 @@ function columnClass(columnId: string): string {
     case 'tipo':
       return 'w-[9%]';
     case 'estatus':
-      return 'w-[10%]';
+      return 'w-[9%]';
     case 'categoria':
-      return 'w-[13%]';
-    case 'actions':
       return 'w-[11%]';
+    case 'isAccreditable':
+      return 'w-[9%]';
+    case 'actions':
+      return 'w-[10%]';
     default:
       return '';
   }
@@ -131,10 +142,11 @@ export function HistoryTicketTable({
   onUpdateDraft,
   onSave,
   onCancel,
-  onOpen,
   onPreviewImage,
   onDelete,
   onClearFilters,
+  onToggleAccreditable,
+  savingAccreditableIds,
 }: HistoryTicketTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const dirtyIds = useMemo(() => new Set(dirtyTicketIds), [dirtyTicketIds]);
@@ -156,7 +168,6 @@ export function HistoryTicketTable({
             placeholder="Nombre del comercio"
             aria-label={`Comercio de ${row.original.comercio}`}
             className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
-            onClick={(event) => event.stopPropagation()}
             onChange={(event) => onUpdateDraft(row.original.id, { vendor: event.target.value })}
           />
         ) : (
@@ -187,7 +198,6 @@ export function HistoryTicketTable({
             value={draft.date}
             aria-label={`Fecha de ${row.original.comercio}`}
             className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
-            onClick={(event) => event.stopPropagation()}
             onChange={(event) => onUpdateDraft(row.original.id, { date: event.target.value })}
           />
         );
@@ -211,7 +221,6 @@ export function HistoryTicketTable({
             value={draft.amount}
             aria-label={`Total de ${row.original.comercio}`}
             className="h-9 w-full rounded-lg bg-background text-right text-sm tabular-nums shadow-sm"
-            onClick={(event) => event.stopPropagation()}
             onChange={(event) => onUpdateDraft(row.original.id, { amount: event.target.value })}
           />
         ) : (
@@ -237,7 +246,6 @@ export function HistoryTicketTable({
             <SelectTrigger
               className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
               aria-label={`Método de pago de ${row.original.comercio}`}
-              onClick={(event) => event.stopPropagation()}
             >
               <SelectValue />
             </SelectTrigger>
@@ -266,7 +274,6 @@ export function HistoryTicketTable({
               <SelectTrigger
                 className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
                 aria-label={`Tipo de ${row.original.comercio}`}
-                onClick={(event) => event.stopPropagation()}
               >
                 <SelectValue />
               </SelectTrigger>
@@ -303,7 +310,6 @@ export function HistoryTicketTable({
             <SelectTrigger
               className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
               aria-label={`Estatus de ${row.original.comercio}`}
-              onClick={(event) => event.stopPropagation()}
             >
               <SelectValue />
             </SelectTrigger>
@@ -330,7 +336,6 @@ export function HistoryTicketTable({
             placeholder="Categoría"
             aria-label={`Categoría de ${row.original.comercio}`}
             className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
-            onClick={(event) => event.stopPropagation()}
             onChange={(event) => onUpdateDraft(row.original.id, { category: event.target.value })}
           />
         ) : (
@@ -339,32 +344,71 @@ export function HistoryTicketTable({
       },
     },
     {
+      id: 'isAccreditable',
+      accessorKey: 'isAccreditable',
+      header: () => (
+        <div className="flex items-center gap-1">
+          <span>Acreditable</span>
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="Qué significa Acreditable"
+                >
+                  <HelpCircle size={12} aria-hidden />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs">
+                Indica si este ticket puede utilizarse para un proceso de acreditación.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+      ),
+      enableSorting: false,
+      cell: ({ row }) => {
+        const checked = row.original.isAccreditable ?? false;
+        const saving = savingAccreditableIds.has(row.original.id);
+        return (
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={checked}
+              disabled={saving || isEditing}
+              aria-label={`Marcar ticket de ${row.original.comercio} como acreditable`}
+              onCheckedChange={(next) => {
+                if (saving || isEditing) return;
+                onToggleAccreditable(row.original, next);
+              }}
+            />
+            <span className="text-xs text-muted-foreground">
+              {checked ? 'Sí' : 'No'}
+            </span>
+            {saving ? <Loader2 size={12} className="animate-spin text-muted-foreground" /> : null}
+          </div>
+        );
+      },
+    },
+    {
       id: 'actions',
       header: 'Acciones',
       enableSorting: false,
-      cell: ({ row }) => (
-        <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
+      cell: ({ row }) => {
+        const hasImage = Boolean(resolveTicketImageUrl(row.original.imagenUrl));
+        return (
+        <div className="flex items-center gap-1">
           <Button
             type="button"
             variant="ghost"
             size="icon"
             className="h-8 w-8"
             aria-label={`Ver imagen del ticket de ${row.original.comercio}`}
-            title="Ver imagen"
+            title={hasImage ? 'Ver imagen' : 'Sin imagen'}
+            disabled={!hasImage}
             onClick={() => onPreviewImage(row.original)}
           >
             <Camera size={15} />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8"
-            aria-label={`Consultar ticket de ${row.original.comercio}`}
-            title="Consultar ticket"
-            onClick={() => onOpen(row.original)}
-          >
-            <Eye size={15} />
           </Button>
           <Button
             type="button"
@@ -381,9 +425,19 @@ export function HistoryTicketTable({
               : <Trash2 size={15} />}
           </Button>
         </div>
-      ),
+        );
+      },
     },
-  ], [deletingTicketId, drafts, isEditing, onDelete, onOpen, onPreviewImage, onUpdateDraft]);
+  ], [
+    savingAccreditableIds,
+    deletingTicketId,
+    drafts,
+    isEditing,
+    onDelete,
+    onPreviewImage,
+    onToggleAccreditable,
+    onUpdateDraft,
+  ]);
 
   const table = useReactTable({
     data: tickets,
@@ -497,12 +551,9 @@ export function HistoryTicketTable({
                     <tr
                       key={row.id}
                       className={cn(
-                        'group cursor-pointer transition-colors hover:bg-surface-hover',
+                        'group transition-colors hover:bg-surface-hover',
                         isDirty && 'bg-amber-50/70 dark:bg-amber-950/20',
                       )}
-                      onClick={() => {
-                        if (!isEditing) onOpen(row.original);
-                      }}
                     >
                       {row.getVisibleCells().map((cell) => (
                         <td

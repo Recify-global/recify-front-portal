@@ -3,7 +3,7 @@ import { AppLayout } from '@/components/recify/AppLayout';
 import { StatusBadge } from '@/components/recify/StatusBadge';
 import { CategoryBadge } from '@/components/recify/CategoryBadge';
 import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
-import { TicketNotes } from '@/components/recify/TicketNotes';
+import { TicketImageDialog } from '@/components/recify/TicketImageDialog';
 import { CameraCaptureDialog } from '@/components/recify/CameraCaptureDialog';
 import { BatchUploadDialog } from '@/components/recify/BatchUploadDialog';
 import { TicketScanAnimation } from '@/components/recify/TicketScanAnimation';
@@ -79,12 +79,12 @@ export default function UploadPage() {
   const [uploadMode, setUploadMode] = useState<UploadMode>('ticket');
   const [invoiceResult, setInvoiceResult] = useState<UploadInvoiceResponse | null>(null);
   const [ticket, setTicket] = useState<UiTicket | null>(null);
-  const [analysisRaw, setAnalysisRaw] = useState<unknown>(null);
   const [editBaseline, setEditBaseline] = useState<TicketEditDraft | null>(null);
   const [draft, setDraft] = useState<TicketEditDraft | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | undefined>(undefined);
+  const [imageDialogUrl, setImageDialogUrl] = useState<string | null>(null);
   const [hasPersistedTicket, setHasPersistedTicket] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
@@ -94,6 +94,7 @@ export default function UploadPage() {
   const previousCompanyIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const saveClaimRef = useRef(false);
+  const invoiceClaimRef = useRef(false);
   const uploadFlowRef = useRef(createIndividualUploadFlow());
   const { token, companyId } = useAuth();
   const preprocessMutation = usePreprocessTicket();
@@ -114,6 +115,7 @@ export default function UploadPage() {
 
   const replacePreview = useCallback((nextPreview: string | undefined) => {
     const previousPreview = previewUrlRef.current;
+    setImageDialogUrl((current) => (current ? nextPreview ?? null : null));
     if (previousPreview && previousPreview !== nextPreview) {
       URL.revokeObjectURL(previousPreview);
     }
@@ -124,12 +126,12 @@ export default function UploadPage() {
   const clearUploadState = useCallback(() => {
     uploadFlowRef.current.cancel();
     saveClaimRef.current = false;
+    invoiceClaimRef.current = false;
     replacePreview(undefined);
     setState('idle');
     setUploadMode('ticket');
     setInvoiceResult(null);
     setTicket(null);
-    setAnalysisRaw(null);
     setEditBaseline(null);
     setDraft(null);
     setSelectedFile(null);
@@ -204,7 +206,7 @@ export default function UploadPage() {
       return false;
     }
     if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-      toast.error('Formato no permitido. Usa JPG, PNG, WEBP o GIF (o PDF para facturas).');
+      toast.error('Formato no permitido. Usa PNG, JPG o PDF.');
       return false;
     }
     if (file.size > MAX_SIZE_BYTES) {
@@ -234,33 +236,58 @@ export default function UploadPage() {
   };
 
   const runInvoiceUpload = async (file: File) => {
+    if (invoiceClaimRef.current) return;
     if (!validateSession()) return;
+    if (!companyId) return;
     if (file.size > MAX_SIZE_BYTES) {
       toast.error('El archivo supera el máximo de 10 MB.');
       return;
     }
 
-    uploadFlowRef.current.cancel();
+    invoiceClaimRef.current = true;
+    const context = uploadFlowRef.current.begin(companyId);
+    const controller = uploadFlowRef.current.createController(context);
+    if (!controller) {
+      invoiceClaimRef.current = false;
+      return;
+    }
+
     replacePreview(undefined);
     setSelectedFile(file);
     setUploadMode('invoice');
     setInvoiceResult(null);
     setTicket(null);
-    setAnalysisRaw(null);
     setEditBaseline(null);
     setDraft(null);
     setHasPersistedTicket(false);
     setState('analyzing');
 
     try {
-      const response = await invoiceMutation.mutateAsync({ file });
+      const response = await invoiceMutation.mutateAsync({
+        companyId: context.companyId,
+        file,
+        signal: controller.signal,
+      });
+      if (!isCurrentFlow(context, controller.signal)) return;
+
       setInvoiceResult(response);
       setState('done');
       toast.success('Factura procesada correctamente.');
     } catch (err) {
+      if (!isCurrentFlow(context, controller.signal) || isAbortLike(err)) return;
       setState('idle');
       setSelectedFile(null);
       toast.error(extractInvoiceError(err));
+    } finally {
+      uploadFlowRef.current.releaseController(controller);
+      const active = uploadFlowRef.current.getActive();
+      if (
+        active?.generation === context.generation &&
+        active.companyId === context.companyId
+      ) {
+        invoiceClaimRef.current = false;
+        uploadFlowRef.current.complete(context);
+      }
     }
   };
 
@@ -288,7 +315,6 @@ export default function UploadPage() {
       });
       const nextBaseline = createDraftFromAnalyzedTicket(response.ticket, mapped);
       setTicket(mapped);
-      setAnalysisRaw(response.ticket);
       setEditBaseline(nextBaseline);
       setDraft(null);
       setState('done');
@@ -324,7 +350,6 @@ export default function UploadPage() {
     setUploadMode('ticket');
     setInvoiceResult(null);
     setTicket(null);
-    setAnalysisRaw(null);
     setEditBaseline(null);
     setDraft(null);
     setHasPersistedTicket(false);
@@ -449,7 +474,6 @@ export default function UploadPage() {
         imagenUrl: mapped.imagenUrl ?? response.imageUrl ?? previewUrlRef.current,
       };
       setTicket(nextTicket);
-      setAnalysisRaw(persistedTicket);
       const nextBaseline = createDraftFromTicket(persistedTicket);
       setEditBaseline(nextBaseline);
       setDraft(null);
@@ -606,7 +630,7 @@ export default function UploadPage() {
                     </p>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Ticket: PNG, JPG, WEBP o GIF · Factura: PDF de una página — hasta 10 MB
+                    PNG, JPG o PDF · Máx. 10 MB
                   </p>
                 </div>
               )}
@@ -725,6 +749,7 @@ export default function UploadPage() {
                   imageUrl={ticket.imagenUrl}
                   fallbackImageUrl={previewUrl}
                   alt={`Ticket de ${ticket.comercio}`}
+                  onView={setImageDialogUrl}
                 />
 
                 {/* Summary mini card */}
@@ -878,10 +903,6 @@ export default function UploadPage() {
                         </div>
                       </div>
 
-                      <div className="pt-1">
-                        <TicketNotes title="Productos detectados" sources={[analysisRaw, ticket]} />
-                      </div>
-
                       <div className="flex flex-col sm:flex-row gap-2 pt-1">
                         <Button
                           className="flex-1 h-10 rounded-xl bg-gradient-primary text-primary-foreground transition-all hover:shadow-md hover:ring-2 hover:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none disabled:hover:ring-0"
@@ -914,9 +935,6 @@ export default function UploadPage() {
                             <p className="text-sm font-medium text-foreground">{field.value}</p>
                           </div>
                         ))}
-                      </div>
-                      <div className="mt-3 pt-3 border-t border-border/50">
-                        <TicketNotes title="Productos detectados" sources={[analysisRaw, ticket]} />
                       </div>
                     </>
                   )}
@@ -979,6 +997,15 @@ export default function UploadPage() {
           </div>
         </div>
       </div>
+      <TicketImageDialog
+        open={Boolean(imageDialogUrl && ticket)}
+        onOpenChange={(open) => {
+          if (!open) setImageDialogUrl(null);
+        }}
+        imageUrl={imageDialogUrl}
+        alt={ticket ? `Ticket de ${ticket.comercio}` : 'Imagen del ticket'}
+        title={ticket ? `Ticket de ${ticket.comercio}` : 'Imagen del ticket'}
+      />
     </AppLayout>
   );
 }

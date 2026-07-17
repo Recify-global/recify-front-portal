@@ -8,6 +8,7 @@ import {
   INVOICE_TYPE_LABELS,
   formatInvoiceDate,
   formatInvoicePaymentForm,
+  resolveInvoiceFileUrl,
 } from '@/utils/invoice-display';
 import { formatMxn } from '@/utils/financial-kpis';
 
@@ -21,6 +22,7 @@ interface InvoiceUploadResultProps {
  */
 export function InvoiceUploadResult({ response }: InvoiceUploadResultProps) {
   const [invoice, setInvoice] = useState<BackendInvoice>(response.invoice);
+  const pdfUrl = resolveInvoiceFileUrl(invoice.fileUrl || response.fileUrl);
 
   const fields = [
     { label: 'Emisor', value: invoice.issuerName ?? '—', key: 'issuerName' },
@@ -82,9 +84,10 @@ export function InvoiceUploadResult({ response }: InvoiceUploadResultProps) {
       <Button
         variant="outline"
         className="w-full h-11 rounded-xl"
-        onClick={() =>
-          window.open(invoice.fileUrl || response.fileUrl, '_blank', 'noopener,noreferrer')
-        }
+        onClick={() => {
+          if (pdfUrl) window.open(pdfUrl, '_blank', 'noopener,noreferrer');
+        }}
+        disabled={!pdfUrl}
       >
         <FileText size={16} className="mr-2" /> Abrir PDF
       </Button>

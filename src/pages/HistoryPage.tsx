@@ -3,14 +3,7 @@ import { AppLayout } from '@/components/recify/AppLayout';
 import { MetricCard } from '@/components/recify/MetricCard';
 import { SkeletonCard } from '@/components/recify/SkeletonCard';
 import { HistoryTicketTable } from '@/components/recify/HistoryTicketTable';
-import { HistoryTicketDrawer } from '@/components/recify/HistoryTicketDrawer';
-import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { TicketImageDialog } from '@/components/recify/TicketImageDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -32,10 +25,9 @@ import {
   Receipt, ArrowDownCircle, ArrowUpCircle, Scale, CreditCard,
   AlertCircle, Search, X, Loader2, Info,
 } from 'lucide-react';
-import { mapBackendTicket, mapBackendTickets } from '@/mappers/ticket.mapper';
+import { mapBackendTickets } from '@/mappers/ticket.mapper';
 import {
   useDashboardDailyReport,
-  useTicket,
   useTickets,
   useUpdateDashboardTicket,
 } from '@/hooks/use-tickets';
@@ -48,18 +40,29 @@ import { useAuth } from '@/hooks/use-auth';
 import { isAuthSessionClosing } from '@/auth/session-cleanup';
 import { deleteTicket } from '@/services/tickets.service';
 import {
+  DATE_PRESETS,
+  dateRangeForPreset,
   detectActivePreset,
   formatMxn,
   isValidDateRange,
   last12MonthsRange,
-  last30DaysRange,
+  type DatePresetId,
 } from '@/utils/financial-kpis';
-import { selectTicketImageUrl } from '@/utils/ticket-image';
+import {
+  invalidateTicketDerivedQueries,
+  ticketUpdateAffectsFinancialKpis,
+} from '@/utils/ticket-derived-queries';
+import { buildHistoryTicketUpdatePayload } from '@/utils/ticket-edit';
+import { selectTicketImageUrl, mergeTicketImageUrl } from '@/utils/ticket-image';
 import { cn } from '@/lib/utils';
-import type {
-  BackendTicket,
-  UiTicket,
-} from '@/types/ticket';
+import type { UiTicket } from '@/types/ticket';
+
+interface SelectedTicketImage {
+  ticketId: string;
+  companyId: string;
+  imageUrl: string;
+  alt: string;
+}
 
 const formatMXN = (n: number) => formatMxn(n);
 
@@ -91,33 +94,37 @@ export default function HistoryPage() {
   const [periodReference] = useState(() => new Date());
   const [initialDateRange] = useState(() => last12MonthsRange(periodReference));
   const [globalFilter, setGlobalFilter] = useState('');
-  const [selectedTicket, setSelectedTicket] = useState<UiTicket | null>(null);
-  const [selectedTicketCompanyId, setSelectedTicketCompanyId] = useState<string | null>(null);
-  const [detailView, setDetailView] = useState<'drawer' | 'image'>('drawer');
+  const [selectedImage, setSelectedImage] = useState<SelectedTicketImage | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFromFilter, setDateFromFilter] = useState(initialDateRange.dateFrom);
   const [dateToFilter, setDateToFilter] = useState(initialDateRange.dateTo);
-  const [lastKnownImageUrl, setLastKnownImageUrl] = useState<string | null>(null);
   const [isSavingTable, setIsSavingTable] = useState(false);
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
+  const [savingAccreditableIds, setSavingAccreditableIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [isImageRetrying, setIsImageRetrying] = useState(false);
 
   const { companyId } = useAuth();
   const queryClient = useQueryClient();
   const companyIdRef = useRef(companyId);
   const previousCompanyIdRef = useRef(companyId);
   const savingClaimRef = useRef(false);
+  const savingAccreditableRef = useRef<Set<string>>(new Set());
+  const imageRetryCountRef = useRef(0);
   const tableEditing = useHistoryTableEditing();
   const { cancelEditing, isTableEditing } = tableEditing;
   companyIdRef.current = companyId;
 
-  // P0 multitenant: al cambiar compañía, cerrar detalle y limpiar fallback visual.
+  // P0 multitenant: una imagen nunca sobrevive al cambio de compañía.
   useEffect(() => {
     if (previousCompanyIdRef.current !== companyId) {
-      setSelectedTicket(null);
-      setSelectedTicketCompanyId(null);
-      setLastKnownImageUrl(null);
+      setSelectedImage(null);
+      imageRetryCountRef.current = 0;
+      savingAccreditableRef.current = new Set();
+      setSavingAccreditableIds(new Set());
       if (previousCompanyIdRef.current && isTableEditing) {
         cancelEditing();
         if (companyId && !isAuthSessionClosing()) {
@@ -128,11 +135,18 @@ export default function HistoryPage() {
     previousCompanyIdRef.current = companyId;
   }, [cancelEditing, companyId, isTableEditing]);
 
-  const ticketsQuery = useTickets({ page: 1, limit: 100 });
-  const dailyReportQuery = useDashboardDailyReport({ page: 1, limit: 100 });
-  const selectedTicketIdForQuery =
-    selectedTicketCompanyId === companyId ? selectedTicket?.id : null;
-  const detailQuery = useTicket(selectedTicketIdForQuery);
+  const ticketsQuery = useTickets({
+    page: 1,
+    limit: 100,
+    dateFrom: dateFromFilter,
+    dateTo: dateToFilter,
+  });
+  const dailyReportQuery = useDashboardDailyReport({
+    page: 1,
+    limit: 100,
+    dateFrom: dateFromFilter,
+    dateTo: dateToFilter,
+  });
   const updateMutation = useUpdateDashboardTicket();
 
   const financialKpis = useFinancialKpis({
@@ -155,9 +169,10 @@ export default function HistoryPage() {
         ...dailyTicket,
         rawData: dailyTicket.rawData ?? ticket.rawData,
         vendor: dailyTicket.vendor ?? ticket.vendor,
-        imageUrl: dailyTicket.imageUrl ?? ticket.imageUrl,
+        imageUrl: mergeTicketImageUrl(ticket, dailyTicket),
         tax: dailyTicket.tax ?? ticket.tax,
         subtotal: dailyTicket.subtotal ?? ticket.subtotal,
+        isAccreditable: ticket.isAccreditable ?? dailyTicket.isAccreditable ?? false,
       };
     });
   }, [dailyReportQuery.data?.tickets, ticketsQuery.data?.data]);
@@ -202,105 +217,11 @@ export default function HistoryPage() {
     );
   };
 
-  const applyLastMonthPreset = () => {
-    const range = last30DaysRange(periodReference);
+  const applyDatePreset = (preset: DatePresetId) => {
+    const range = dateRangeForPreset(preset, periodReference);
     setDateFromFilter(range.dateFrom);
     setDateToFilter(range.dateTo);
   };
-
-  const applyLastYearPreset = () => {
-    const range = last12MonthsRange(periodReference);
-    setDateFromFilter(range.dateFrom);
-    setDateToFilter(range.dateTo);
-  };
-
-  const selectedTicketDetail = useMemo(() => {
-    if (
-      !selectedTicket ||
-      !companyId ||
-      selectedTicketCompanyId !== companyId
-    ) {
-      return null;
-    }
-    // Solo usar detalle remoto si pertenece a la misma compañía activa.
-    if (
-      detailQuery.data &&
-      companyId &&
-      detailQuery.data.companyId === companyId &&
-      detailQuery.data._id === selectedTicket.id
-    ) {
-      const currentBackendTicket = backendTicketById.get(selectedTicket.id);
-      const mergedDetail: BackendTicket = {
-        ...currentBackendTicket,
-        ...detailQuery.data,
-        rawData: detailQuery.data.rawData ?? currentBackendTicket?.rawData,
-        vendor: detailQuery.data.vendor ?? currentBackendTicket?.vendor,
-        imageUrl: detailQuery.data.imageUrl ?? currentBackendTicket?.imageUrl,
-        tax: detailQuery.data.tax ?? currentBackendTicket?.tax,
-        subtotal: detailQuery.data.subtotal ?? currentBackendTicket?.subtotal,
-      };
-      const mapped = mapBackendTicket(mergedDetail);
-      const currentListTicket = tickets.find(
-        (ticket) => ticket.id === selectedTicket.id,
-      );
-      const imageUrl = selectTicketImageUrl(
-        companyId,
-        selectedTicket.id,
-        {
-          ticketId: detailQuery.data._id,
-          companyId: detailQuery.data.companyId,
-          imageUrl: mapped.imagenUrl,
-        },
-        {
-          ticketId: selectedTicket.id,
-          companyId: selectedTicketCompanyId,
-          imageUrl:
-            currentListTicket?.imagenUrl ??
-            selectedTicket.imagenUrl ??
-            lastKnownImageUrl,
-        },
-      );
-      return {
-        ...mapped,
-        imagenUrl: imageUrl ?? undefined,
-      };
-    }
-    // Fallback de lista solo mientras el detalle de ESTA compañía carga.
-    const currentListTicket = tickets.find(
-      (ticket) => ticket.id === selectedTicket.id,
-    );
-    const listImageUrl = selectTicketImageUrl(
-      companyId,
-      selectedTicket.id,
-      null,
-      {
-        ticketId: selectedTicket.id,
-        companyId: selectedTicketCompanyId,
-        imageUrl:
-          currentListTicket?.imagenUrl ??
-          selectedTicket.imagenUrl ??
-          lastKnownImageUrl,
-      },
-    );
-    return {
-      ...selectedTicket,
-      imagenUrl: listImageUrl ?? undefined,
-    };
-  }, [
-    companyId,
-    backendTicketById,
-    detailQuery.data,
-    lastKnownImageUrl,
-    selectedTicket,
-    selectedTicketCompanyId,
-    tickets,
-  ]);
-
-  useEffect(() => {
-    if (selectedTicketDetail?.imagenUrl) {
-      setLastKnownImageUrl(selectedTicketDetail.imagenUrl);
-    }
-  }, [selectedTicketDetail?.imagenUrl]);
 
   const deleteMutation = useMutation({
     mutationFn: async ({
@@ -318,13 +239,11 @@ export default function HistoryPage() {
     onSuccess: async (_data, { originCompanyId }) => {
       if (isAuthSessionClosing()) return;
       toast.success('Ticket eliminado.');
-      setSelectedTicket(null);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['tickets', originCompanyId] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard-daily-report', originCompanyId] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard-summary', originCompanyId] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard-by-payment-method', originCompanyId] }),
-      ]);
+      await invalidateTicketDerivedQueries(queryClient, originCompanyId, {
+        tickets: true,
+        dailyReport: true,
+        financialKpis: true,
+      });
     },
     onError: () => {
       if (isAuthSessionClosing()) return;
@@ -336,24 +255,83 @@ export default function HistoryPage() {
     },
   });
 
-  const handleOpenSheet = (ticket: UiTicket) => {
-    setDetailView('drawer');
-    setSelectedTicket(ticket);
-    setSelectedTicketCompanyId(companyId);
-    setLastKnownImageUrl(ticket.imagenUrl ?? null);
-  };
-
   const handlePreviewImage = (ticket: UiTicket) => {
-    setDetailView('image');
-    setSelectedTicket(ticket);
-    setSelectedTicketCompanyId(companyId);
-    setLastKnownImageUrl(ticket.imagenUrl ?? null);
+    const backendTicket = backendTicketById.get(ticket.id);
+    const imageUrl = selectTicketImageUrl(companyId, ticket.id, null, {
+      ticketId: ticket.id,
+      companyId: companyId ?? '',
+      imageUrl: backendTicket?.imageUrl ?? ticket.imagenUrl,
+    });
+    if (!companyId || !imageUrl) return;
+    imageRetryCountRef.current = 0;
+    setSelectedImage({
+      ticketId: ticket.id,
+      companyId,
+      imageUrl,
+      alt: `Ticket de ${ticket.comercio}`,
+    });
   };
 
-  const handleCloseSheet = () => {
-    setSelectedTicket(null);
-    setSelectedTicketCompanyId(null);
-    setLastKnownImageUrl(null);
+  const handleImageRetry = async () => {
+    if (!selectedImage || !companyId || isImageRetrying) return;
+    if (imageRetryCountRef.current >= 1) return;
+
+    imageRetryCountRef.current += 1;
+    setIsImageRetrying(true);
+    try {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['tickets', companyId] }),
+        queryClient.refetchQueries({ queryKey: ['dashboard-daily-report', companyId] }),
+      ]);
+
+      const ticketsData = queryClient.getQueryData([
+        'tickets',
+        companyId,
+        {
+          page: 1,
+          limit: 100,
+          dateFrom: dateFromFilter,
+          dateTo: dateToFilter,
+        },
+      ]) as {
+        data?: Array<{ _id: string; companyId: string; imageUrl?: string | null }>;
+      } | undefined;
+      const dailyData = queryClient.getQueryData([
+        'dashboard-daily-report',
+        companyId,
+        {
+          page: 1,
+          limit: 100,
+          dateFrom: dateFromFilter,
+          dateTo: dateToFilter,
+        },
+      ]) as {
+        tickets?: Array<{ _id: string; companyId: string; imageUrl?: string | null }>;
+      } | undefined;
+
+      const listTicket = ticketsData?.data?.find(
+        (row) => row._id === selectedImage.ticketId && row.companyId === companyId,
+      );
+      const dailyTicket = dailyData?.tickets?.find(
+        (row) => row._id === selectedImage.ticketId && row.companyId === companyId,
+      );
+      const freshUrl = selectTicketImageUrl(companyId, selectedImage.ticketId, null, {
+        ticketId: selectedImage.ticketId,
+        companyId,
+        imageUrl: mergeTicketImageUrl(listTicket, dailyTicket),
+      });
+
+      if (freshUrl && freshUrl !== selectedImage.imageUrl) {
+        setSelectedImage((current) =>
+          current && current.ticketId === selectedImage.ticketId
+            ? { ...current, imageUrl: freshUrl }
+            : current,
+        );
+        imageRetryCountRef.current = 0;
+      }
+    } finally {
+      setIsImageRetrying(false);
+    }
   };
 
   const handleStartTableEditing = (ticketIds: string[]) => {
@@ -399,6 +377,15 @@ export default function HistoryPage() {
     savingClaimRef.current = true;
     setIsSavingTable(true);
     const dirtyIds = [...tableEditing.dirtyTicketIds];
+    const kpiRelevantIds = new Set(
+      dirtyIds.filter((ticketId) => {
+        const baseline = tableEditing.baselines[ticketId];
+        const draft = tableEditing.drafts[ticketId];
+        if (!baseline || !draft) return false;
+        const built = buildHistoryTicketUpdatePayload(baseline, draft);
+        return built.ok && 'payload' in built && ticketUpdateAffectsFinancialKpis(built.payload);
+      }),
+    );
 
     try {
       const { savedIds, errors } = await saveHistoryTicketDrafts({
@@ -414,7 +401,17 @@ export default function HistoryPage() {
         },
       });
 
-      if (isAuthSessionClosing() || companyIdRef.current !== originCompanyId) return;
+      if (isAuthSessionClosing()) return;
+
+      const shouldRefreshKpis = savedIds.some((id) => kpiRelevantIds.has(id));
+      if (shouldRefreshKpis) {
+        await invalidateTicketDerivedQueries(queryClient, originCompanyId, {
+          financialKpis: true,
+        });
+      }
+
+      if (companyIdRef.current !== originCompanyId) return;
+
       tableEditing.applySaveResults(savedIds, errors);
       if (Object.keys(errors).length > 0) {
         toast.error('Algunos tickets no pudieron guardarse. Revisa las filas marcadas.');
@@ -430,6 +427,70 @@ export default function HistoryPage() {
   const handleDelete = (ticketId: string) => {
     if (!companyId || deleteMutation.isPending || tableEditing.isTableEditing) return;
     deleteMutation.mutate({ ticketId, originCompanyId: companyId });
+  };
+
+  const handleToggleAccreditable = async (ticket: UiTicket, nextValue: boolean) => {
+    const originCompanyId = companyId;
+    const ticketId = ticket.id;
+    if (!originCompanyId || tableEditing.isTableEditing) return;
+    if (savingAccreditableRef.current.has(ticketId)) return;
+    if (ticket.isAccreditable === nextValue) return;
+
+    savingAccreditableRef.current.add(ticketId);
+    setSavingAccreditableIds(new Set(savingAccreditableRef.current));
+
+    try {
+      const updated = await updateMutation.mutateAsync({
+        companyId: originCompanyId,
+        ticketId,
+        payload: { isAccreditable: nextValue },
+      });
+      if (isAuthSessionClosing() || companyIdRef.current !== originCompanyId) return;
+
+      const confirmed =
+        typeof updated?.isAccreditable === 'boolean' ? updated.isAccreditable : nextValue;
+
+      // Patch both History sources immediately so a slower daily-report refetch
+      // cannot flash the previous value (tickets list is the merge priority).
+      queryClient.setQueriesData(
+        { queryKey: ['tickets', originCompanyId] },
+        (current: unknown) => {
+          if (!current || typeof current !== 'object') return current;
+          const page = current as { data?: Array<{ _id: string; isAccreditable?: boolean }> };
+          if (!Array.isArray(page.data)) return current;
+          return {
+            ...page,
+            data: page.data.map((row) =>
+              row._id === ticketId ? { ...row, isAccreditable: confirmed } : row,
+            ),
+          };
+        },
+      );
+      queryClient.setQueriesData(
+        { queryKey: ['dashboard-daily-report', originCompanyId] },
+        (current: unknown) => {
+          if (!current || typeof current !== 'object') return current;
+          const report = current as {
+            tickets?: Array<{ _id: string; isAccreditable?: boolean }>;
+          };
+          if (!Array.isArray(report.tickets)) return current;
+          return {
+            ...report,
+            tickets: report.tickets.map((row) =>
+              row._id === ticketId ? { ...row, isAccreditable: confirmed } : row,
+            ),
+          };
+        },
+      );
+    } catch {
+      if (isAuthSessionClosing() || companyIdRef.current !== originCompanyId) return;
+      toast.error('No se pudo actualizar si el ticket es acreditable.');
+    } finally {
+      savingAccreditableRef.current.delete(ticketId);
+      if (!isAuthSessionClosing()) {
+        setSavingAccreditableIds(new Set(savingAccreditableRef.current));
+      }
+    }
   };
 
   const kpiUnavailableLabel = (() => {
@@ -455,7 +516,7 @@ export default function HistoryPage() {
         return 'No fue posible cargar esta métrica.';
       case 'empty':
         return financialKpis.periodLabel === 'Selecciona un período'
-          ? 'Usa Último mes, Último año o un rango de fechas.'
+          ? 'Usa un preset o selecciona un rango de fechas.'
           : 'Período sin movimientos.';
       default:
         return 'No fue posible cargar esta métrica.';
@@ -600,25 +661,20 @@ export default function HistoryPage() {
               </Select>
             </div>
             <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant={activePreset === 'last_30_days' ? 'default' : 'outline'}
-                  className="rounded-xl h-9"
-                  onClick={applyLastMonthPreset}
-                  disabled={tableEditing.isTableEditing}
-                >
-                  Último mes
-                </Button>
-                <Button
-                  type="button"
-                  variant={activePreset === 'last_12_months' ? 'default' : 'outline'}
-                  className="rounded-xl h-9"
-                  onClick={applyLastYearPreset}
-                  disabled={tableEditing.isTableEditing}
-                >
-                  Último año
-                </Button>
+              <div className="flex flex-wrap gap-2" aria-label="Rangos rápidos de fecha">
+                {DATE_PRESETS.map((preset) => (
+                  <Button
+                    key={preset.id}
+                    type="button"
+                    variant={activePreset === preset.id ? 'default' : 'outline'}
+                    className="rounded-xl min-h-9"
+                    onClick={() => applyDatePreset(preset.id)}
+                    disabled={tableEditing.isTableEditing}
+                    aria-pressed={activePreset === preset.id}
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
               </div>
               <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
                 <div className="space-y-1.5 w-full sm:w-40">
@@ -706,52 +762,39 @@ export default function HistoryPage() {
             void handleSaveTableEditing();
           }}
           onCancel={handleCancelTableEditing}
-          onOpen={handleOpenSheet}
           onPreviewImage={handlePreviewImage}
           onDelete={handleDelete}
           onClearFilters={handleClearFilters}
+          onToggleAccreditable={(ticket, nextValue) => {
+            void handleToggleAccreditable(ticket, nextValue);
+          }}
+          savingAccreditableIds={savingAccreditableIds}
         />
       </div>
 
-      <HistoryTicketDrawer
-        ticket={detailView === 'drawer' ? selectedTicketDetail : null}
-        noteSources={[
-          detailQuery.data,
-          selectedTicketDetail
-            ? backendTicketById.get(selectedTicketDetail.id)
-            : undefined,
-          selectedTicketDetail,
-        ]}
-        imageLoading={detailQuery.isFetching || dailyReportQuery.isFetching}
-        detailFetching={detailQuery.isFetching}
-        detailError={detailQuery.isError}
-        onClose={handleCloseSheet}
-      />
-
-      <Dialog
-        open={detailView === 'image' && Boolean(selectedTicketDetail)}
+      <TicketImageDialog
+        open={Boolean(
+          selectedImage &&
+            selectedImage.companyId === companyId,
+        )}
         onOpenChange={(open) => {
-          if (!open) handleCloseSheet();
+          if (!open) {
+            setSelectedImage(null);
+            imageRetryCountRef.current = 0;
+          }
         }}
-      >
-        <DialogContent className="sm:max-w-2xl">
-          {detailView === 'image' && selectedTicketDetail ? (
-            <>
-              <DialogHeader>
-                <DialogTitle>Ticket de {selectedTicketDetail.comercio}</DialogTitle>
-              </DialogHeader>
-              <div className="max-h-[75vh] overflow-y-auto rounded-2xl">
-                <TicketImagePreview
-                  imageUrl={selectedTicketDetail.imagenUrl}
-                  alt={`Ticket de ${selectedTicketDetail.comercio}`}
-                  loading={detailQuery.isFetching || dailyReportQuery.isFetching}
-                  plain
-                />
-              </div>
-            </>
-          ) : null}
-        </DialogContent>
-      </Dialog>
+        imageUrl={
+          selectedImage?.companyId === companyId
+            ? selectedImage.imageUrl
+            : null
+        }
+        alt={selectedImage?.alt ?? 'Imagen del ticket'}
+        title={selectedImage?.alt ?? 'Imagen del ticket'}
+        onRetry={() => {
+          void handleImageRetry();
+        }}
+        isRetrying={isImageRetrying}
+      />
 
       <AlertDialog open={showCancelConfirmation} onOpenChange={setShowCancelConfirmation}>
         <AlertDialogContent>

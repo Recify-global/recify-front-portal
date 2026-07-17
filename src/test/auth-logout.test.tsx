@@ -6,6 +6,7 @@ import { useAuth } from '@/hooks/use-auth';
 import {
   markAuthSessionActive,
   registerSessionCacheCleanup,
+  terminateAuthSession,
 } from '@/auth/session-cleanup';
 import {
   getStoredCompanyId,
@@ -96,6 +97,34 @@ describe('useAuth session lifecycle', () => {
       expect(result.current.user).toBeNull();
       expect(result.current.companyId).toBeNull();
     });
+    unregister();
+  });
+
+  it('does not navigate to auth if a newer session starts during delayed logout', async () => {
+    setAuthSession({ token: 'token-a', user: userA });
+    markAuthSessionActive();
+    let releaseCleanup!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    const unregister = registerSessionCacheCleanup(() => gate);
+    const { result } = renderHook(() => useAuth(), { wrapper: wrapperWithClient() });
+
+    let logoutPromise!: Promise<void>;
+    await act(async () => {
+      logoutPromise = result.current.logout();
+    });
+    setAuthSession({ token: 'token-b', user: userB });
+    markAuthSessionActive();
+    releaseCleanup();
+    await act(async () => {
+      await logoutPromise;
+    });
+
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(getStoredToken()).toBe('token-b');
+    expect(getStoredUser()).toEqual(userB);
+    expect(getStoredCompanyId()).toBe('company-b');
     unregister();
   });
 

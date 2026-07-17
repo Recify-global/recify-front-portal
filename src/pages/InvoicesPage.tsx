@@ -47,6 +47,7 @@ import {
   formatInvoiceDate,
   formatInvoicePaymentForm,
   invoiceTicketRefObject,
+  resolveInvoiceFileUrl,
 } from '@/utils/invoice-display';
 import { formatMxn } from '@/utils/financial-kpis';
 import { ApiRequestError } from '@/api/http';
@@ -155,8 +156,9 @@ export default function InvoicesPage() {
   };
 
   const openPdf = (invoice: BackendInvoice) => {
-    // La URL viene firmada y vale 1 hora; se abre directo sin cachear.
-    window.open(invoice.fileUrl, '_blank', 'noopener,noreferrer');
+    // La URL viene firmada y vale 1 hora; nunca se abre un protocolo no seguro.
+    const pdfUrl = resolveInvoiceFileUrl(invoice.fileUrl);
+    if (pdfUrl) window.open(pdfUrl, '_blank', 'noopener,noreferrer');
   };
 
   return (

@@ -11,6 +11,7 @@ import {
 import { uploadInvoice } from '@/services/upload.service';
 import type { InvoicesListParams } from '@/types/invoice';
 import { useAuth } from './use-auth';
+import { isAuthSessionClosing } from '@/auth/session-cleanup';
 
 /**
  * El match toca ambos lados (invoice.ticketId / ticket.invoiceId), así que
@@ -51,14 +52,21 @@ export function useInvoice(id: string | null | undefined) {
 }
 
 export function useUploadInvoice() {
-  const { companyId } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ file }: { file: File }) =>
-      requireCompany(companyId) ?? uploadInvoice(companyId as string, file),
-    onSuccess: async () => {
-      if (companyId) await invalidateInvoiceQueries(queryClient, companyId);
+    mutationFn: ({
+      companyId,
+      file,
+      signal,
+    }: {
+      companyId: string;
+      file: File;
+      signal?: AbortSignal;
+    }) => requireCompany(companyId) ?? uploadInvoice(companyId, file, { signal }),
+    onSuccess: async (_data, { companyId }) => {
+      if (isAuthSessionClosing()) return;
+      await invalidateInvoiceQueries(queryClient, companyId);
     },
   });
 }

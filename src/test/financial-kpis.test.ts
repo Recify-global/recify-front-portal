@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DATE_PRESETS,
   civilDateInTimeZone,
+  dateRangeForPreset,
   detectActivePreset,
   endOfCivilDayIso,
+  inclusiveDaysRange,
   isKpiExcludedStatus,
   isValidDateRange,
   last12MonthsRange,
-  last30DaysRange,
   paymentMethodKpiFromTop,
   resolveMostUsedPaymentMethod,
   startOfCivilDayIso,
@@ -132,11 +134,34 @@ describe('paymentMethodKpiFromTop', () => {
 });
 
 describe('date presets and range', () => {
-  it('builds last 30 days including today', () => {
+  it('exposes every required preset without the ambiguous month label', () => {
+    expect(DATE_PRESETS.map((preset) => preset.label)).toEqual([
+      '7 días',
+      '15 días',
+      '30 días',
+      '60 días',
+      '90 días',
+      'Último año',
+    ]);
+    expect(DATE_PRESETS.map((preset) => preset.label)).not.toContain('Último mes');
+  });
+
+  it.each([
+    ['last_7_days', '2026-07-06'],
+    ['last_15_days', '2026-06-28'],
+    ['last_30_days', '2026-06-13'],
+    ['last_60_days', '2026-05-14'],
+    ['last_90_days', '2026-04-14'],
+  ] as const)('builds %s inclusively through today', (preset, expectedFrom) => {
     const now = new Date('2026-07-12T18:00:00.000-06:00');
-    const range = last30DaysRange(now);
+    const range = dateRangeForPreset(preset, now);
     expect(range.dateTo).toBe('2026-07-12');
-    expect(range.dateFrom).toBe('2026-06-13');
+    expect(range.dateFrom).toBe(expectedFrom);
+  });
+
+  it('rejects invalid day counts', () => {
+    expect(() => inclusiveDaysRange(0)).toThrow();
+    expect(() => inclusiveDaysRange(1.5)).toThrow();
   });
 
   it('builds last 12 months including today', () => {
@@ -165,8 +190,10 @@ describe('date presets and range', () => {
 
   it('detects active presets', () => {
     const now = new Date('2026-07-12T12:00:00.000-06:00');
-    const month = last30DaysRange(now);
-    expect(detectActivePreset(month.dateFrom, month.dateTo, now)).toBe('last_30_days');
+    for (const preset of DATE_PRESETS) {
+      const range = dateRangeForPreset(preset.id, now);
+      expect(detectActivePreset(range.dateFrom, range.dateTo, now)).toBe(preset.id);
+    }
     const year = last12MonthsRange(now);
     expect(detectActivePreset(year.dateFrom, year.dateTo, now)).toBe('last_12_months');
     expect(detectActivePreset('2026-01-01', '2026-01-31', now)).toBe(null);
