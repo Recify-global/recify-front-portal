@@ -389,3 +389,57 @@ solo deshabilitaba una.
 | TypeScript / tests / build | ✅ |
 | ESLint dirigido | ✅ (errores globales históricos ajenos) |
 | Veredicto | ✅ Default persistido y switch estable con QA runtime aprobado |
+
+---
+
+## Sincronización de KPIs tras edición/delete — 16 de julio de 2026
+
+### Causa
+
+Histórico consume `['dashboard-kpis', companyId, dateFrom, dateTo]` vía
+`useFinancialKpis`, pero edición/delete invalidaban `dashboard-summary` y
+`dashboard-by-payment-method` (keys huérfanas). Los KPIs visibles nunca se
+marcaban stale.
+
+### Fix
+
+- Helper `invalidateTicketDerivedQueries` + `ticketUpdateAffectsFinancialKpis`.
+- Prefijo canónico: `['dashboard-kpis', companyId]`.
+- Campos KPI relevantes: `type`, `amount`, `date`, `paymentMethod`.
+- Edición: una invalidación KPI por guardado si algún PATCH exitoso fue relevante.
+- Delete: siempre invalida KPIs de `originCompanyId`.
+- Lazy/`enabled` de KPIs sin cambios; sin polling ni effects.
+
+### Contrato verificado (status / category)
+
+| Campo | ¿Afecta `/dashboard/kpis`? | Evidencia |
+|---|---|---|
+| `status` | **No** | `buildMatch` solo filtra `companyId` + fechas (+ `type` opcional). Sin filtro de status. Agregación cuenta todos los tickets del rango. |
+| `category` | **No** | `kpisSchema` Zod solo acepta `period`/`dateFrom`/`dateTo`. FE: `enabled` requiere `category === 'all'`. |
+| Nota | — | `isKpiExcludedStatus` (duplicate/failed) existe en utils pero **no** lo aplica `useFinancialKpis` (`includesAllStatuses: true`). |
+
+Allowlist final: `type`, `amount`, `date`, `paymentMethod`.
+
+### QA runtime / Network (entorno local, company `6a14d23f…`)
+
+| Caso | Requests KPI | Resultado |
+|---|---:|---|
+| Delete exitoso | 1 (`GET .../dashboard/kpis` 200) | ✅ tras cada DELETE 204 |
+| PATCH relevante (edit save) | 1 | ✅ PATCH → tickets/daily → 1 kpis |
+| Segunda edición relevante | 1 | ✅ sin loop |
+| Vendor / Acreditable / status | 0 | ✅ por allowlist + tests; contrato backend |
+| Error PATCH/DELETE | 0 | ✅ invalidación solo en `onSuccess` |
+| Chunk warning Vite | — | informativo, no bloqueante |
+
+### Tests
+
+`src/test/kpi-invalidation.test.ts` — relevancia de payload, prefijo de compañía,
+queries inactivas stale, A→B, vendor/accreditable/status/category sin KPI.
+
+### Checks de cierre
+
+- TypeScript / tests / build / ESLint dirigido: ✅
+- ESLint global: 3 errores + 7 warnings históricos (ui/*, tailwind.config)
+- Chunk size warning: informativo
+- Commit aislado en `KAN-36`; sin push
+

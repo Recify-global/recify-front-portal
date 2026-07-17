@@ -48,6 +48,11 @@ import {
   last12MonthsRange,
   type DatePresetId,
 } from '@/utils/financial-kpis';
+import {
+  invalidateTicketDerivedQueries,
+  ticketUpdateAffectsFinancialKpis,
+} from '@/utils/ticket-derived-queries';
+import { buildHistoryTicketUpdatePayload } from '@/utils/ticket-edit';
 import { selectTicketImageUrl, mergeTicketImageUrl } from '@/utils/ticket-image';
 import { cn } from '@/lib/utils';
 import type { UiTicket } from '@/types/ticket';
@@ -234,12 +239,11 @@ export default function HistoryPage() {
     onSuccess: async (_data, { originCompanyId }) => {
       if (isAuthSessionClosing()) return;
       toast.success('Ticket eliminado.');
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['tickets', originCompanyId] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard-daily-report', originCompanyId] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard-summary', originCompanyId] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard-by-payment-method', originCompanyId] }),
-      ]);
+      await invalidateTicketDerivedQueries(queryClient, originCompanyId, {
+        tickets: true,
+        dailyReport: true,
+        financialKpis: true,
+      });
     },
     onError: () => {
       if (isAuthSessionClosing()) return;
@@ -373,6 +377,15 @@ export default function HistoryPage() {
     savingClaimRef.current = true;
     setIsSavingTable(true);
     const dirtyIds = [...tableEditing.dirtyTicketIds];
+    const kpiRelevantIds = new Set(
+      dirtyIds.filter((ticketId) => {
+        const baseline = tableEditing.baselines[ticketId];
+        const draft = tableEditing.drafts[ticketId];
+        if (!baseline || !draft) return false;
+        const built = buildHistoryTicketUpdatePayload(baseline, draft);
+        return built.ok && 'payload' in built && ticketUpdateAffectsFinancialKpis(built.payload);
+      }),
+    );
 
     try {
       const { savedIds, errors } = await saveHistoryTicketDrafts({
@@ -388,7 +401,17 @@ export default function HistoryPage() {
         },
       });
 
-      if (isAuthSessionClosing() || companyIdRef.current !== originCompanyId) return;
+      if (isAuthSessionClosing()) return;
+
+      const shouldRefreshKpis = savedIds.some((id) => kpiRelevantIds.has(id));
+      if (shouldRefreshKpis) {
+        await invalidateTicketDerivedQueries(queryClient, originCompanyId, {
+          financialKpis: true,
+        });
+      }
+
+      if (companyIdRef.current !== originCompanyId) return;
+
       tableEditing.applySaveResults(savedIds, errors);
       if (Object.keys(errors).length > 0) {
         toast.error('Algunos tickets no pudieron guardarse. Revisa las filas marcadas.');

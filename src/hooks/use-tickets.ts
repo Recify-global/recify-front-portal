@@ -10,6 +10,7 @@ import type {
 } from '@/types/dashboard';
 import type { TicketsListParams } from '@/types/ticket';
 import { isAuthSessionClosing } from '@/auth/session-cleanup';
+import { invalidateTicketDerivedQueries } from '@/utils/ticket-derived-queries';
 import { useAuth } from './use-auth';
 
 export function useTickets(params: TicketsListParams = {}) {
@@ -54,13 +55,12 @@ export function useUpdateDashboardTicket() {
     },
     onSuccess: async (_data, { companyId, ticketId }) => {
       if (isAuthSessionClosing()) return;
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['tickets', companyId] }),
-        queryClient.invalidateQueries({ queryKey: ['ticket', companyId, ticketId] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard-daily-report', companyId] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard-summary', companyId] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard-by-payment-method', companyId] }),
-      ]);
+      // KPIs are owned by the caller (only when the payload is aggregation-relevant).
+      await invalidateTicketDerivedQueries(queryClient, companyId, {
+        tickets: true,
+        ticketDetail: true,
+        dailyReport: true,
+      }, ticketId);
     },
   });
 }
