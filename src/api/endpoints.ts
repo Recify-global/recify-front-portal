@@ -32,5 +32,16 @@ export const endpoints = {
     dailyReport: (companyId: string) => `/companies/${companyId}/dashboard/daily-report`,
     dailyReportTicket: (companyId: string, ticketId: string) =>
       `/companies/${companyId}/dashboard/daily-report/${ticketId}`,
+    // Analítica avanzada (comparte el filtro de fechas datePreset | dateFrom/dateTo).
+    expensesByVendor: (companyId: string) =>
+      `/companies/${companyId}/dashboard/expenses-by-vendor`,
+    invoicedVsUninvoiced: (companyId: string) =>
+      `/companies/${companyId}/dashboard/invoiced-vs-uninvoiced`,
+    deductibleTaxByCategory: (companyId: string) =>
+      `/companies/${companyId}/dashboard/deductible-tax-by-category`,
+    heatmap: (companyId: string) => `/companies/${companyId}/dashboard/heatmap`,
+    invoicedCategoryCorrelation: (companyId: string) =>
+      `/companies/${companyId}/dashboard/invoiced-category-correlation`,
+    cashFlow: (companyId: string) => `/companies/${companyId}/dashboard/cash-flow`,
   },
 } as const;

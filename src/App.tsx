@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import AuthPage from "./pages/AuthPage";
+import DashboardPage from "./pages/DashboardPage";
 import UploadPage from "./pages/UploadPage";
 import HistoryPage from "./pages/HistoryPage";
 import InvoicesPage from "./pages/InvoicesPage";
@@ -24,6 +25,7 @@ const App = () => (
           <Route path="/" element={<Navigate to="/auth" replace />} />
           <Route path="/auth" element={<AuthPage />} />
           <Route element={<ProtectedRoute />}>
+            <Route path="/app/dashboard" element={<DashboardPage />} />
             <Route path="/app/upload" element={<UploadPage />} />
             <Route path="/app/history" element={<HistoryPage />} />
             <Route path="/app/invoices" element={<InvoicesPage />} />

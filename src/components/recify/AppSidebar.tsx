@@ -1,4 +1,4 @@
-import { Upload, History, FileText, Settings, HelpCircle } from 'lucide-react';
+import { LayoutDashboard, Upload, History, FileText, Settings, HelpCircle } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { RecifyLogo } from './RecifyLogo';
 import { CompanySelector } from './CompanySelector';
@@ -15,9 +15,10 @@ import {
 } from '@/components/ui/sidebar';
 
 const mainNav = [
-  { title: 'Subir ticket', url: '/app/upload', icon: Upload },
-  { title: 'Histórico', url: '/app/history', icon: History },
+  { title: 'Subir tickets y facturas', url: '/app/upload', icon: Upload },
+  { title: 'Tickets', url: '/app/history', icon: History },
   { title: 'Facturas', url: '/app/invoices', icon: FileText },
+  { title: 'Dashboard', url: '/app/dashboard', icon: LayoutDashboard },
 ];
 
 const secondaryNav = [
