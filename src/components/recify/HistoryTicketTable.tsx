@@ -116,9 +116,9 @@ function columnClass(columnId: string): string {
     case 'categoria':
       return 'w-[11%]';
     case 'isAccreditable':
-      return 'w-[9%]';
+      return 'w-[140px] min-w-[140px] whitespace-nowrap';
     case 'actions':
-      return 'w-[10%]';
+      return 'w-[96px] min-w-[96px] whitespace-nowrap';
     default:
       return '';
   }
@@ -347,7 +347,7 @@ export function HistoryTicketTable({
       id: 'isAccreditable',
       accessorKey: 'isAccreditable',
       header: () => (
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 whitespace-nowrap">
           <span>Acreditable</span>
           <TooltipProvider delayDuration={200}>
             <Tooltip>
@@ -369,10 +369,10 @@ export function HistoryTicketTable({
       ),
       enableSorting: false,
       cell: ({ row }) => {
-        const checked = row.original.isAccreditable ?? false;
+        const checked = row.original.isAccreditable ?? true;
         const saving = savingAccreditableIds.has(row.original.id);
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-[116px] items-center gap-2 whitespace-nowrap">
             <Switch
               checked={checked}
               disabled={saving || isEditing}
@@ -397,7 +397,7 @@ export function HistoryTicketTable({
       cell: ({ row }) => {
         const hasImage = Boolean(resolveTicketImageUrl(row.original.imagenUrl));
         return (
-        <div className="flex items-center gap-1">
+        <div className="flex min-w-[68px] items-center gap-1">
           <Button
             type="button"
             variant="ghost"
@@ -524,7 +524,7 @@ export function HistoryTicketTable({
       ) : (
         <>
           <div className="overflow-x-auto" tabIndex={0} aria-label="Tabla de tickets">
-            <table className="w-full min-w-[880px] table-fixed border-separate border-spacing-0">
+            <table className="w-full min-w-[1040px] table-fixed border-separate border-spacing-0">
               <thead>
                 {table.getHeaderGroups().map((headerGroup) => (
                   <tr key={headerGroup.id} className="border-b border-border/50">

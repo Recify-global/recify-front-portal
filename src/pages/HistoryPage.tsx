@@ -172,7 +172,7 @@ export default function HistoryPage() {
         imageUrl: mergeTicketImageUrl(ticket, dailyTicket),
         tax: dailyTicket.tax ?? ticket.tax,
         subtotal: dailyTicket.subtotal ?? ticket.subtotal,
-        isAccreditable: ticket.isAccreditable ?? dailyTicket.isAccreditable ?? false,
+        isAccreditable: ticket.isAccreditable ?? dailyTicket.isAccreditable ?? true,
       };
     });
   }, [dailyReportQuery.data?.tickets, ticketsQuery.data?.data]);
