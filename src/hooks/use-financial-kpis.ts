@@ -80,7 +80,7 @@ function buildPeriodLabel(dateFrom: string, dateTo: string): string {
   if (dateFrom && dateTo) return `${dateFrom} → ${dateTo}`;
   if (dateFrom) return `Desde ${dateFrom}`;
   if (dateTo) return `Hasta ${dateTo}`;
-  return 'Sin rango de fechas';
+  return 'Todo el historial';
 }
 
 function ticketsLabel(count: number): string {
@@ -94,6 +94,8 @@ function ticketsLabel(count: number): string {
  * Limitaciones contractuales actuales del backend:
  * - /dashboard/kpis no acepta `category` ni `type` (400 si se mandan).
  * - no excluye `duplicate` ni `failed`.
+ * - `dateFrom`/`dateTo` son opcionales; sin ellos el período es todo el historial
+ *   (`period.from`/`period.to` pueden venir null).
  */
 export function useFinancialKpis(filters: FinancialKpiFilters): FinancialKpisView {
   const { companyId } = useAuth();
@@ -101,7 +103,6 @@ export function useFinancialKpis(filters: FinancialKpiFilters): FinancialKpisVie
 
   const rangeValid = isValidDateRange(dateFrom, dateTo);
   const categoryActive = category !== 'all' && category.trim() !== '';
-  const hasDateFilter = Boolean(dateFrom.trim() || dateTo.trim());
 
   const queryParams = useMemo(() => {
     const params: { dateFrom?: string; dateTo?: string } = {};
@@ -110,8 +111,7 @@ export function useFinancialKpis(filters: FinancialKpiFilters): FinancialKpisVie
     return params;
   }, [dateFrom, dateTo]);
 
-  const enabled =
-    Boolean(companyId) && rangeValid && !categoryActive && hasDateFilter;
+  const enabled = Boolean(companyId) && rangeValid && !categoryActive;
 
   const kpisQuery = useQuery({
     queryKey: ['dashboard-kpis', companyId, queryParams.dateFrom ?? null, queryParams.dateTo ?? null],
@@ -143,19 +143,6 @@ export function useFinancialKpis(filters: FinancialKpiFilters): FinancialKpisVie
         balance: null,
         paymentMethod: null,
         periodLabel,
-        includesAllStatuses: true,
-        categorySupported: false,
-      };
-    }
-
-    if (!hasDateFilter) {
-      return {
-        availability: 'empty',
-        income: null,
-        expense: null,
-        balance: null,
-        paymentMethod: null,
-        periodLabel: 'Selecciona un período',
         includesAllStatuses: true,
         categorySupported: false,
       };
@@ -214,7 +201,6 @@ export function useFinancialKpis(filters: FinancialKpiFilters): FinancialKpisVie
     categoryActive,
     dateFrom,
     dateTo,
-    hasDateFilter,
     kpisQuery.data,
     kpisQuery.isError,
     kpisQuery.isPending,

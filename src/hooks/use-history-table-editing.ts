@@ -7,6 +7,8 @@ import {
   hasHistoryTicketEditChanges,
   type HistoryTicketEditDraft,
 } from '@/utils/ticket-edit';
+import { formatCivilDateDisplay } from '@/utils/civil-date-input';
+import { HISTORY_TIMEZONE } from '@/utils/financial-kpis';
 import type { DashboardDailyReportTicketUpdate } from '@/types/dashboard';
 
 export interface HistoryEditableTicket {
@@ -84,13 +86,18 @@ function openCellState(
   row: HistoryEditableTicket,
   field: HistoryEditableField,
   companyId: string,
+  timeZone: string = HISTORY_TIMEZONE,
 ) {
-  const draft = createHistoryDraftFromTicket(row.ticket);
+  const draft = createHistoryDraftFromTicket(row.ticket, timeZone);
+  const editingDraft =
+    field === 'date'
+      ? { ...draft, date: formatCivilDateDisplay(draft.date) || draft.date }
+      : draft;
   return {
     editingCell: { ticketId: row.id, field } satisfies EditingCell,
     editingCompanyId: companyId,
     baselines: { [row.id]: draft },
-    drafts: { [row.id]: draft },
+    drafts: { [row.id]: editingDraft },
     rowErrors: {} as ErrorRecord,
   };
 }
@@ -113,9 +120,14 @@ export function useHistoryTableEditing() {
   }, []);
 
   const activateCell = useCallback(
-    (row: HistoryEditableTicket, field: HistoryEditableField, companyId: string) => {
+    (
+      row: HistoryEditableTicket,
+      field: HistoryEditableField,
+      companyId: string,
+      timeZone: string = HISTORY_TIMEZONE,
+    ) => {
       if (row.companyId !== companyId) return;
-      const next = openCellState(row, field, companyId);
+      const next = openCellState(row, field, companyId, timeZone);
       setEditingCell(next.editingCell);
       setEditingCompanyId(next.editingCompanyId);
       setBaselines(next.baselines);
@@ -142,6 +154,7 @@ export function useHistoryTableEditing() {
       row: HistoryEditableTicket,
       field: HistoryEditableField,
       companyId: string,
+      timeZone: string = HISTORY_TIMEZONE,
     ): 'activated' | 'same-cell' | 'needs-commit' | 'ignored' => {
       if (row.companyId !== companyId) return 'ignored';
 
@@ -157,7 +170,7 @@ export function useHistoryTableEditing() {
         return 'needs-commit';
       }
 
-      activateCell(row, field, companyId);
+      activateCell(row, field, companyId, timeZone);
       return 'activated';
     },
     [activateCell, editingCell, hasDirtyChanges],

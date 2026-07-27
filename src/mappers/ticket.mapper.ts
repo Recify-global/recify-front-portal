@@ -12,7 +12,7 @@ import {
   getTicketFolio,
   getTicketImageUrl,
 } from '@/utils/ticket-display';
-import { HISTORY_TIMEZONE } from '@/utils/financial-kpis';
+import { HISTORY_TIMEZONE, resolveCompanyTimeZone } from '@/utils/financial-kpis';
 
 const STATUS_MAP: Record<BackendTicketStatus, UiTicket['estatus']> = {
   processed: 'analizado',
@@ -26,11 +26,16 @@ const CATEGORY_BY_TYPE: Record<BackendTicket['type'], string> = {
   egreso: 'Otros Gastos',
 };
 
-function splitDate(iso: string): { fecha: string; hora: string } {
+function splitDate(iso: string, timeZone = HISTORY_TIMEZONE): { fecha: string; hora: string } {
+  // YYYY-MM-DD literal: no pasar por Date UTC.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso.trim())) {
+    return { fecha: iso.trim(), hora: '00:00' };
+  }
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return { fecha: 'Sin fecha', hora: '--:--' };
+  const zone = resolveCompanyTimeZone(timeZone);
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: HISTORY_TIMEZONE,
+    timeZone: zone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -87,8 +92,8 @@ function normalizeStatus(value: unknown): BackendTicketStatus {
 // Convierte la forma del backend a la forma visual usada hoy por el UI
 // (basada en `src/data/dummy-tickets.ts`). Se mantiene separado de los servicios
 // para no acoplar la API a los componentes.
-export function mapBackendTicket(t: BackendTicket): UiTicket {
-  const { fecha, hora } = splitDate(asString(t.date) ?? '');
+export function mapBackendTicket(t: BackendTicket, timeZone = HISTORY_TIMEZONE): UiTicket {
+  const { fecha, hora } = splitDate(asString(t.date) ?? '', timeZone);
   const total = Math.max(0, asNumber(t.amount) ?? 0);
   const subtotalFromApi = asNumber(t.subtotal) ?? asNumber(t.rawData?.subtotal);
   const taxFromApi = asNumber(t.tax) ?? asNumber(t.rawData?.tax);
@@ -130,9 +135,13 @@ export function mapBackendTicket(t: BackendTicket): UiTicket {
   };
 }
 
-export function mapBackendTickets(list: BackendTicket[] | null | undefined): UiTicket[] {
+export function mapBackendTickets(
+  list: BackendTicket[] | null | undefined,
+  timeZone = HISTORY_TIMEZONE,
+): UiTicket[] {
   if (!Array.isArray(list)) return [];
-  return list.map(mapBackendTicket);
+  const zone = resolveCompanyTimeZone(timeZone);
+  return list.map((ticket) => mapBackendTicket(ticket, zone));
 }
 
 interface PreprocessMapperMeta {

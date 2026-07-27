@@ -9,7 +9,8 @@ import type {
   UiTicketStatus,
 } from '@/types/ticket';
 import { formatTicketPaymentMethod, formatTicketReviewStatus, formatTicketType } from './ticket-display';
-import { HISTORY_TIMEZONE } from './financial-kpis';
+import { HISTORY_TIMEZONE, resolveCompanyTimeZone } from './financial-kpis';
+import { coerceToWireCivilDate } from './civil-date-input';
 
 export interface TicketEditDraft {
   type: BackendTicketType;
@@ -68,11 +69,12 @@ function normalizeStatus(value: unknown): BackendTicketStatus {
   return 'processed';
 }
 
-export function backendDateToInput(iso: string): string {
+export function backendDateToInput(iso: string, timeZone = HISTORY_TIMEZONE): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
+  const zone = resolveCompanyTimeZone(timeZone);
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: HISTORY_TIMEZONE,
+    timeZone: zone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -83,11 +85,12 @@ export function backendDateToInput(iso: string): string {
   return year && month && day ? `${year}-${month}-${day}` : '';
 }
 
-export function backendTimeToInput(iso: string): string {
+export function backendTimeToInput(iso: string, timeZone = HISTORY_TIMEZONE): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
+  const zone = resolveCompanyTimeZone(timeZone);
   const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: HISTORY_TIMEZONE,
+    timeZone: zone,
     hour: '2-digit',
     minute: '2-digit',
     hourCycle: 'h23',
@@ -97,11 +100,14 @@ export function backendTimeToInput(iso: string): string {
   return hour && minute ? `${hour}:${minute}` : '';
 }
 
-export function createDraftFromTicket(ticket: BackendTicket): TicketEditDraft {
+export function createDraftFromTicket(
+  ticket: BackendTicket,
+  timeZone = HISTORY_TIMEZONE,
+): TicketEditDraft {
   return {
     type: ticket.type,
-    date: backendDateToInput(ticket.date),
-    time: backendTimeToInput(ticket.date),
+    date: backendDateToInput(ticket.date, timeZone),
+    time: backendTimeToInput(ticket.date, timeZone),
     vendor: ticket.vendor ?? ticket.rawData?.vendor ?? '',
     amount: String(ticket.amount),
     category: ticket.category ?? '',
@@ -187,9 +193,10 @@ export function normalizeTicketEditDraft(draft: TicketEditDraft): TicketEditDraf
 }
 
 function inputDateTimeToIso(dateStr: string, timeStr: string): string | null {
-  if (!dateStr.trim() || !timeStr.trim()) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || !/^\d{2}:\d{2}$/.test(timeStr)) return null;
-  const d = new Date(`${dateStr}T${timeStr}:00.000-06:00`);
+  const wireDate = coerceToWireCivilDate(dateStr);
+  if (!wireDate || !timeStr.trim()) return null;
+  if (!/^\d{2}:\d{2}$/.test(timeStr.trim())) return null;
+  const d = new Date(`${wireDate}T${timeStr.trim()}:00.000-06:00`);
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString();
 }
@@ -205,7 +212,12 @@ function validateDraft(draft: TicketEditDraft): { ok: true; amount: number; date
     return { ok: false, message: 'Ingresa un monto válido mayor o igual a 0.' };
   }
 
-  const dateIso = inputDateTimeToIso(draft.date, draft.time);
+  const wireDate = coerceToWireCivilDate(draft.date);
+  if (!wireDate) {
+    return { ok: false, message: 'Ingresa una fecha válida con el formato DD/MM/AAAA.' };
+  }
+
+  const dateIso = inputDateTimeToIso(wireDate, draft.time);
   if (!dateIso) {
     return { ok: false, message: 'Ingresa una fecha y hora válidas.' };
   }
@@ -231,11 +243,13 @@ export function buildTicketUpdatePayload(
   }
 
   const baselineAmount = parseAmount(normalizedBaseline.amount);
+  const baselineWireDate = coerceToWireCivilDate(normalizedBaseline.date);
+  const draftWireDate = coerceToWireCivilDate(normalizedDraft.date);
   const payload: DashboardDailyReportTicketUpdate = {};
 
   if (normalizedDraft.type !== normalizedBaseline.type) payload.type = normalizedDraft.type;
   if (
-    normalizedDraft.date !== normalizedBaseline.date ||
+    draftWireDate !== baselineWireDate ||
     normalizedDraft.time !== normalizedBaseline.time
   ) {
     payload.date = validation.dateIso;
@@ -261,8 +275,11 @@ export function buildDashboardUpdatePayload(
   return buildTicketUpdatePayload(createDraftFromTicket(original), draft);
 }
 
-export function createHistoryDraftFromTicket(ticket: BackendTicket): HistoryTicketEditDraft {
-  const { reviewStatus: _reviewStatus, ...draft } = createDraftFromTicket(ticket);
+export function createHistoryDraftFromTicket(
+  ticket: BackendTicket,
+  timeZone = HISTORY_TIMEZONE,
+): HistoryTicketEditDraft {
+  const { reviewStatus: _reviewStatus, ...draft } = createDraftFromTicket(ticket, timeZone);
   return {
     ...draft,
     tax: taxFromTicket(ticket),
@@ -337,13 +354,33 @@ export function hasHistoryTicketEditChanges(
   baseline: HistoryTicketEditDraft,
   draft: HistoryTicketEditDraft,
 ): boolean {
-  return JSON.stringify(normalizeHistoryTicketEditDraft(baseline)) !==
-    JSON.stringify(normalizeHistoryTicketEditDraft(draft));
+  const normalizedBaseline = normalizeHistoryTicketEditDraft(baseline);
+  const normalizedDraft = normalizeHistoryTicketEditDraft(draft);
+  const baselineDate = coerceToWireCivilDate(normalizedBaseline.date) ?? normalizedBaseline.date;
+  const draftDate = coerceToWireCivilDate(normalizedDraft.date);
+  const comparableDraft = {
+    ...normalizedDraft,
+    date: draftDate ?? normalizedDraft.date.trim(),
+  };
+  const comparableBaseline = {
+    ...normalizedBaseline,
+    date: baselineDate,
+  };
+  return JSON.stringify(comparableBaseline) !== JSON.stringify(comparableDraft);
+}
+
+function isIncompleteCivilDateDraft(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (coerceToWireCivilDate(trimmed)) return false;
+  // Sigue escribiendo DD/MM/AAAA (o borrando parcial).
+  return true;
 }
 
 export function getHistoryTicketEditValidationMessage(
   draft: HistoryTicketEditDraft,
 ): string | null {
+  if (isIncompleteCivilDateDraft(draft.date)) return null;
   const validation = validateDraft({ ...draft, reviewStatus: 'pendiente' });
   if ('message' in validation) return validation.message;
   if (parseTaxDraft(draft.tax) === undefined) {

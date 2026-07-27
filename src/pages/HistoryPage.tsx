@@ -28,6 +28,7 @@ import {
 } from '@/hooks/use-history-table-editing';
 import { useFinancialKpis } from '@/hooks/use-financial-kpis';
 import { useAuth } from '@/hooks/use-auth';
+import { useCompanies } from '@/hooks/use-companies';
 import { isAuthSessionClosing } from '@/auth/session-cleanup';
 import { deleteTicket } from '@/services/tickets.service';
 import {
@@ -37,8 +38,13 @@ import {
   formatMxn,
   isValidDateRange,
   last12MonthsRange,
+  resolveCompanyTimeZone,
   type DatePresetId,
 } from '@/utils/financial-kpis';
+import {
+  formatCivilDateDisplay,
+  parseCivilDateInput,
+} from '@/utils/civil-date-input';
 import {
   invalidateTicketDerivedQueries,
   ticketUpdateAffectsFinancialKpis,
@@ -61,14 +67,6 @@ interface SelectedTicketImage {
 const formatMXN = (n: number) => formatMxn(n);
 
 const statusOptions = ['analizado', 'pendiente', 'error'] as const;
-
-/** Normaliza `UiTicket.fecha` (YYYY-MM-DD) para comparar por día completo. */
-function ticketDateKey(fecha: string | undefined | null): string | null {
-  if (!fecha || typeof fecha !== 'string') return null;
-  const trimmed = fecha.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
-  return trimmed;
-}
 
 function clearHistoryFilters(
   setGlobalFilter: (v: string) => void,
@@ -93,6 +91,12 @@ export default function HistoryPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFromFilter, setDateFromFilter] = useState(initialDateRange.dateFrom);
   const [dateToFilter, setDateToFilter] = useState(initialDateRange.dateTo);
+  const [dateFromDisplay, setDateFromDisplay] = useState(() =>
+    formatCivilDateDisplay(initialDateRange.dateFrom),
+  );
+  const [dateToDisplay, setDateToDisplay] = useState(() =>
+    formatCivilDateDisplay(initialDateRange.dateTo),
+  );
   const [isSavingTable, setIsSavingTable] = useState(false);
   const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
   const [savingAccreditableIds, setSavingAccreditableIds] = useState<ReadonlySet<string>>(
@@ -101,6 +105,8 @@ export default function HistoryPage() {
   const [isImageRetrying, setIsImageRetrying] = useState(false);
 
   const { companyId } = useAuth();
+  const { activeCompany } = useCompanies();
+  const companyTimeZone = resolveCompanyTimeZone(activeCompany?.timezone);
   const queryClient = useQueryClient();
   const companyIdRef = useRef(companyId);
   const previousCompanyIdRef = useRef(companyId);
@@ -128,27 +134,64 @@ export default function HistoryPage() {
     previousCompanyIdRef.current = companyId;
   }, [cancelEditing, companyId, isEditing]);
 
-  const ticketsQuery = useTickets({
+  // Mantener displays alineados cuando el wire cambia por presets / limpiar.
+  useEffect(() => {
+    setDateFromDisplay(dateFromFilter ? formatCivilDateDisplay(dateFromFilter) : '');
+    setDateToDisplay(dateToFilter ? formatCivilDateDisplay(dateToFilter) : '');
+  }, [dateFromFilter, dateToFilter]);
+
+  const dateRangeInvalid = !isValidDateRange(dateFromFilter, dateToFilter);
+
+  const effectiveDateRange = useMemo(
+    () => ({
+      dateFrom: dateFromFilter.trim(),
+      dateTo: dateToFilter.trim(),
+    }),
+    [dateFromFilter, dateToFilter],
+  );
+
+  const lastValidListParamsRef = useRef<{
+    page: number;
+    limit: number;
+    dateFrom?: string;
+    dateTo?: string;
+  }>({
     page: 1,
     limit: 100,
-    dateFrom: dateFromFilter,
-    dateTo: dateToFilter,
+    dateFrom: initialDateRange.dateFrom,
+    dateTo: initialDateRange.dateTo,
   });
-  const dailyReportQuery = useDashboardDailyReport({
-    page: 1,
-    limit: 100,
-    dateFrom: dateFromFilter,
-    dateTo: dateToFilter,
-  });
+
+  const ticketsListParams = useMemo(() => {
+    if (dateRangeInvalid) return lastValidListParamsRef.current;
+    const params: { page: number; limit: number; dateFrom?: string; dateTo?: string } = {
+      page: 1,
+      limit: 100,
+    };
+    if (effectiveDateRange.dateFrom) params.dateFrom = effectiveDateRange.dateFrom;
+    if (effectiveDateRange.dateTo) params.dateTo = effectiveDateRange.dateTo;
+    lastValidListParamsRef.current = params;
+    return params;
+  }, [effectiveDateRange, dateRangeInvalid]);
+
+  const ticketsQuery = useTickets(ticketsListParams);
+  const dailyReportQuery = useDashboardDailyReport(ticketsListParams);
   const updateMutation = useUpdateDashboardTicket();
 
   const financialKpis = useFinancialKpis({
-    dateFrom: dateFromFilter,
-    dateTo: dateToFilter,
+    dateFrom: ticketsListParams.dateFrom ?? '',
+    dateTo: ticketsListParams.dateTo ?? '',
     category: categoryFilter,
   });
-  const activePreset = detectActivePreset(dateFromFilter, dateToFilter, periodReference);
-  const dateRangeInvalid = !isValidDateRange(dateFromFilter, dateToFilter);
+  const activePreset = detectActivePreset(
+    effectiveDateRange.dateFrom,
+    effectiveDateRange.dateTo,
+    periodReference,
+    companyTimeZone,
+  );
+  const hasDateFilter = Boolean(
+    effectiveDateRange.dateFrom || effectiveDateRange.dateTo,
+  );
 
   const backendTickets = useMemo(() => {
     const dailyById = new Map(
@@ -169,7 +212,10 @@ export default function HistoryPage() {
       };
     });
   }, [dailyReportQuery.data?.tickets, ticketsQuery.data?.data]);
-  const tickets = useMemo(() => mapBackendTickets(backendTickets), [backendTickets]);
+  const tickets = useMemo(
+    () => mapBackendTickets(backendTickets, companyTimeZone),
+    [backendTickets, companyTimeZone],
+  );
   const backendTicketById = useMemo(
     () => new Map(backendTickets.map((ticket) => [ticket._id, ticket])),
     [backendTickets],
@@ -184,21 +230,9 @@ export default function HistoryPage() {
     let data = [...tickets];
     if (categoryFilter !== 'all') data = data.filter((t) => t.categoria === categoryFilter);
     if (statusFilter !== 'all') data = data.filter((t) => t.estatus === statusFilter);
-
-    const fromKey = dateFromFilter.trim() || null;
-    const toKey = dateToFilter.trim() || null;
-    if (fromKey || toKey) {
-      data = data.filter((t) => {
-        const key = ticketDateKey(t.fecha);
-        if (!key) return false;
-        if (fromKey && key < fromKey) return false;
-        if (toKey && key > toKey) return false;
-        return true;
-      });
-    }
-
+    // Las fechas las aplica el servidor (dateFrom/dateTo). No refiltrar en cliente.
     return data;
-  }, [tickets, categoryFilter, statusFilter, dateFromFilter, dateToFilter]);
+  }, [tickets, categoryFilter, statusFilter]);
 
   const handleClearFilters = () => {
     clearHistoryFilters(
@@ -211,9 +245,44 @@ export default function HistoryPage() {
   };
 
   const applyDatePreset = (preset: DatePresetId) => {
-    const range = dateRangeForPreset(preset, periodReference);
+    if (activePreset === preset) return;
+    const range = dateRangeForPreset(preset, periodReference, companyTimeZone);
     setDateFromFilter(range.dateFrom);
     setDateToFilter(range.dateTo);
+  };
+
+  const commitDateFromDisplay = () => {
+    const raw = dateFromDisplay.trim();
+    if (!raw) {
+      setDateFromFilter('');
+      setDateFromDisplay('');
+      return;
+    }
+    const wire = parseCivilDateInput(raw);
+    if (!wire) {
+      setDateFromDisplay(dateFromFilter ? formatCivilDateDisplay(dateFromFilter) : '');
+      toast.error('Ingresa una fecha válida con el formato DD/MM/AAAA.');
+      return;
+    }
+    setDateFromFilter(wire);
+    setDateFromDisplay(formatCivilDateDisplay(wire));
+  };
+
+  const commitDateToDisplay = () => {
+    const raw = dateToDisplay.trim();
+    if (!raw) {
+      setDateToFilter('');
+      setDateToDisplay('');
+      return;
+    }
+    const wire = parseCivilDateInput(raw);
+    if (!wire) {
+      setDateToDisplay(dateToFilter ? formatCivilDateDisplay(dateToFilter) : '');
+      toast.error('Ingresa una fecha válida con el formato DD/MM/AAAA.');
+      return;
+    }
+    setDateToFilter(wire);
+    setDateToDisplay(formatCivilDateDisplay(wire));
   };
 
   const deleteMutation = useMutation({
@@ -280,24 +349,14 @@ export default function HistoryPage() {
       const ticketsData = queryClient.getQueryData([
         'tickets',
         companyId,
-        {
-          page: 1,
-          limit: 100,
-          dateFrom: dateFromFilter,
-          dateTo: dateToFilter,
-        },
+        ticketsListParams,
       ]) as {
         data?: Array<{ _id: string; companyId: string; imageUrl?: string | null }>;
       } | undefined;
       const dailyData = queryClient.getQueryData([
         'dashboard-daily-report',
         companyId,
-        {
-          page: 1,
-          limit: 100,
-          dateFrom: dateFromFilter,
-          dateTo: dateToFilter,
-        },
+        ticketsListParams,
       ]) as {
         tickets?: Array<{ _id: string; companyId: string; imageUrl?: string | null }>;
       } | undefined;
@@ -424,7 +483,7 @@ export default function HistoryPage() {
     }
 
     const row = { id: ticket.id, companyId, ticket: backendTicket };
-    let result = tableEditing.requestCellEdit(row, field, companyId);
+    let result = tableEditing.requestCellEdit(row, field, companyId, companyTimeZone);
 
     if (result === 'needs-commit') {
       const commitResult = await commitActiveCell();
@@ -435,7 +494,7 @@ export default function HistoryPage() {
       ) {
         return;
       }
-      result = tableEditing.requestCellEdit(row, field, companyId);
+      result = tableEditing.requestCellEdit(row, field, companyId, companyTimeZone);
     }
 
     if (result === 'ignored') {
@@ -539,9 +598,7 @@ export default function HistoryPage() {
       case 'error':
         return 'No fue posible cargar esta métrica.';
       case 'empty':
-        return financialKpis.periodLabel === 'Selecciona un período'
-          ? 'Usa un preset o selecciona un rango de fechas.'
-          : 'Período sin movimientos.';
+        return 'Período sin movimientos.';
       default:
         return 'No fue posible cargar esta métrica.';
     }
@@ -707,9 +764,18 @@ export default function HistoryPage() {
                   </Label>
                   <Input
                     id="history-date-from"
-                    type="date"
-                    value={dateFromFilter}
-                    onChange={(e) => setDateFromFilter(e.target.value)}
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="DD/MM/AAAA"
+                    value={dateFromDisplay}
+                    onChange={(e) => setDateFromDisplay(e.target.value)}
+                    onBlur={commitDateFromDisplay}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        commitDateFromDisplay();
+                      }
+                    }}
                     disabled={tableEditing.isEditing}
                     className={cn(
                       'h-10 rounded-xl border-border',
@@ -723,9 +789,18 @@ export default function HistoryPage() {
                   </Label>
                   <Input
                     id="history-date-to"
-                    type="date"
-                    value={dateToFilter}
-                    onChange={(e) => setDateToFilter(e.target.value)}
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="DD/MM/AAAA"
+                    value={dateToDisplay}
+                    onChange={(e) => setDateToDisplay(e.target.value)}
+                    onBlur={commitDateToDisplay}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        commitDateToDisplay();
+                      }
+                    }}
                     disabled={tableEditing.isEditing}
                     className={cn(
                       'h-10 rounded-xl border-border',
@@ -781,6 +856,21 @@ export default function HistoryPage() {
             void handleToggleAccreditable(ticket, nextValue);
           }}
           savingAccreditableIds={savingAccreditableIds}
+          emptyTitle={
+            !hasDateFilter &&
+            categoryFilter === 'all' &&
+            statusFilter === 'all' &&
+            !globalFilter.trim()
+              ? 'No hay tickets registrados'
+              : 'No hay tickets para estos filtros.'
+          }
+          emptyDescription={
+            !hasDateFilter
+              ? categoryFilter !== 'all' || statusFilter !== 'all' || globalFilter.trim()
+                ? 'Prueba otra categoría, estatus o búsqueda.'
+                : 'Aún no hay tickets cargados para esta compañía.'
+              : 'Prueba otro rango de fechas, categoría o búsqueda.'
+          }
         />
       </div>
 

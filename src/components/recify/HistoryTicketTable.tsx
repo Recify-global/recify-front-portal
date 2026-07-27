@@ -94,6 +94,8 @@ interface HistoryTicketTableProps {
   onClearFilters: () => void;
   onToggleAccreditable: (ticket: UiTicket, nextValue: boolean) => void;
   savingAccreditableIds: ReadonlySet<string>;
+  emptyTitle?: string;
+  emptyDescription?: string;
 }
 
 function columnClass(columnId: string): string {
@@ -217,6 +219,8 @@ export function HistoryTicketTable({
   onClearFilters,
   onToggleAccreditable,
   savingAccreditableIds,
+  emptyTitle = 'No hay tickets para estos filtros.',
+  emptyDescription = 'Prueba otro rango de fechas, categoría o búsqueda.',
 }: HistoryTicketTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const dirtyIds = useMemo(() => new Set(dirtyTicketIds), [dirtyTicketIds]);
@@ -437,7 +441,9 @@ export function HistoryTicketTable({
             <CellEditorShell>
               <Input
                 ref={activeInputRef}
-                type="date"
+                type="text"
+                inputMode="numeric"
+                placeholder="DD/MM/AAAA"
                 value={draft.date}
                 aria-label={`Editar fecha de ${row.original.comercio}`}
                 disabled={liveSaving}
@@ -445,6 +451,7 @@ export function HistoryTicketTable({
                 onClick={(event) => event.stopPropagation()}
                 onChange={(event) => liveUpdateDraft(row.original.id, { date: event.target.value })}
                 onKeyDown={commitInputKeys}
+                onBlur={commitOnBlur}
               />
             </CellEditorShell>
           );
@@ -938,8 +945,8 @@ export function HistoryTicketTable({
       ) : table.getRowModel().rows.length === 0 ? (
         <EmptyState
           icon={<Receipt size={32} />}
-          title="No hay tickets para estos filtros."
-          description="Prueba otro rango de fechas, categoría o búsqueda."
+          title={emptyTitle}
+          description={emptyDescription}
           action={<Button variant="outline" className="rounded-xl" onClick={onClearFilters}>Limpiar filtros</Button>}
         />
       ) : (

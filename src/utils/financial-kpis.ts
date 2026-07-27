@@ -2,6 +2,19 @@ import type { BackendPaymentMethod } from '@/types/ticket';
 
 export const HISTORY_TIMEZONE = 'America/Chihuahua';
 
+/** Fallback central cuando la compañía no expone un timezone IANA válido. */
+export function resolveCompanyTimeZone(timeZone?: string | null): string {
+  const trimmed = typeof timeZone === 'string' ? timeZone.trim() : '';
+  if (!trimmed) return HISTORY_TIMEZONE;
+  try {
+    // Valida el IANA sin depender del offset actual.
+    Intl.DateTimeFormat('en-US', { timeZone: trimmed }).format(new Date());
+    return trimmed;
+  } catch {
+    return HISTORY_TIMEZONE;
+  }
+}
+
 export const mxnFormatter = new Intl.NumberFormat('es-MX', {
   style: 'currency',
   currency: 'MXN',
@@ -193,11 +206,12 @@ function pad2(n: number): string {
 }
 
 /**
- * Fecha civil YYYY-MM-DD en America/Chihuahua para un instante dado.
+ * Fecha civil YYYY-MM-DD en el timezone indicado (default: fallback de Histórico).
  */
 export function civilDateInTimeZone(date: Date, timeZone = HISTORY_TIMEZONE): string {
+  const zone = resolveCompanyTimeZone(timeZone);
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
+    timeZone: zone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -213,21 +227,18 @@ export function civilDateInTimeZone(date: Date, timeZone = HISTORY_TIMEZONE): st
 }
 
 /**
- * Inicio del día civil (00:00:00.000) en America/Chihuahua como ISO UTC.
- * Chihuahua observa UTC-6 fijo (sin DST).
+ * Inicio del día civil como ISO con offset fijo -06:00 (contrato KPI Histórico).
+ * El `timeZone` se resuelve para validar IANA; el offset wire permanece -06:00
+ * mientras el contrato FE de KPIs no exponga otro.
  */
 export function startOfCivilDayIso(dateKey: string, timeZone = HISTORY_TIMEZONE): string {
-  if (timeZone !== HISTORY_TIMEZONE) {
-    // Solo soportamos el timezone temporal del ticket.
-  }
+  resolveCompanyTimeZone(timeZone);
   return `${dateKey}T00:00:00.000-06:00`;
 }
 
-/** Fin del día civil (23:59:59.999) en America/Chihuahua como ISO UTC. */
+/** Fin del día civil como ISO con offset fijo -06:00. */
 export function endOfCivilDayIso(dateKey: string, timeZone = HISTORY_TIMEZONE): string {
-  if (timeZone !== HISTORY_TIMEZONE) {
-    // Solo soportamos el timezone temporal del ticket.
-  }
+  resolveCompanyTimeZone(timeZone);
   return `${dateKey}T23:59:59.999-06:00`;
 }
 
@@ -239,7 +250,8 @@ export type DatePresetId =
   | 'last_30_days'
   | 'last_60_days'
   | 'last_90_days'
-  | 'last_12_months';
+  | 'last_12_months'
+  | 'all';
 export type DatePreset = DatePresetId | null;
 
 export const DATE_PRESETS: ReadonlyArray<{ id: DatePresetId; label: string }> = [
@@ -251,9 +263,11 @@ export const DATE_PRESETS: ReadonlyArray<{ id: DatePresetId; label: string }> = 
   { id: 'last_60_days', label: '60 días' },
   { id: 'last_90_days', label: '90 días' },
   { id: 'last_12_months', label: 'Último año' },
+  { id: 'all', label: 'Todo el historial' },
 ];
 
-function shiftCivilDays(dateKey: string, days: number): string {
+/** Desplaza una fecha civil YYYY-MM-DD N días (calendario, sin Date local). */
+export function shiftCivilDays(dateKey: string, days: number): string {
   const [year, month, day] = dateKey.split('-').map(Number);
   const shifted = new Date(Date.UTC(year, month - 1, day + days));
   return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(
@@ -278,11 +292,12 @@ function shiftCivilMonths(dateKey: string, months: number): string {
 export function inclusiveDaysRange(
   days: number,
   now = new Date(),
+  timeZone = HISTORY_TIMEZONE,
 ): { dateFrom: string; dateTo: string } {
   if (!Number.isInteger(days) || days < 1) {
     throw new Error('El rango debe contener al menos un día.');
   }
-  const toKey = civilDateInTimeZone(now);
+  const toKey = civilDateInTimeZone(now, timeZone);
   const fromKey = shiftCivilDays(toKey, -(days - 1));
   return { dateFrom: fromKey, dateTo: toKey };
 }
@@ -290,8 +305,11 @@ export function inclusiveDaysRange(
 /**
  * Últimos 12 meses incluyendo hoy (rango móvil).
  */
-export function last12MonthsRange(now = new Date()): { dateFrom: string; dateTo: string } {
-  const toKey = civilDateInTimeZone(now);
+export function last12MonthsRange(
+  now = new Date(),
+  timeZone = HISTORY_TIMEZONE,
+): { dateFrom: string; dateTo: string } {
+  const toKey = civilDateInTimeZone(now, timeZone);
   const fromKey = shiftCivilMonths(toKey, -12);
   return { dateFrom: fromKey, dateTo: toKey };
 }
@@ -299,16 +317,19 @@ export function last12MonthsRange(now = new Date()): { dateFrom: string; dateTo:
 export function dateRangeForPreset(
   preset: DatePresetId,
   now = new Date(),
+  timeZone = HISTORY_TIMEZONE,
 ): { dateFrom: string; dateTo: string } {
-  if (preset === 'last_12_months') return last12MonthsRange(now);
-  if (preset === 'today') return inclusiveDaysRange(1, now);
+  const zone = resolveCompanyTimeZone(timeZone);
+  if (preset === 'all') return { dateFrom: '', dateTo: '' };
+  if (preset === 'last_12_months') return last12MonthsRange(now, zone);
+  if (preset === 'today') return inclusiveDaysRange(1, now, zone);
   if (preset === 'yesterday') {
-    const today = civilDateInTimeZone(now);
+    const today = civilDateInTimeZone(now, zone);
     const yesterday = shiftCivilDays(today, -1);
     return { dateFrom: yesterday, dateTo: yesterday };
   }
   const daysByPreset: Record<
-    Exclude<DatePresetId, 'last_12_months' | 'today' | 'yesterday'>,
+    Exclude<DatePresetId, 'last_12_months' | 'today' | 'yesterday' | 'all'>,
     number
   > = {
     last_7_days: 7,
@@ -317,16 +338,20 @@ export function dateRangeForPreset(
     last_60_days: 60,
     last_90_days: 90,
   };
-  return inclusiveDaysRange(daysByPreset[preset], now);
+  return inclusiveDaysRange(daysByPreset[preset], now, zone);
 }
 
 export function detectActivePreset(
   dateFrom: string,
   dateTo: string,
   now = new Date(),
+  timeZone = HISTORY_TIMEZONE,
 ): DatePreset {
+  if (!dateFrom.trim() && !dateTo.trim()) return 'all';
+  const zone = resolveCompanyTimeZone(timeZone);
   for (const preset of DATE_PRESETS) {
-    const range = dateRangeForPreset(preset.id, now);
+    if (preset.id === 'all') continue;
+    const range = dateRangeForPreset(preset.id, now, zone);
     if (dateFrom === range.dateFrom && dateTo === range.dateTo) return preset.id;
   }
   return null;
