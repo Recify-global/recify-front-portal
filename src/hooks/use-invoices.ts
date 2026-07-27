@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   confirmInvoiceMatch,
   deleteInvoice,
@@ -10,44 +10,63 @@ import {
 } from '@/services/invoices.service';
 import { uploadInvoice } from '@/services/upload.service';
 import type { InvoicesListParams } from '@/types/invoice';
-import { useAuth } from './use-auth';
 import { isAuthSessionClosing } from '@/auth/session-cleanup';
+import { shouldRetryInvoiceQuery } from '@/utils/invoice-errors';
+import {
+  invalidateInvoiceQueries,
+  invoiceDetailQueryKey,
+  invoiceListQueryKey,
+  removeInvoiceFromCache,
+  writeInvoiceCache,
+} from '@/utils/invoice-queries';
+import { useAuth } from './use-auth';
 
-/**
- * El match toca ambos lados (invoice.ticketId / ticket.invoiceId), así que
- * cualquier mutación invalida facturas y tickets de la compañía.
- */
-async function invalidateInvoiceQueries(queryClient: QueryClient, companyId: string) {
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: ['invoices', companyId] }),
-    queryClient.invalidateQueries({ queryKey: ['invoice', companyId] }),
-    queryClient.invalidateQueries({ queryKey: ['tickets', companyId] }),
-    queryClient.invalidateQueries({ queryKey: ['dashboard-daily-report', companyId] }),
-  ]);
-}
-
-function requireCompany(companyId: string | null): Promise<never> | null {
+function requireCompanyId(companyId: string): void {
   if (!companyId) {
-    return Promise.reject(new Error('No hay compañía activa.'));
+    throw new Error('No hay compañía activa.');
   }
-  return null;
 }
+
+const invoiceQueryOptions = {
+  staleTime: 30_000,
+  gcTime: 5 * 60_000,
+  refetchOnWindowFocus: false as const,
+  retry: shouldRetryInvoiceQuery,
+};
 
 export function useInvoices(params: InvoicesListParams = {}) {
   const { companyId } = useAuth();
   return useQuery({
-    queryKey: ['invoices', companyId, params],
-    queryFn: () => listInvoices(companyId as string, params),
+    queryKey: invoiceListQueryKey(companyId ?? '', params),
+    queryFn: ({ signal }) => listInvoices(companyId as string, params, { signal }),
     enabled: Boolean(companyId),
+    ...invoiceQueryOptions,
+    placeholderData: (previous) => previous,
   });
 }
 
-export function useInvoice(id: string | null | undefined) {
-  const { companyId } = useAuth();
+/**
+ * Detalle ligado a compañía de la selección.
+ * No habilitar si `selection.companyId !== activeCompanyId`.
+ */
+export function useInvoice(
+  selection: { companyId: string; invoiceId: string } | null | undefined,
+) {
+  const { companyId: activeCompanyId } = useAuth();
+  const companyId = selection?.companyId;
+  const invoiceId = selection?.invoiceId;
+  const enabled =
+    Boolean(companyId) &&
+    Boolean(invoiceId) &&
+    Boolean(activeCompanyId) &&
+    companyId === activeCompanyId;
+
   return useQuery({
-    queryKey: ['invoice', companyId, id],
-    queryFn: () => getInvoice(companyId as string, id as string),
-    enabled: Boolean(companyId) && Boolean(id),
+    queryKey: invoiceDetailQueryKey(companyId ?? '', invoiceId ?? ''),
+    queryFn: ({ signal }) => getInvoice(companyId as string, invoiceId as string, { signal }),
+    enabled,
+    ...invoiceQueryOptions,
+    retry: (failureCount, error) => shouldRetryInvoiceQuery(failureCount, error),
   });
 }
 
@@ -55,6 +74,7 @@ export function useUploadInvoice() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    retry: false,
     mutationFn: ({
       companyId,
       file,
@@ -63,82 +83,142 @@ export function useUploadInvoice() {
       companyId: string;
       file: File;
       signal?: AbortSignal;
-    }) => requireCompany(companyId) ?? uploadInvoice(companyId, file, { signal }),
-    onSuccess: async (_data, { companyId }) => {
+    }) => {
+      requireCompanyId(companyId);
+      return uploadInvoice(companyId, file, { signal });
+    },
+    onSuccess: async (data, { companyId }) => {
       if (isAuthSessionClosing()) return;
-      await invalidateInvoiceQueries(queryClient, companyId);
+      writeInvoiceCache(queryClient, companyId, data.invoice);
+      await invalidateInvoiceQueries(queryClient, companyId, {
+        invoiceId: data.invoice._id,
+      });
     },
   });
 }
 
 /**
- * Recalcula candidatos bajo demanda (GET, pero modelado como mutación
- * porque se dispara con un botón y puede responder 409 si ya hay match).
+ * Recalcula candidatos bajo demanda (GET modelado como mutación).
+ * Captura companyId de origen en variables.
  */
 export function useRecalculateMatchCandidates() {
-  const { companyId } = useAuth();
-
   return useMutation({
-    mutationFn: ({ invoiceId }: { invoiceId: string }) =>
-      requireCompany(companyId) ?? getInvoiceMatchCandidates(companyId as string, invoiceId),
+    retry: false,
+    mutationFn: ({
+      companyId,
+      invoiceId,
+      signal,
+    }: {
+      companyId: string;
+      invoiceId: string;
+      signal?: AbortSignal;
+    }) => {
+      requireCompanyId(companyId);
+      return getInvoiceMatchCandidates(companyId, invoiceId, { signal });
+    },
   });
 }
 
 export function useConfirmInvoiceMatch() {
-  const { companyId } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ invoiceId, ticketId }: { invoiceId: string; ticketId: string }) =>
-      requireCompany(companyId) ?? confirmInvoiceMatch(companyId as string, invoiceId, ticketId),
-    onSuccess: async () => {
-      if (companyId) await invalidateInvoiceQueries(queryClient, companyId);
+    retry: false,
+    mutationFn: ({
+      companyId,
+      invoiceId,
+      ticketId,
+      signal,
+    }: {
+      companyId: string;
+      invoiceId: string;
+      ticketId: string;
+      signal?: AbortSignal;
+    }) => {
+      requireCompanyId(companyId);
+      return confirmInvoiceMatch(companyId, invoiceId, ticketId, { signal });
+    },
+    onSuccess: async (data, { companyId, invoiceId }) => {
+      if (isAuthSessionClosing()) return;
+      writeInvoiceCache(queryClient, companyId, data.invoice);
+      await invalidateInvoiceQueries(queryClient, companyId, { invoiceId });
     },
   });
 }
 
 export function useUnlinkInvoiceMatch() {
-  const { companyId } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ invoiceId }: { invoiceId: string }) =>
-      requireCompany(companyId) ?? unlinkInvoiceMatch(companyId as string, invoiceId),
-    onSuccess: async () => {
-      if (companyId) await invalidateInvoiceQueries(queryClient, companyId);
+    retry: false,
+    mutationFn: ({
+      companyId,
+      invoiceId,
+      signal,
+    }: {
+      companyId: string;
+      invoiceId: string;
+      signal?: AbortSignal;
+    }) => {
+      requireCompanyId(companyId);
+      return unlinkInvoiceMatch(companyId, invoiceId, { signal });
+    },
+    onSuccess: async (data, { companyId, invoiceId }) => {
+      if (isAuthSessionClosing()) return;
+      writeInvoiceCache(queryClient, companyId, data);
+      await invalidateInvoiceQueries(queryClient, companyId, { invoiceId });
     },
   });
 }
 
 export function useUpdateInvoiceMatchStatus() {
-  const { companyId } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
+    retry: false,
     mutationFn: ({
+      companyId,
       invoiceId,
       matchStatus,
+      signal,
     }: {
+      companyId: string;
       invoiceId: string;
       matchStatus: 'missing_ticket' | 'unmatched';
-    }) =>
-      requireCompany(companyId) ??
-      updateInvoiceMatchStatus(companyId as string, invoiceId, matchStatus),
-    onSuccess: async () => {
-      if (companyId) await invalidateInvoiceQueries(queryClient, companyId);
+      signal?: AbortSignal;
+    }) => {
+      requireCompanyId(companyId);
+      return updateInvoiceMatchStatus(companyId, invoiceId, matchStatus, { signal });
+    },
+    onSuccess: async (data, { companyId, invoiceId }) => {
+      if (isAuthSessionClosing()) return;
+      writeInvoiceCache(queryClient, companyId, data);
+      await invalidateInvoiceQueries(queryClient, companyId, { invoiceId });
     },
   });
 }
 
 export function useDeleteInvoice() {
-  const { companyId } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ invoiceId }: { invoiceId: string }) =>
-      requireCompany(companyId) ?? deleteInvoice(companyId as string, invoiceId),
-    onSuccess: async () => {
-      if (companyId) await invalidateInvoiceQueries(queryClient, companyId);
+    retry: false,
+    mutationFn: ({
+      companyId,
+      invoiceId,
+      signal,
+    }: {
+      companyId: string;
+      invoiceId: string;
+      signal?: AbortSignal;
+    }) => {
+      requireCompanyId(companyId);
+      return deleteInvoice(companyId, invoiceId, { signal });
+    },
+    onSuccess: async (_data, { companyId, invoiceId }) => {
+      if (isAuthSessionClosing()) return;
+      removeInvoiceFromCache(queryClient, companyId, invoiceId);
+      await invalidateInvoiceQueries(queryClient, companyId, { invoiceId });
     },
   });
 }

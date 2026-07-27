@@ -15,6 +15,18 @@ vi.mock('@/hooks/use-auth', () => ({
   }),
 }));
 
+vi.mock('@/hooks/use-companies', () => ({
+  useCompanies: () => ({
+    activeCompany: { _id: 'company-a', name: 'Acme', timezone: 'America/Mexico_City' },
+    companies: [],
+    allowedIds: ['company-a'],
+    hasNames: true,
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  }),
+}));
+
 vi.mock('@/hooks/use-upload-ticket', () => ({
   usePreprocessTicket: () => ({
     mutateAsync: mocks.preprocess,
@@ -133,7 +145,7 @@ afterEach(() => {
 describe('UploadPage format hint', () => {
   it('shows the simplified supported formats and size limit', () => {
     render(<UploadPage />);
-    expect(screen.getByText('PNG, JPG o PDF · Máx. 10 MB')).toBeInTheDocument();
+    expect(screen.getByText('Imágenes PNG/JPG o PDF CFDI · Máx. 10 MB')).toBeInTheDocument();
     expect(screen.queryByText(/WEBP/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/GIF/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/PDF de una página/i)).not.toBeInTheDocument();

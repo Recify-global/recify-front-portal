@@ -33,7 +33,8 @@ export interface InvoiceMatchCandidate {
 
 export interface BackendInvoice {
   _id: string;
-  uuid: string;
+  /** Folio fiscal; puede ser null si el OCR no lo leyó. */
+  uuid: string | null;
   type: BackendInvoiceType;
   issuerRfc: string | null;
   issuerName: string | null;

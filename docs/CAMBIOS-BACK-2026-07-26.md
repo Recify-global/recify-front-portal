@@ -173,3 +173,21 @@ Todo ticket nuevo debe persistirse con Acreditable = true porque la página Anal
 
 - Pendiente de revisión de backend/política de rate limiting.
 - Frontend puede continuar con otras features: Sí, una vez restablecida la ventana de rate limit; el QA intensivo seguirá limitado mientras la política permanezca igual.
+
+## Dependencias backend detectadas en auditoría frontend de Facturas
+
+### Búsqueda global por emisor / folio fiscal (UUID)
+
+- ID del hallazgo frontend: FACT-FE-P1-002 (parcial; paginación sí cerrada en frontend)
+- Endpoint involucrado: `GET /api/v1/companies/:companyId/invoices`
+- Contrato observado en frontend (`InvoicesListParams`): `matchStatus`, `type`, `issuerRfc`, `dateFrom`, `dateTo`, `page`, `limit`. No existe parámetro de búsqueda libre (`q` / `search` / `issuerName` / `uuid`).
+- Capacidad faltante: filtro/búsqueda server-side por razón social del emisor y/o folio fiscal (UUID), idealmente combinable con paginación.
+- Evidencia frontend: la UI solo puede enviar `issuerRfc` cuando el texto parece un RFC completo; emisor/folio se filtran únicamente sobre la página actual, con copy explícito.
+- Resultado esperado: el usuario puede localizar una factura por emisor o UUID en todo el inventario sin recorrer páginas.
+- Criterios de aceptación:
+  - Query documentada (p. ej. `q` o campos dedicados) con paginación.
+  - Respuestas mantienen `{ data, total, page, limit, pages }`.
+  - Sin filtrar solo en la página actual.
+- Severidad: P2 de producto (P1 de inventario oculto quedó mitigado con paginación real).
+- Frontend modificado: No (respecto a inventar el contrato).
+- Backend modificado: No.
