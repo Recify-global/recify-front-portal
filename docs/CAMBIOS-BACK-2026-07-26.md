@@ -92,13 +92,38 @@ Durante QA del frontend en la branch `KAN-43`, el Histórico de tickets present�
 - Seleccionar nuevamente el preset ya activo no cambia estado ni dispara otra request.
 - No se modificó backend durante esta auditoría.
 
-## Default persistente de Acreditable
+## Default persistente de Acreditable en creación
 
-- El frontend interpreta valores ausentes o `null` como `true`.
-- El backend debe confirmar si el campo tiene default persistente `true` para tickets nuevos.
-- El upload multipart actual del frontend no admite enviar este campo.
-- No se realizó backfill de tickets históricos ni PATCH automático al cargar.
-- Un `false` explícito se conserva siempre.
+### Requerimiento
+Todo ticket nuevo debe persistirse con Acreditable = true porque la página Analizar ticket no permite elegir el valor.
+
+### Evidencia frontend
+- Endpoint: `POST /api/v1/companies/:companyId/upload/ticket`
+- Payload enviado: multipart FormData con un único campo `image`
+- Campo: `isAccreditable` no forma parte del contrato de creación usado por el frontend
+- Respuesta: el ticket creado llega típicamente con `isAccreditable: false` (o se interpreta como no acreditable tras recargar)
+- Resultado tras recargar: el switch del Histórico muestra No cuando el backend persiste `false` explícito
+- Flujos afectados: upload individual, cámara y batch comparten el mismo `uploadTicket`
+- Persistencia conocida del campo: únicamente vía `PATCH .../dashboard/daily-report/:ticketId` con `{ isAccreditable }`
+- El frontend no añade un PATCH posterior a cada creación solo para forzar `true` (evita request extra y agravar rate limit)
+
+### Comportamiento esperado
+- Ticket nuevo: `true` persistido desde creación o default de backend.
+- Cambio manual posterior a `false`: conservar `false`.
+- Sin backfill automático de históricos.
+- Valores ausentes/`null` en lectura pueden tratarse como Sí en UI; un `false` explícito nunca debe convertirse en `true`.
+
+### Revisión requerida en backend
+- Aceptar el campo en creación o configurar default persistente `true` al crear el ticket.
+- No sobrescribir un `true` enviado por frontend si se amplía el contrato.
+- Conservar `false` explícito enviado posteriormente desde Histórico.
+- Aplicar la misma semántica a los flujos individual, cámara y batch.
+- Evitar obligar al frontend a un segundo PATCH por ticket nuevo.
+
+### Estado
+- Frontend modificado: fallback visual `?? true`, layout de columnas, sin inventar contrato de upload.
+- Backend pendiente: default persistente `true` en creación o aceptación explícita del campo.
+- Severidad: P1 — bloquea el requisito de producto “nuevo ticket nace en Sí” tras recargar.
 
 ## QA de aceptación para backend
 

@@ -558,7 +558,10 @@ export function HistoryTicketTable({
                       {row.getVisibleCells().map((cell) => (
                         <td
                           key={cell.id}
-                          className="border-b border-border/30 px-3 py-3 align-middle"
+                          className={cn(
+                            'border-b border-border/30 px-3 py-3 align-middle',
+                            columnClass(cell.column.id),
+                          )}
                         >
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
                           {cell.column.id === 'comercio' && rowError ? (
