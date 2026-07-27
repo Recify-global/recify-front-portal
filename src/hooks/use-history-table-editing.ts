@@ -15,6 +15,21 @@ export interface HistoryEditableTicket {
   ticket: BackendTicket;
 }
 
+export type HistoryEditableField =
+  | 'vendor'
+  | 'date'
+  | 'amount'
+  | 'tax'
+  | 'paymentMethod'
+  | 'type'
+  | 'status'
+  | 'category';
+
+export type EditingCell = {
+  ticketId: string;
+  field: HistoryEditableField;
+};
+
 type DraftRecord = Record<string, HistoryTicketEditDraft>;
 type ErrorRecord = Record<string, string>;
 
@@ -44,7 +59,7 @@ export async function saveHistoryTicketDrafts({
       if (!baseline || !draft) continue;
 
       const result = buildHistoryTicketUpdatePayload(baseline, draft);
-      if (!result.ok) {
+      if (result.ok === false) {
         if (result.reason === 'validation') errors[ticketId] = result.message;
         continue;
       }
@@ -65,34 +80,88 @@ export async function saveHistoryTicketDrafts({
   return { savedIds, errors };
 }
 
+function openCellState(
+  row: HistoryEditableTicket,
+  field: HistoryEditableField,
+  companyId: string,
+) {
+  const draft = createHistoryDraftFromTicket(row.ticket);
+  return {
+    editingCell: { ticketId: row.id, field } satisfies EditingCell,
+    editingCompanyId: companyId,
+    baselines: { [row.id]: draft },
+    drafts: { [row.id]: draft },
+    rowErrors: {} as ErrorRecord,
+  };
+}
+
 export function useHistoryTableEditing() {
-  const [isTableEditing, setIsTableEditing] = useState(false);
+  const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
   const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
   const [baselines, setBaselines] = useState<DraftRecord>({});
   const [drafts, setDrafts] = useState<DraftRecord>({});
   const [rowErrors, setRowErrors] = useState<ErrorRecord>({});
 
-  const startEditing = useCallback((rows: HistoryEditableTicket[], companyId: string) => {
-    const next = rows.reduce<DraftRecord>((result, row) => {
-      if (row.companyId === companyId) {
-        result[row.id] = createHistoryDraftFromTicket(row.ticket);
-      }
-      return result;
-    }, {});
-    setEditingCompanyId(companyId);
-    setBaselines(next);
-    setDrafts(next);
-    setRowErrors({});
-    setIsTableEditing(true);
-  }, []);
+  const isEditing = editingCell !== null;
 
   const cancelEditing = useCallback(() => {
-    setIsTableEditing(false);
+    setEditingCell(null);
     setEditingCompanyId(null);
     setBaselines({});
     setDrafts({});
     setRowErrors({});
   }, []);
+
+  const activateCell = useCallback(
+    (row: HistoryEditableTicket, field: HistoryEditableField, companyId: string) => {
+      if (row.companyId !== companyId) return;
+      const next = openCellState(row, field, companyId);
+      setEditingCell(next.editingCell);
+      setEditingCompanyId(next.editingCompanyId);
+      setBaselines(next.baselines);
+      setDrafts(next.drafts);
+      setRowErrors(next.rowErrors);
+    },
+    [],
+  );
+
+  const dirtyTicketIds = useMemo(
+    () =>
+      Object.keys(drafts).filter((ticketId) => {
+        const baseline = baselines[ticketId];
+        const draft = drafts[ticketId];
+        return Boolean(baseline && draft && hasHistoryTicketEditChanges(baseline, draft));
+      }),
+    [baselines, drafts],
+  );
+
+  const hasDirtyChanges = dirtyTicketIds.length > 0;
+
+  const requestCellEdit = useCallback(
+    (
+      row: HistoryEditableTicket,
+      field: HistoryEditableField,
+      companyId: string,
+    ): 'activated' | 'same-cell' | 'needs-commit' | 'ignored' => {
+      if (row.companyId !== companyId) return 'ignored';
+
+      if (
+        editingCell &&
+        editingCell.ticketId === row.id &&
+        editingCell.field === field
+      ) {
+        return 'same-cell';
+      }
+
+      if (editingCell && hasDirtyChanges) {
+        return 'needs-commit';
+      }
+
+      activateCell(row, field, companyId);
+      return 'activated';
+    },
+    [activateCell, editingCell, hasDirtyChanges],
+  );
 
   const updateDraft = useCallback(
     <K extends keyof HistoryTicketEditDraft>(
@@ -132,16 +201,6 @@ export function useHistoryTableEditing() {
     [],
   );
 
-  const dirtyTicketIds = useMemo(
-    () =>
-      Object.keys(drafts).filter((ticketId) => {
-        const baseline = baselines[ticketId];
-        const draft = drafts[ticketId];
-        return Boolean(baseline && draft && hasHistoryTicketEditChanges(baseline, draft));
-      }),
-    [baselines, drafts],
-  );
-
   const validationErrors = useMemo(
     () =>
       dirtyTicketIds.reduce<ErrorRecord>((result, ticketId) => {
@@ -166,20 +225,33 @@ export function useHistoryTableEditing() {
       Object.fromEntries(Object.entries(current).filter(([id]) => !saved.has(id))),
     );
     setRowErrors(errors);
-  }, [cancelEditing]);
+    if (editingCell && saved.has(editingCell.ticketId)) {
+      setEditingCell(null);
+    }
+  }, [cancelEditing, editingCell]);
+
+  const isCellEditing = useCallback(
+    (ticketId: string, field: HistoryEditableField) =>
+      Boolean(editingCell && editingCell.ticketId === ticketId && editingCell.field === field),
+    [editingCell],
+  );
 
   return {
-    isTableEditing,
+    isEditing,
+    editingCell,
     editingCompanyId,
     baselines,
     drafts,
     dirtyTicketIds,
+    hasDirtyChanges,
     validationErrors,
     rowErrors,
-    startEditing,
+    requestCellEdit,
+    activateCell,
     cancelEditing,
     updateDraft,
     updateDraftPatch,
     applySaveResults,
+    isCellEditing,
   };
 }

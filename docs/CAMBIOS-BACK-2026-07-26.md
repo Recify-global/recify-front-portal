@@ -125,6 +125,40 @@ Todo ticket nuevo debe persistirse con Acreditable = true porque la página Anal
 - Backend pendiente: default persistente `true` en creación o aceptación explícita del campo.
 - Severidad: P1 — bloquea el requisito de producto “nuevo ticket nace en Sí” tras recargar.
 
+## Auditoría del IVA en tickets
+
+### Resultado confirmado
+
+- Campo real: `tax`.
+- El valor está persistido en tickets.
+- Los endpoints existentes de tickets/daily-report aceptan actualizar `tax`.
+- No se necesita un endpoint nuevo.
+- Cambiar `amount` no recalcula `tax`.
+- Total e IVA son valores independientes.
+- Frontend no debe aplicar una fórmula automática ni asumir 16%.
+- La capacidad pendiente estaba únicamente en frontend:
+  - declarar `tax` en el tipo de actualización;
+  - incluirlo en la allowlist editable (`HistoryEditableField`);
+  - renderizar el editor en Histórico;
+  - enviarlo mediante el PATCH existente.
+
+> La auditoría posterior confirmó que el backend ya admite `tax`; la dependencia inicial era un gap del contrato frontend.
+
+### Decisión frontend
+
+- IVA es editable directamente desde Histórico.
+- Se reutiliza el contrato / PATCH existente (`tax` en el body).
+- No se modifica backend.
+- No se calcula automáticamente.
+- No se sincroniza automáticamente con Total (editar Total no envía `tax`; editar IVA no envía `amount`).
+
+### Backend
+
+- Cambio backend requerido para editar IVA: Ninguno.
+- Endpoint nuevo requerido: No.
+- Modelo modificado: No.
+- Fórmula backend modificada: No.
+
 ## QA de aceptación para backend
 
 1. Ejecutar la misma request válida al menos diez veces.

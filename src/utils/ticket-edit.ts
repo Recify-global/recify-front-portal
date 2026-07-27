@@ -23,7 +23,10 @@ export interface TicketEditDraft {
   reviewStatus: BackendTicketReviewStatus;
 }
 
-export type HistoryTicketEditDraft = Omit<TicketEditDraft, 'reviewStatus'>;
+export type HistoryTicketEditDraft = Omit<TicketEditDraft, 'reviewStatus'> & {
+  /** Draft textual del IVA (`tax`); independiente de `amount`. */
+  tax: string;
+};
 
 const STATUS_LABELS: Record<BackendTicketStatus, UiTicketStatus> = {
   processed: 'analizado',
@@ -159,6 +162,20 @@ export function parseAmount(value: string): number | null {
   return n;
 }
 
+/** Vacío → `null` (sin IVA); mismo criterio numérico que Total para valores no vacíos. */
+export function parseTaxDraft(value: string): number | null | undefined {
+  const trimmed = value.trim().replace(/,/g, '');
+  if (trimmed === '') return null;
+  return parseAmount(trimmed) ?? undefined;
+}
+
+function taxFromTicket(ticket: BackendTicket): string {
+  const raw = ticket.tax ?? ticket.rawData?.tax;
+  if (raw === null || raw === undefined) return '';
+  const n = asNumber(raw);
+  return n === null ? '' : String(n);
+}
+
 export function normalizeTicketEditDraft(draft: TicketEditDraft): TicketEditDraft {
   const amount = parseAmount(draft.amount);
   return {
@@ -246,20 +263,59 @@ export function buildDashboardUpdatePayload(
 
 export function createHistoryDraftFromTicket(ticket: BackendTicket): HistoryTicketEditDraft {
   const { reviewStatus: _reviewStatus, ...draft } = createDraftFromTicket(ticket);
-  return draft;
+  return {
+    ...draft,
+    tax: taxFromTicket(ticket),
+  };
 }
 
 export function buildHistoryTicketUpdatePayload(
   baseline: HistoryTicketEditDraft,
   draft: HistoryTicketEditDraft,
 ): BuildPayloadResult {
+  const normalizedBaseline = normalizeHistoryTicketEditDraft(baseline);
+  const normalizedDraft = normalizeHistoryTicketEditDraft(draft);
+
+  const draftTax = parseTaxDraft(normalizedDraft.tax);
+  if (draftTax === undefined) {
+    return {
+      ok: false,
+      reason: 'validation',
+      message: 'Ingresa un IVA válido mayor o igual a 0.',
+    };
+  }
+  const baselineTax = parseTaxDraft(normalizedBaseline.tax);
+  if (baselineTax === undefined) {
+    return {
+      ok: false,
+      reason: 'validation',
+      message: 'Ingresa un IVA válido mayor o igual a 0.',
+    };
+  }
+
   const result = buildTicketUpdatePayload(
-    { ...baseline, reviewStatus: 'pendiente' },
-    { ...draft, reviewStatus: 'pendiente' },
+    { ...normalizedBaseline, reviewStatus: 'pendiente' },
+    { ...normalizedDraft, reviewStatus: 'pendiente' },
   );
-  if (!result.ok || !('payload' in result)) return result;
-  const { reviewStatus: _reviewStatus, ...payload } = result.payload;
-  return { ok: true, payload };
+
+  if (result.ok === false && result.reason === 'validation') {
+    return result;
+  }
+
+  const payload: DashboardDailyReportTicketUpdate =
+    result.ok === true ? { ...result.payload } : {};
+  const { reviewStatus: _reviewStatus, ...withoutReview } = payload;
+  const nextPayload: DashboardDailyReportTicketUpdate = { ...withoutReview };
+
+  if (draftTax !== baselineTax) {
+    nextPayload.tax = draftTax;
+  }
+
+  if (Object.keys(nextPayload).length === 0) {
+    return { ok: false, reason: 'no-changes' };
+  }
+
+  return { ok: true, payload: nextPayload };
 }
 
 export function normalizeHistoryTicketEditDraft(
@@ -270,7 +326,11 @@ export function normalizeHistoryTicketEditDraft(
     reviewStatus: 'pendiente',
   });
   const { reviewStatus: _reviewStatus, ...historyDraft } = normalized;
-  return historyDraft;
+  const parsedTax = parseTaxDraft(draft.tax);
+  return {
+    ...historyDraft,
+    tax: parsedTax === undefined ? draft.tax.trim() : parsedTax === null ? '' : String(parsedTax),
+  };
 }
 
 export function hasHistoryTicketEditChanges(
@@ -285,7 +345,11 @@ export function getHistoryTicketEditValidationMessage(
   draft: HistoryTicketEditDraft,
 ): string | null {
   const validation = validateDraft({ ...draft, reviewStatus: 'pendiente' });
-  return 'message' in validation ? validation.message : null;
+  if ('message' in validation) return validation.message;
+  if (parseTaxDraft(draft.tax) === undefined) {
+    return 'Ingresa un IVA válido mayor o igual a 0.';
+  }
+  return null;
 }
 
 export function hasTicketEditChanges(baseline: TicketEditDraft | null, draft: TicketEditDraft | null): boolean {

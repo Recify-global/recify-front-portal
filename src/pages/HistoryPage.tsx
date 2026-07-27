@@ -9,16 +9,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -34,6 +24,7 @@ import {
 import {
   saveHistoryTicketDrafts,
   useHistoryTableEditing,
+  type HistoryEditableField,
 } from '@/hooks/use-history-table-editing';
 import { useFinancialKpis } from '@/hooks/use-financial-kpis';
 import { useAuth } from '@/hooks/use-auth';
@@ -52,7 +43,10 @@ import {
   invalidateTicketDerivedQueries,
   ticketUpdateAffectsFinancialKpis,
 } from '@/utils/ticket-derived-queries';
-import { buildHistoryTicketUpdatePayload } from '@/utils/ticket-edit';
+import {
+  buildHistoryTicketUpdatePayload,
+  type HistoryTicketEditDraft,
+} from '@/utils/ticket-edit';
 import { selectTicketImageUrl, mergeTicketImageUrl } from '@/utils/ticket-image';
 import { cn } from '@/lib/utils';
 import type { UiTicket } from '@/types/ticket';
@@ -100,7 +94,6 @@ export default function HistoryPage() {
   const [dateFromFilter, setDateFromFilter] = useState(initialDateRange.dateFrom);
   const [dateToFilter, setDateToFilter] = useState(initialDateRange.dateTo);
   const [isSavingTable, setIsSavingTable] = useState(false);
-  const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
   const [savingAccreditableIds, setSavingAccreditableIds] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -115,7 +108,7 @@ export default function HistoryPage() {
   const savingAccreditableRef = useRef<Set<string>>(new Set());
   const imageRetryCountRef = useRef(0);
   const tableEditing = useHistoryTableEditing();
-  const { cancelEditing, isTableEditing } = tableEditing;
+  const { cancelEditing, isEditing } = tableEditing;
   companyIdRef.current = companyId;
 
   // P0 multitenant: una imagen nunca sobrevive al cambio de compañía.
@@ -125,7 +118,7 @@ export default function HistoryPage() {
       imageRetryCountRef.current = 0;
       savingAccreditableRef.current = new Set();
       setSavingAccreditableIds(new Set());
-      if (previousCompanyIdRef.current && isTableEditing) {
+      if (previousCompanyIdRef.current && isEditing) {
         cancelEditing();
         if (companyId && !isAuthSessionClosing()) {
           toast.info('La edición se canceló al cambiar de compañía.');
@@ -133,7 +126,7 @@ export default function HistoryPage() {
       }
     }
     previousCompanyIdRef.current = companyId;
-  }, [cancelEditing, companyId, isTableEditing]);
+  }, [cancelEditing, companyId, isEditing]);
 
   const ticketsQuery = useTickets({
     page: 1,
@@ -334,64 +327,62 @@ export default function HistoryPage() {
     }
   };
 
-  const handleStartTableEditing = (ticketIds: string[]) => {
-    if (!companyId) return;
-    const editableRows = ticketIds.flatMap((ticketId) => {
-      const ticket = backendTicketById.get(ticketId);
-      return ticket && ticket.companyId === companyId
-        ? [{ id: ticketId, companyId, ticket }]
-        : [];
-    });
-    if (editableRows.length === 0) {
-      toast.error('No fue posible preparar los tickets visibles para edición.');
-      return;
-    }
-    tableEditing.startEditing(editableRows, companyId);
-  };
+  type CommitActiveCellResult =
+    | 'idle'
+    | 'unchanged'
+    | 'committed'
+    | 'invalid'
+    | 'error'
+    | 'busy';
 
-  const handleCancelTableEditing = () => {
-    if (tableEditing.dirtyTicketIds.length > 0) {
-      setShowCancelConfirmation(true);
-      return;
-    }
-    tableEditing.cancelEditing();
-  };
+  const commitActiveCell = async (
+    draftOverride?: Partial<HistoryTicketEditDraft>,
+  ): Promise<CommitActiveCellResult> => {
+    if (savingClaimRef.current || isSavingTable) return 'busy';
+    if (!tableEditing.editingCell) return 'idle';
 
-  const handleSaveTableEditing = async () => {
-    if (savingClaimRef.current || isSavingTable) return;
     const originCompanyId = tableEditing.editingCompanyId;
-    if (!originCompanyId || originCompanyId !== companyId) {
+    const activeTicketId = tableEditing.editingCell.ticketId;
+    if (!originCompanyId || originCompanyId !== companyId || !activeTicketId) {
       tableEditing.cancelEditing();
       toast.error('La edición ya no pertenece a la compañía activa.');
-      return;
+      return 'error';
     }
-    if (Object.keys(tableEditing.validationErrors).length > 0) {
-      toast.error('Revisa los datos marcados antes de guardar.');
-      return;
+
+    const baseline = tableEditing.baselines[activeTicketId];
+    const currentDraft = tableEditing.drafts[activeTicketId];
+    if (!baseline || !currentDraft) {
+      tableEditing.cancelEditing();
+      return 'idle';
     }
-    if (tableEditing.dirtyTicketIds.length === 0) {
-      toast.info('No hay cambios para guardar.');
-      return;
+
+    const draft = draftOverride
+      ? { ...currentDraft, ...draftOverride }
+      : currentDraft;
+
+    if (draftOverride) {
+      tableEditing.updateDraftPatch(activeTicketId, draftOverride);
+    }
+
+    const built = buildHistoryTicketUpdatePayload(baseline, draft);
+    if (built.ok === false) {
+      if (built.reason === 'validation') {
+        toast.error(built.message);
+        return 'invalid';
+      }
+      tableEditing.cancelEditing();
+      return 'unchanged';
     }
 
     savingClaimRef.current = true;
     setIsSavingTable(true);
-    const dirtyIds = [...tableEditing.dirtyTicketIds];
-    const kpiRelevantIds = new Set(
-      dirtyIds.filter((ticketId) => {
-        const baseline = tableEditing.baselines[ticketId];
-        const draft = tableEditing.drafts[ticketId];
-        if (!baseline || !draft) return false;
-        const built = buildHistoryTicketUpdatePayload(baseline, draft);
-        return built.ok && 'payload' in built && ticketUpdateAffectsFinancialKpis(built.payload);
-      }),
-    );
+    const shouldRefreshKpis = ticketUpdateAffectsFinancialKpis(built.payload);
 
     try {
       const { savedIds, errors } = await saveHistoryTicketDrafts({
-        ticketIds: dirtyIds,
-        baselines: tableEditing.baselines,
-        drafts: tableEditing.drafts,
+        ticketIds: [activeTicketId],
+        baselines: { [activeTicketId]: baseline },
+        drafts: { [activeTicketId]: draft },
         save: async (ticketId, payload) => {
           await updateMutation.mutateAsync({
             companyId: originCompanyId,
@@ -401,38 +392,71 @@ export default function HistoryPage() {
         },
       });
 
-      if (isAuthSessionClosing()) return;
+      if (isAuthSessionClosing()) return 'error';
 
-      const shouldRefreshKpis = savedIds.some((id) => kpiRelevantIds.has(id));
-      if (shouldRefreshKpis) {
+      if (shouldRefreshKpis && savedIds.includes(activeTicketId)) {
         await invalidateTicketDerivedQueries(queryClient, originCompanyId, {
           financialKpis: true,
         });
       }
 
-      if (companyIdRef.current !== originCompanyId) return;
+      if (companyIdRef.current !== originCompanyId) return 'error';
 
       tableEditing.applySaveResults(savedIds, errors);
       if (Object.keys(errors).length > 0) {
-        toast.error('Algunos tickets no pudieron guardarse. Revisa las filas marcadas.');
-      } else {
-        toast.success('Cambios guardados.');
+        toast.error('No fue posible guardar este ticket. Revisa los datos e inténtalo nuevamente.');
+        return 'error';
       }
+      toast.success('Cambio guardado.');
+      return 'committed';
     } finally {
       savingClaimRef.current = false;
       setIsSavingTable(false);
     }
   };
 
+  const handleEditCell = async (ticket: UiTicket, field: HistoryEditableField) => {
+    if (!companyId || isSavingTable || savingClaimRef.current) return;
+    const backendTicket = backendTicketById.get(ticket.id);
+    if (!backendTicket || backendTicket.companyId !== companyId) {
+      toast.error('No fue posible preparar este ticket para edición.');
+      return;
+    }
+
+    const row = { id: ticket.id, companyId, ticket: backendTicket };
+    let result = tableEditing.requestCellEdit(row, field, companyId);
+
+    if (result === 'needs-commit') {
+      const commitResult = await commitActiveCell();
+      if (
+        commitResult === 'invalid' ||
+        commitResult === 'error' ||
+        commitResult === 'busy'
+      ) {
+        return;
+      }
+      result = tableEditing.requestCellEdit(row, field, companyId);
+    }
+
+    if (result === 'ignored') {
+      toast.error('No fue posible preparar este ticket para edición.');
+    }
+  };
+
+  const handleCancelTableEditing = () => {
+    if (isSavingTable || savingClaimRef.current) return;
+    tableEditing.cancelEditing();
+  };
+
   const handleDelete = (ticketId: string) => {
-    if (!companyId || deleteMutation.isPending || tableEditing.isTableEditing) return;
+    if (!companyId || deleteMutation.isPending || tableEditing.isEditing) return;
     deleteMutation.mutate({ ticketId, originCompanyId: companyId });
   };
 
   const handleToggleAccreditable = async (ticket: UiTicket, nextValue: boolean) => {
     const originCompanyId = companyId;
     const ticketId = ticket.id;
-    if (!originCompanyId || tableEditing.isTableEditing) return;
+    if (!originCompanyId || tableEditing.isEditing) return;
     if (savingAccreditableRef.current.has(ticketId)) return;
     if (ticket.isAccreditable === nextValue) return;
 
@@ -616,13 +640,13 @@ export default function HistoryPage() {
                   placeholder="Buscar por comercio, categoría..."
                   value={globalFilter}
                   onChange={(e) => setGlobalFilter(e.target.value)}
-                  disabled={tableEditing.isTableEditing}
+                  disabled={tableEditing.isEditing}
                   className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground"
                 />
                 {globalFilter && (
                   <button
                     type="button"
-                    disabled={tableEditing.isTableEditing}
+                    disabled={tableEditing.isEditing}
                     onClick={() => setGlobalFilter('')}
                   >
                     <X size={14} className="text-muted-foreground" />
@@ -632,7 +656,7 @@ export default function HistoryPage() {
               <Select
                 value={categoryFilter}
                 onValueChange={setCategoryFilter}
-                disabled={tableEditing.isTableEditing}
+                    disabled={tableEditing.isEditing}
               >
                 <SelectTrigger className="w-full sm:w-44 h-10 rounded-xl border-border">
                   <SelectValue placeholder="Categoría" />
@@ -647,7 +671,7 @@ export default function HistoryPage() {
               <Select
                 value={statusFilter}
                 onValueChange={setStatusFilter}
-                disabled={tableEditing.isTableEditing}
+                    disabled={tableEditing.isEditing}
               >
                 <SelectTrigger className="w-full sm:w-36 h-10 rounded-xl border-border">
                   <SelectValue placeholder="Estatus" />
@@ -669,7 +693,7 @@ export default function HistoryPage() {
                     variant={activePreset === preset.id ? 'default' : 'outline'}
                     className="rounded-xl min-h-9"
                     onClick={() => applyDatePreset(preset.id)}
-                    disabled={tableEditing.isTableEditing}
+                    disabled={tableEditing.isEditing}
                     aria-pressed={activePreset === preset.id}
                   >
                     {preset.label}
@@ -686,7 +710,7 @@ export default function HistoryPage() {
                     type="date"
                     value={dateFromFilter}
                     onChange={(e) => setDateFromFilter(e.target.value)}
-                    disabled={tableEditing.isTableEditing}
+                    disabled={tableEditing.isEditing}
                     className={cn(
                       'h-10 rounded-xl border-border',
                       dateRangeInvalid && 'border-destructive',
@@ -702,7 +726,7 @@ export default function HistoryPage() {
                     type="date"
                     value={dateToFilter}
                     onChange={(e) => setDateToFilter(e.target.value)}
-                    disabled={tableEditing.isTableEditing}
+                    disabled={tableEditing.isEditing}
                     className={cn(
                       'h-10 rounded-xl border-border',
                       dateRangeInvalid && 'border-destructive',
@@ -715,9 +739,9 @@ export default function HistoryPage() {
                   La fecha inicial no puede ser posterior a la fecha final.
                 </p>
               )}
-              {tableEditing.isTableEditing && (
+              {tableEditing.isEditing && (
                 <p className="text-xs text-muted-foreground">
-                  Guarda o cancela los cambios para modificar los filtros.
+                  Termina la celda activa (Enter o clic fuera) o cancela con Escape para modificar los filtros.
                 </p>
               )}
             </div>
@@ -734,17 +758,20 @@ export default function HistoryPage() {
           onRetry={() => {
             void ticketsQuery.refetch();
           }}
-          isEditing={tableEditing.isTableEditing}
           isSaving={isSavingTable}
           drafts={tableEditing.drafts}
           dirtyTicketIds={tableEditing.dirtyTicketIds}
           validationErrors={tableEditing.validationErrors}
           rowErrors={tableEditing.rowErrors}
           deletingTicketId={deletingTicketId}
-          onStartEditing={handleStartTableEditing}
+          editingTicketId={tableEditing.editingCell?.ticketId ?? null}
+          editingField={tableEditing.editingCell?.field ?? null}
+          onEditCell={(ticket, field) => {
+            void handleEditCell(ticket, field);
+          }}
           onUpdateDraft={tableEditing.updateDraftPatch}
-          onSave={() => {
-            void handleSaveTableEditing();
+          onSave={(patch) => {
+            void commitActiveCell(patch);
           }}
           onCancel={handleCancelTableEditing}
           onPreviewImage={handlePreviewImage}
@@ -780,28 +807,6 @@ export default function HistoryPage() {
         }}
         isRetrying={isImageRetrying}
       />
-
-      <AlertDialog open={showCancelConfirmation} onOpenChange={setShowCancelConfirmation}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Descartar cambios sin guardar?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Los valores editados volverán a su estado original. No se enviará ninguna solicitud.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Continuar editando</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                tableEditing.cancelEditing();
-                setShowCancelConfirmation(false);
-              }}
-            >
-              Descartar cambios
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </AppLayout>
   );
 }
