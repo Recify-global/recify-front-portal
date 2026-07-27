@@ -709,21 +709,6 @@ export default function HistoryPage() {
                     )}
                   />
                 </div>
-                {(globalFilter ||
-                  categoryFilter !== 'all' ||
-                  statusFilter !== 'all' ||
-                  dateFromFilter ||
-                  dateToFilter) && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-xl h-10"
-                    onClick={handleClearFilters}
-                    disabled={tableEditing.isTableEditing}
-                  >
-                    Limpiar filtros
-                  </Button>
-                )}
               </div>
               {dateRangeInvalid && (
                 <p className="text-xs text-destructive">

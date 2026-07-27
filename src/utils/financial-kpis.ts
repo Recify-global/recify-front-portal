@@ -232,6 +232,8 @@ export function endOfCivilDayIso(dateKey: string, timeZone = HISTORY_TIMEZONE): 
 }
 
 export type DatePresetId =
+  | 'today'
+  | 'yesterday'
   | 'last_7_days'
   | 'last_15_days'
   | 'last_30_days'
@@ -241,6 +243,8 @@ export type DatePresetId =
 export type DatePreset = DatePresetId | null;
 
 export const DATE_PRESETS: ReadonlyArray<{ id: DatePresetId; label: string }> = [
+  { id: 'today', label: 'Hoy' },
+  { id: 'yesterday', label: 'Ayer' },
   { id: 'last_7_days', label: '7 días' },
   { id: 'last_15_days', label: '15 días' },
   { id: 'last_30_days', label: '30 días' },
@@ -297,7 +301,16 @@ export function dateRangeForPreset(
   now = new Date(),
 ): { dateFrom: string; dateTo: string } {
   if (preset === 'last_12_months') return last12MonthsRange(now);
-  const daysByPreset: Record<Exclude<DatePresetId, 'last_12_months'>, number> = {
+  if (preset === 'today') return inclusiveDaysRange(1, now);
+  if (preset === 'yesterday') {
+    const today = civilDateInTimeZone(now);
+    const yesterday = shiftCivilDays(today, -1);
+    return { dateFrom: yesterday, dateTo: yesterday };
+  }
+  const daysByPreset: Record<
+    Exclude<DatePresetId, 'last_12_months' | 'today' | 'yesterday'>,
+    number
+  > = {
     last_7_days: 7,
     last_15_days: 15,
     last_30_days: 30,

@@ -136,6 +136,8 @@ describe('paymentMethodKpiFromTop', () => {
 describe('date presets and range', () => {
   it('exposes every required preset without the ambiguous month label', () => {
     expect(DATE_PRESETS.map((preset) => preset.label)).toEqual([
+      'Hoy',
+      'Ayer',
       '7 días',
       '15 días',
       '30 días',
@@ -144,6 +146,34 @@ describe('date presets and range', () => {
       'Último año',
     ]);
     expect(DATE_PRESETS.map((preset) => preset.label)).not.toContain('Último mes');
+  });
+
+  it('builds today as a single civil day', () => {
+    const now = new Date('2026-07-12T18:00:00.000-06:00');
+    const range = dateRangeForPreset('today', now);
+    expect(range.dateFrom).toBe('2026-07-12');
+    expect(range.dateTo).toBe('2026-07-12');
+  });
+
+  it('builds yesterday as a single civil day', () => {
+    const now = new Date('2026-07-12T18:00:00.000-06:00');
+    const range = dateRangeForPreset('yesterday', now);
+    expect(range.dateFrom).toBe('2026-07-11');
+    expect(range.dateTo).toBe('2026-07-11');
+  });
+
+  it('builds yesterday across a month boundary', () => {
+    const now = new Date('2026-07-01T10:00:00.000-06:00');
+    const range = dateRangeForPreset('yesterday', now);
+    expect(range.dateFrom).toBe('2026-06-30');
+    expect(range.dateTo).toBe('2026-06-30');
+  });
+
+  it('builds yesterday across a year boundary', () => {
+    const now = new Date('2026-01-01T10:00:00.000-06:00');
+    const range = dateRangeForPreset('yesterday', now);
+    expect(range.dateFrom).toBe('2025-12-31');
+    expect(range.dateTo).toBe('2025-12-31');
   });
 
   it.each([
