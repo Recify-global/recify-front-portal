@@ -46,6 +46,10 @@ import {
   parseCivilDateInput,
 } from '@/utils/civil-date-input';
 import {
+  ticketCompanyQueryKey,
+  ticketListQueryKey,
+} from '@/utils/ticket-queries';
+import {
   invalidateTicketDerivedQueries,
   ticketUpdateAffectsFinancialKpis,
 } from '@/utils/ticket-derived-queries';
@@ -342,15 +346,13 @@ export default function HistoryPage() {
     setIsImageRetrying(true);
     try {
       await Promise.all([
-        queryClient.refetchQueries({ queryKey: ['tickets', companyId] }),
+        queryClient.refetchQueries({ queryKey: ticketCompanyQueryKey(companyId) }),
         queryClient.refetchQueries({ queryKey: ['dashboard-daily-report', companyId] }),
       ]);
 
-      const ticketsData = queryClient.getQueryData([
-        'tickets',
-        companyId,
-        ticketsListParams,
-      ]) as {
+      const ticketsData = queryClient.getQueryData(
+        ticketListQueryKey(companyId, ticketsListParams),
+      ) as {
         data?: Array<{ _id: string; companyId: string; imageUrl?: string | null }>;
       } | undefined;
       const dailyData = queryClient.getQueryData([
@@ -536,7 +538,7 @@ export default function HistoryPage() {
       // Patch both History sources immediately so a slower daily-report refetch
       // cannot flash the previous value (tickets list is the merge priority).
       queryClient.setQueriesData(
-        { queryKey: ['tickets', originCompanyId] },
+        { queryKey: ticketCompanyQueryKey(originCompanyId) },
         (current: unknown) => {
           if (!current || typeof current !== 'object') return current;
           const page = current as { data?: Array<{ _id: string; isAccreditable?: boolean }> };

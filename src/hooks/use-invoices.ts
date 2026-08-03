@@ -16,6 +16,8 @@ import {
   invalidateInvoiceQueries,
   invoiceDetailQueryKey,
   invoiceListQueryKey,
+  invoiceQueryCacheOptions,
+  normalizeInvoiceListParams,
   removeInvoiceFromCache,
   writeInvoiceCache,
 } from '@/utils/invoice-queries';
@@ -28,20 +30,19 @@ function requireCompanyId(companyId: string): void {
 }
 
 const invoiceQueryOptions = {
-  staleTime: 30_000,
-  gcTime: 5 * 60_000,
-  refetchOnWindowFocus: false as const,
+  ...invoiceQueryCacheOptions,
   retry: shouldRetryInvoiceQuery,
 };
 
 export function useInvoices(params: InvoicesListParams = {}) {
   const { companyId } = useAuth();
+  const normalized = normalizeInvoiceListParams(params);
   return useQuery({
     queryKey: invoiceListQueryKey(companyId ?? '', params),
-    queryFn: ({ signal }) => listInvoices(companyId as string, params, { signal }),
+    queryFn: ({ signal }) => listInvoices(companyId as string, normalized, { signal }),
     enabled: Boolean(companyId),
     ...invoiceQueryOptions,
-    placeholderData: (previous) => previous,
+    // Sin placeholderData cross-key: evita mostrar datos de otra compañía/filtro.
   });
 }
 

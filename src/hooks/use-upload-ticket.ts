@@ -1,6 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { preprocessTicket, uploadTicket } from '@/services/upload.service';
 import { isAuthSessionClosing } from '@/auth/session-cleanup';
+import {
+  invoiceCompanyQueryKey,
+  invoiceKeys,
+} from '@/utils/invoice-queries';
+import { ticketCompanyQueryKey } from '@/utils/ticket-queries';
 
 interface UploadMutationInput {
   companyId: string;
@@ -20,11 +25,11 @@ export function useUploadTicket() {
     },
     onSuccess: (data, { companyId }) => {
       if (isAuthSessionClosing()) return;
-      queryClient.invalidateQueries({ queryKey: ['tickets', companyId] });
+      queryClient.invalidateQueries({ queryKey: ticketCompanyQueryKey(companyId) });
       // El upload de ticket puede auto-vincular una factura existente.
       if (data.matchedInvoice) {
-        queryClient.invalidateQueries({ queryKey: ['invoices', companyId] });
-        queryClient.invalidateQueries({ queryKey: ['invoice', companyId] });
+        queryClient.invalidateQueries({ queryKey: invoiceCompanyQueryKey(companyId) });
+        queryClient.invalidateQueries({ queryKey: invoiceKeys.detailRoot(companyId) });
       }
     },
   });

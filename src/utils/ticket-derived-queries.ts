@@ -1,5 +1,9 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { DashboardDailyReportTicketUpdate } from '@/types/dashboard';
+import {
+  ticketCompanyQueryKey,
+  ticketDetailQueryKey,
+} from '@/utils/ticket-queries';
 
 /**
  * Fields that change GET /dashboard/kpis aggregates (income/expense/balance/top payment).
@@ -55,11 +59,15 @@ export async function invalidateTicketDerivedQueries(
   const tasks: Array<Promise<unknown>> = [];
 
   if (options.tickets) {
-    tasks.push(queryClient.invalidateQueries({ queryKey: ['tickets', originCompanyId] }));
+    tasks.push(
+      queryClient.invalidateQueries({ queryKey: ticketCompanyQueryKey(originCompanyId) }),
+    );
   }
   if (options.ticketDetail && ticketId) {
     tasks.push(
-      queryClient.invalidateQueries({ queryKey: ['ticket', originCompanyId, ticketId] }),
+      queryClient.invalidateQueries({
+        queryKey: ticketDetailQueryKey(originCompanyId, ticketId),
+      }),
     );
   }
   if (options.dailyReport) {

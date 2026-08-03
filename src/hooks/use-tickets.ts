@@ -11,14 +11,22 @@ import type {
 import type { TicketsListParams } from '@/types/ticket';
 import { isAuthSessionClosing } from '@/auth/session-cleanup';
 import { invalidateTicketDerivedQueries } from '@/utils/ticket-derived-queries';
+import {
+  normalizeTicketListParams,
+  ticketListQueryKey,
+  ticketQueryCacheOptions,
+} from '@/utils/ticket-queries';
 import { useAuth } from './use-auth';
 
 export function useTickets(params: TicketsListParams = {}) {
   const { companyId } = useAuth();
+  const normalized = normalizeTicketListParams(params);
+
   return useQuery({
-    queryKey: ['tickets', companyId, params],
-    queryFn: () => listTickets(companyId as string, params),
+    queryKey: ticketListQueryKey(companyId ?? '', params),
+    queryFn: () => listTickets(companyId as string, normalized),
     enabled: Boolean(companyId),
+    ...ticketQueryCacheOptions,
   });
 }
 
@@ -31,6 +39,7 @@ export function useDashboardDailyReport(
     queryKey: ['dashboard-daily-report', companyId, params],
     queryFn: () => getDashboardDailyReport(companyId as string, params),
     enabled: Boolean(companyId),
+    ...ticketQueryCacheOptions,
   });
 }
 

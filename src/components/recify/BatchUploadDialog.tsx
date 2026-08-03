@@ -28,6 +28,7 @@ import {
 } from '@/hooks/use-batch-upload';
 import { cn } from '@/lib/utils';
 import { isAuthSessionClosing } from '@/auth/session-cleanup';
+import { ticketCompanyQueryKey } from '@/utils/ticket-queries';
 
 interface BatchUploadDialogProps {
   open: boolean;
@@ -78,7 +79,9 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
   const invalidateCompanyTickets = useCallback(
     (targetCompanyId: string | null | undefined) => {
       if (!targetCompanyId) return;
-      void queryClient.invalidateQueries({ queryKey: ['tickets', targetCompanyId] });
+      void queryClient.invalidateQueries({
+        queryKey: ticketCompanyQueryKey(targetCompanyId),
+      });
     },
     [queryClient],
   );
