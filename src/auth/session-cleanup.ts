@@ -1,7 +1,9 @@
 import {
+  advanceAuthSessionGeneration,
   clearAuthSession,
   getAuthSessionGeneration,
   getStoredToken,
+  isCurrentAuthSessionGeneration,
 } from '@/auth/storage';
 
 type CacheCleanup = () => Promise<void>;
@@ -31,6 +33,23 @@ export function isAuthSessionClosing(): boolean {
   return sessionClosing;
 }
 
+export type AuthMutationContext = {
+  authSessionGeneration: number;
+};
+
+/** Capturar al comenzar la mutación, nunca al montar el hook. */
+export function captureAuthMutationContext(): AuthMutationContext {
+  return { authSessionGeneration: getAuthSessionGeneration() };
+}
+
+export function isAuthMutationContextCurrent(
+  context: AuthMutationContext | null | undefined,
+): boolean {
+  return Boolean(
+    context && isCurrentAuthSessionGeneration(context.authSessionGeneration),
+  );
+}
+
 /** Generación capturada por el cleanup en curso; null si no hay cierre activo. */
 export function getActiveClosingGeneration(): number | null {
   return activeClosingGeneration;
@@ -47,19 +66,21 @@ export function shouldFinalizeSessionCleanup(closingGeneration: number): boolean
  * el cierre anterior sin borrar la sesión nueva.
  */
 export function terminateAuthSession(): Promise<void> {
-  const closingGeneration = getAuthSessionGeneration();
+  const currentGeneration = getAuthSessionGeneration();
 
-  if (cleanupInFlight && cleanupInFlightGeneration === closingGeneration) {
+  if (cleanupInFlight && cleanupInFlightGeneration === currentGeneration) {
     return cleanupInFlight;
   }
   if (
     sessionClosing &&
     !getStoredToken() &&
-    shouldFinalizeSessionCleanup(closingGeneration)
+    activeClosingGeneration === currentGeneration
   ) {
     return Promise.resolve();
   }
 
+  // Invalida callbacks de queries/mutaciones antes de comenzar el cleanup.
+  const closingGeneration = advanceAuthSessionGeneration();
   sessionClosing = true;
   activeClosingGeneration = closingGeneration;
   const cleanup = cacheCleanup;
@@ -70,7 +91,7 @@ export function terminateAuthSession(): Promise<void> {
       // La sesión debe eliminarse aunque React Query no pueda cancelar.
     } finally {
       if (shouldFinalizeSessionCleanup(closingGeneration)) {
-        clearAuthSession();
+        clearAuthSession({ advanceGeneration: false });
       }
     }
   })();

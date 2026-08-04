@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import HistoryPage from '@/pages/HistoryPage';
 import { last12MonthsRange } from '@/utils/financial-kpis';
+import { ticketListQueryKey } from '@/utils/ticket-queries';
 
 const mocks = vi.hoisted(() => ({
   companyId: 'company-a' as string | null,
@@ -76,11 +77,12 @@ function renderHistory() {
       mutations: { retry: false },
     },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <HistoryPage />
     </QueryClientProvider>,
   );
+  return { view, client };
 }
 
 beforeEach(() => {
@@ -124,6 +126,7 @@ describe('HistoryPage Todo el historial preset', () => {
           dateFrom: expected.dateFrom,
           dateTo: expected.dateTo,
         }),
+        { signal: expect.any(AbortSignal) },
       );
     });
   });
@@ -143,14 +146,18 @@ describe('HistoryPage Todo el historial preset', () => {
       expect(mocks.getDashboardKpis).toHaveBeenCalledTimes(1);
     });
 
-    expect(mocks.listTickets).toHaveBeenCalledWith('company-a', {
-      page: 1,
-      limit: 100,
-    });
+    expect(mocks.listTickets).toHaveBeenCalledWith(
+      'company-a',
+      {
+        page: 1,
+        limit: 100,
+      },
+      { signal: expect.any(AbortSignal) },
+    );
     expect(mocks.getDashboardDailyReport).toHaveBeenCalledWith('company-a', {
       page: 1,
       limit: 100,
-    });
+    }, { signal: expect.any(AbortSignal) });
     expect(mocks.getDashboardKpis).toHaveBeenCalledWith('company-a', {});
     expect(mocks.listTickets.mock.calls[0][1]).not.toHaveProperty('dateFrom');
     expect(mocks.listTickets.mock.calls[0][1]).not.toHaveProperty('dateTo');
@@ -176,16 +183,31 @@ describe('HistoryPage Todo el historial preset', () => {
     expect(mocks.getDashboardKpis).not.toHaveBeenCalled();
   });
 
-  it('restores ranged filters when leaving Todo el historial', async () => {
-    renderHistory();
+  it('reuses the fresh Último año query when returning to the same key', async () => {
+    const { client } = renderHistory();
+    const year = last12MonthsRange();
+    await waitFor(() =>
+      expect(mocks.listTickets).toHaveBeenCalledWith(
+        'company-a',
+        expect.objectContaining(year),
+        { signal: expect.any(AbortSignal) },
+      ),
+    );
+    const yearKey = ticketListQueryKey('company-a', {
+      page: 1,
+      limit: 100,
+      ...year,
+    });
+    const cachedYearData = client.getQueryData(yearKey);
+
     fireEvent.click(await screen.findByRole('button', { name: 'Todo el historial' }));
     await waitFor(() =>
-      expect(mocks.listTickets).toHaveBeenCalledWith('company-a', {
-        page: 1,
-        limit: 100,
-      }),
+      expect(mocks.listTickets).toHaveBeenCalledWith(
+        'company-a',
+        { page: 1, limit: 100 },
+        { signal: expect.any(AbortSignal) },
+      ),
     );
-    mocks.listTickets.mockClear();
 
     fireEvent.click(screen.getByRole('button', { name: 'Hoy' }));
     await waitFor(() => {
@@ -197,6 +219,7 @@ describe('HistoryPage Todo el historial preset', () => {
           dateFrom: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
           dateTo: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
         }),
+        { signal: expect.any(AbortSignal) },
       );
     });
     const todayCall = mocks.listTickets.mock.calls.at(-1)?.[1] as {
@@ -205,18 +228,18 @@ describe('HistoryPage Todo el historial preset', () => {
     };
     expect(todayCall.dateFrom).toBe(todayCall.dateTo);
 
-    mocks.listTickets.mockClear();
+    const requestsBeforeReturn = mocks.listTickets.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: 'Último año' }));
-    const year = last12MonthsRange();
-    await waitFor(() => {
-      expect(mocks.listTickets).toHaveBeenCalledWith(
-        'company-a',
-        expect.objectContaining({
-          dateFrom: year.dateFrom,
-          dateTo: year.dateTo,
-        }),
-      );
-    });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Último año' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(mocks.listTickets).toHaveBeenCalledTimes(requestsBeforeReturn);
+    expect(client.getQueryData(yearKey)).toBe(cachedYearData);
   });
 
   it('uses empty copy without range wording for all-history', async () => {

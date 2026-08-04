@@ -47,6 +47,10 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination';
 import { useAuth } from '@/hooks/use-auth';
+import {
+  captureAuthMutationContext,
+  isAuthMutationContextCurrent,
+} from '@/auth/session-cleanup';
 import { useCompanies } from '@/hooks/use-companies';
 import { useDeleteInvoice, useInvoice, useInvoices } from '@/hooks/use-invoices';
 import { getInvoice } from '@/services/invoices.service';
@@ -227,18 +231,26 @@ export default function InvoicesPage() {
     const origin = pendingDelete;
     const originCompanyId = origin.companyId;
     const invoiceId = origin.invoice._id;
+    const authContext = captureAuthMutationContext();
     try {
       await deleteMutation.mutateAsync({
         companyId: originCompanyId,
         invoiceId,
       });
-      if (companyIdRef.current === originCompanyId) {
+      if (
+        isAuthMutationContextCurrent(authContext) &&
+        companyIdRef.current === originCompanyId
+      ) {
         toast.success('Factura eliminada.');
         if (selection?.invoiceId === invoiceId) closeDetail();
         setPendingDelete(null);
       }
     } catch (err) {
-      if (!isInvoiceAbortError(err) && companyIdRef.current === originCompanyId) {
+      if (
+        isAuthMutationContextCurrent(authContext) &&
+        !isInvoiceAbortError(err) &&
+        companyIdRef.current === originCompanyId
+      ) {
         const message = getInvoiceUserErrorMessage(err, 'No fue posible eliminar la factura.');
         if (message) toast.error(message);
       }
@@ -251,11 +263,15 @@ export default function InvoicesPage() {
     if (!companyId) return;
     if (pdfClaimRef.current) return;
     const originCompanyId = companyId;
+    const authContext = captureAuthMutationContext();
     pdfClaimRef.current = true;
     setPdfBusyId(invoice._id);
     try {
       const fresh = await getInvoice(originCompanyId, invoice._id);
-      if (companyIdRef.current !== originCompanyId) return;
+      if (
+        !isAuthMutationContextCurrent(authContext) ||
+        companyIdRef.current !== originCompanyId
+      ) return;
       const pdfUrl = resolveInvoiceFileUrl(fresh.fileUrl);
       if (!pdfUrl) {
         toast.error('No hay un PDF disponible para esta factura.');
@@ -267,7 +283,10 @@ export default function InvoicesPage() {
       }
     } catch (err) {
       if (isInvoiceAbortError(err)) return;
-      if (companyIdRef.current !== originCompanyId) return;
+      if (
+        !isAuthMutationContextCurrent(authContext) ||
+        companyIdRef.current !== originCompanyId
+      ) return;
       const message = getInvoiceUserErrorMessage(
         err,
         'No se pudo obtener el PDF. Intenta de nuevo.',
@@ -275,7 +294,9 @@ export default function InvoicesPage() {
       if (message) toast.error(message);
     } finally {
       pdfClaimRef.current = false;
-      setPdfBusyId(null);
+      if (isAuthMutationContextCurrent(authContext)) {
+        setPdfBusyId(null);
+      }
     }
   };
 

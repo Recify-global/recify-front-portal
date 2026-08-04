@@ -8,7 +8,6 @@ import type {
   RegisterRequest,
 } from '@/types/auth';
 import {
-  getAuthSessionGeneration,
   getStoredCompanyId,
   getStoredToken,
   getStoredUser,
@@ -17,6 +16,9 @@ import {
   subscribeAuthChanges,
 } from '@/auth/storage';
 import {
+  captureAuthMutationContext,
+  getActiveClosingGeneration,
+  isAuthMutationContextCurrent,
   markAuthSessionActive,
   shouldFinalizeSessionCleanup,
   terminateAuthSession,
@@ -57,21 +59,33 @@ export function useAuth() {
 
   const login = useMutation({
     mutationFn: (payload: LoginRequest) => loginRequest(payload),
-    onSuccess: (data) => persistSession(data),
+    onMutate: captureAuthMutationContext,
+    onSuccess: (data, _variables, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
+      persistSession(data);
+    },
   });
 
   const register = useMutation({
     mutationFn: (payload: RegisterRequest) => registerRequest(payload),
-    onSuccess: (data) => persistSession(data),
+    onMutate: captureAuthMutationContext,
+    onSuccess: (data, _variables, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
+      persistSession(data);
+    },
   });
 
   const logout = useCallback((): Promise<void> => {
     if (logoutClaimRef.current) return logoutClaimRef.current;
 
-    const closingGeneration = getAuthSessionGeneration();
-    const task = terminateAuthSession()
+    const cleanupTask = terminateAuthSession();
+    const closingGeneration = getActiveClosingGeneration();
+    const task = cleanupTask
       .then(() => {
-        if (shouldFinalizeSessionCleanup(closingGeneration)) {
+        if (
+          closingGeneration !== null &&
+          shouldFinalizeSessionCleanup(closingGeneration)
+        ) {
           navigate('/auth', { replace: true });
         }
       })

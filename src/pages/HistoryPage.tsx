@@ -29,7 +29,11 @@ import {
 import { useFinancialKpis } from '@/hooks/use-financial-kpis';
 import { useAuth } from '@/hooks/use-auth';
 import { useCompanies } from '@/hooks/use-companies';
-import { isAuthSessionClosing } from '@/auth/session-cleanup';
+import {
+  captureAuthMutationContext,
+  isAuthMutationContextCurrent,
+  isAuthSessionClosing,
+} from '@/auth/session-cleanup';
 import { deleteTicket } from '@/services/tickets.service';
 import {
   DATE_PRESETS,
@@ -301,9 +305,10 @@ export default function HistoryPage() {
     },
     onMutate: ({ ticketId }) => {
       setDeletingTicketId(ticketId);
+      return captureAuthMutationContext();
     },
-    onSuccess: async (_data, { originCompanyId }) => {
-      if (isAuthSessionClosing()) return;
+    onSuccess: async (_data, { originCompanyId }, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
       toast.success('Ticket eliminado.');
       await invalidateTicketDerivedQueries(queryClient, originCompanyId, {
         tickets: true,
@@ -311,12 +316,12 @@ export default function HistoryPage() {
         financialKpis: true,
       });
     },
-    onError: () => {
-      if (isAuthSessionClosing()) return;
+    onError: (_error, _variables, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
       toast.error('No fue posible eliminar el ticket.');
     },
-    onSettled: () => {
-      if (isAuthSessionClosing()) return;
+    onSettled: (_data, _error, _variables, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
       setDeletingTicketId(null);
     },
   });
@@ -437,6 +442,7 @@ export default function HistoryPage() {
 
     savingClaimRef.current = true;
     setIsSavingTable(true);
+    const authMutationContext = captureAuthMutationContext();
     const shouldRefreshKpis = ticketUpdateAffectsFinancialKpis(built.payload);
 
     try {
@@ -453,7 +459,7 @@ export default function HistoryPage() {
         },
       });
 
-      if (isAuthSessionClosing()) return 'error';
+      if (!isAuthMutationContextCurrent(authMutationContext)) return 'error';
 
       if (shouldRefreshKpis && savedIds.includes(activeTicketId)) {
         await invalidateTicketDerivedQueries(queryClient, originCompanyId, {
@@ -472,7 +478,9 @@ export default function HistoryPage() {
       return 'committed';
     } finally {
       savingClaimRef.current = false;
-      setIsSavingTable(false);
+      if (isAuthMutationContextCurrent(authMutationContext)) {
+        setIsSavingTable(false);
+      }
     }
   };
 
@@ -523,6 +531,7 @@ export default function HistoryPage() {
 
     savingAccreditableRef.current.add(ticketId);
     setSavingAccreditableIds(new Set(savingAccreditableRef.current));
+    const authMutationContext = captureAuthMutationContext();
 
     try {
       const updated = await updateMutation.mutateAsync({
@@ -530,7 +539,10 @@ export default function HistoryPage() {
         ticketId,
         payload: { isAccreditable: nextValue },
       });
-      if (isAuthSessionClosing() || companyIdRef.current !== originCompanyId) return;
+      if (
+        !isAuthMutationContextCurrent(authMutationContext) ||
+        companyIdRef.current !== originCompanyId
+      ) return;
 
       const confirmed =
         typeof updated?.isAccreditable === 'boolean' ? updated.isAccreditable : nextValue;
@@ -568,11 +580,14 @@ export default function HistoryPage() {
         },
       );
     } catch {
-      if (isAuthSessionClosing() || companyIdRef.current !== originCompanyId) return;
+      if (
+        !isAuthMutationContextCurrent(authMutationContext) ||
+        companyIdRef.current !== originCompanyId
+      ) return;
       toast.error('No se pudo actualizar si el ticket es acreditable.');
     } finally {
       savingAccreditableRef.current.delete(ticketId);
-      if (!isAuthSessionClosing()) {
+      if (isAuthMutationContextCurrent(authMutationContext)) {
         setSavingAccreditableIds(new Set(savingAccreditableRef.current));
       }
     }

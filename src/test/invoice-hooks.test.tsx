@@ -23,6 +23,7 @@ import { invalidateInvoiceQueries } from '@/utils/invoice-queries';
 
 const authState = vi.hoisted(() => ({
   companyId: 'company-a' as string | null,
+  generation: 0,
 }));
 
 vi.mock('@/hooks/use-auth', () => ({
@@ -45,6 +46,11 @@ vi.mock('@/services/upload.service', () => ({
 
 vi.mock('@/auth/session-cleanup', () => ({
   isAuthSessionClosing: () => false,
+  captureAuthMutationContext: () => ({
+    authSessionGeneration: authState.generation,
+  }),
+  isAuthMutationContextCurrent: (context: { authSessionGeneration: number }) =>
+    context.authSessionGeneration === authState.generation,
 }));
 
 const baseInvoice = (overrides: Partial<BackendInvoice> = {}): BackendInvoice => ({
@@ -82,6 +88,7 @@ function testQueryClient() {
 afterEach(() => {
   cleanup();
   authState.companyId = 'company-a';
+  authState.generation = 0;
   vi.clearAllMocks();
 });
 

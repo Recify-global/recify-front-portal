@@ -18,6 +18,11 @@ import {
 } from '@/utils/invoice-display';
 import { formatMxn } from '@/utils/financial-kpis';
 import { getInvoiceUserErrorMessage, isInvoiceAbortError } from '@/utils/invoice-errors';
+import {
+  captureAuthMutationContext,
+  isAuthMutationContextCurrent,
+  type AuthMutationContext,
+} from '@/auth/session-cleanup';
 
 interface InvoiceMatchPanelProps {
   /** Compañía origen de la factura (capturada al abrir/subir). */
@@ -70,8 +75,13 @@ export function InvoiceMatchPanel({
 
   const isStillOriginCompany = () => activeCompanyIdRef.current === companyId;
 
-  const notifyError = (err: unknown, fallback: string) => {
+  const notifyError = (
+    err: unknown,
+    fallback: string,
+    authContext: AuthMutationContext,
+  ) => {
     if (isInvoiceAbortError(err)) return;
+    if (!isAuthMutationContextCurrent(authContext)) return;
     if (!isStillOriginCompany()) return;
     const message = getInvoiceUserErrorMessage(err, fallback);
     if (message) toast.error(message);
@@ -79,6 +89,7 @@ export function InvoiceMatchPanel({
 
   const handleConfirm = async (ticketId: string) => {
     if (busy || confirmingTicketId) return;
+    const authContext = captureAuthMutationContext();
     setConfirmingTicketId(ticketId);
     try {
       const result = await confirmMutation.mutateAsync({
@@ -86,79 +97,85 @@ export function InvoiceMatchPanel({
         invoiceId: invoice._id,
         ticketId,
       });
-      if (!isStillOriginCompany()) return;
+      if (!isAuthMutationContextCurrent(authContext) || !isStillOriginCompany()) return;
       toast.success('Factura vinculada al ticket.');
       setSessionTicket(result.ticket ?? null);
       onInvoiceChange?.(result.invoice);
     } catch (err) {
-      notifyError(err, 'No se pudo vincular la factura.');
+      notifyError(err, 'No se pudo vincular la factura.', authContext);
     } finally {
-      setConfirmingTicketId(null);
+      if (isAuthMutationContextCurrent(authContext)) {
+        setConfirmingTicketId(null);
+      }
     }
   };
 
   const handleUnlink = async () => {
     if (busy) return;
+    const authContext = captureAuthMutationContext();
     try {
       const updated = await unlinkMutation.mutateAsync({
         companyId,
         invoiceId: invoice._id,
       });
-      if (!isStillOriginCompany()) return;
+      if (!isAuthMutationContextCurrent(authContext) || !isStillOriginCompany()) return;
       toast.success('Factura desvinculada del ticket.');
       setSessionTicket(null);
       onInvoiceChange?.(updated);
     } catch (err) {
-      notifyError(err, 'No se pudo desvincular la factura.');
+      notifyError(err, 'No se pudo desvincular la factura.', authContext);
     }
   };
 
   const handleMarkMissing = async () => {
     if (busy) return;
+    const authContext = captureAuthMutationContext();
     try {
       const updated = await statusMutation.mutateAsync({
         companyId,
         invoiceId: invoice._id,
         matchStatus: 'missing_ticket',
       });
-      if (!isStillOriginCompany()) return;
+      if (!isAuthMutationContextCurrent(authContext) || !isStillOriginCompany()) return;
       toast.success('Factura marcada como ticket faltante.');
       onInvoiceChange?.(updated);
     } catch (err) {
-      notifyError(err, 'No se pudo marcar la factura.');
+      notifyError(err, 'No se pudo marcar la factura.', authContext);
     }
   };
 
   const handleRevertMissing = async () => {
     if (busy) return;
+    const authContext = captureAuthMutationContext();
     try {
       const updated = await statusMutation.mutateAsync({
         companyId,
         invoiceId: invoice._id,
         matchStatus: 'unmatched',
       });
-      if (!isStillOriginCompany()) return;
+      if (!isAuthMutationContextCurrent(authContext) || !isStillOriginCompany()) return;
       toast.success('La factura volvió a "Sin ticket".');
       onInvoiceChange?.(updated);
     } catch (err) {
-      notifyError(err, 'No se pudo actualizar la factura.');
+      notifyError(err, 'No se pudo actualizar la factura.', authContext);
     }
   };
 
   const handleRecalculate = async () => {
     if (busy) return;
+    const authContext = captureAuthMutationContext();
     try {
       const response = await recalcMutation.mutateAsync({
         companyId,
         invoiceId: invoice._id,
       });
-      if (!isStillOriginCompany()) return;
+      if (!isAuthMutationContextCurrent(authContext) || !isStillOriginCompany()) return;
       setCandidates(response.candidates);
       if (response.candidates.length === 0) {
         toast.info('No encontramos tickets que coincidan con esta factura.');
       }
     } catch (err) {
-      notifyError(err, 'No se pudieron buscar tickets.');
+      notifyError(err, 'No se pudieron buscar tickets.', authContext);
     }
   };
 

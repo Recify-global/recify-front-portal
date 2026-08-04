@@ -76,13 +76,13 @@ describe('shared History and KPI date filters', () => {
         limit: 100,
         dateFrom,
         dateTo,
-      });
+      }, { signal: expect.any(AbortSignal) });
       expect(mocks.getDashboardDailyReport).toHaveBeenCalledWith('company-a', {
         page: 1,
         limit: 100,
         dateFrom,
         dateTo,
-      });
+      }, { signal: expect.any(AbortSignal) });
       expect(mocks.getDashboardKpis).toHaveBeenCalledWith('company-a', {
         dateFrom: '2026-07-06T00:00:00.000-06:00',
         dateTo: '2026-07-12T23:59:59.999-06:00',
@@ -126,11 +126,11 @@ describe('shared History and KPI date filters', () => {
       expect(mocks.listTickets).toHaveBeenCalledWith('company-a', {
         page: 1,
         limit: 100,
-      });
+      }, { signal: expect.any(AbortSignal) });
       expect(mocks.getDashboardDailyReport).toHaveBeenCalledWith('company-a', {
         page: 1,
         limit: 100,
-      });
+      }, { signal: expect.any(AbortSignal) });
       expect(mocks.getDashboardKpis).toHaveBeenCalledWith('company-a', {});
     });
 

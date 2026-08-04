@@ -10,7 +10,10 @@ import {
 } from '@/services/invoices.service';
 import { uploadInvoice } from '@/services/upload.service';
 import type { InvoicesListParams } from '@/types/invoice';
-import { isAuthSessionClosing } from '@/auth/session-cleanup';
+import {
+  captureAuthMutationContext,
+  isAuthMutationContextCurrent,
+} from '@/auth/session-cleanup';
 import { shouldRetryInvoiceQuery } from '@/utils/invoice-errors';
 import {
   invalidateInvoiceQueries,
@@ -76,6 +79,7 @@ export function useUploadInvoice() {
 
   return useMutation({
     retry: false,
+    onMutate: captureAuthMutationContext,
     mutationFn: ({
       companyId,
       file,
@@ -88,9 +92,10 @@ export function useUploadInvoice() {
       requireCompanyId(companyId);
       return uploadInvoice(companyId, file, { signal });
     },
-    onSuccess: async (data, { companyId }) => {
-      if (isAuthSessionClosing()) return;
+    onSuccess: async (data, { companyId }, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
       writeInvoiceCache(queryClient, companyId, data.invoice);
+      if (!isAuthMutationContextCurrent(context)) return;
       await invalidateInvoiceQueries(queryClient, companyId, {
         invoiceId: data.invoice._id,
       });
@@ -105,6 +110,7 @@ export function useUploadInvoice() {
 export function useRecalculateMatchCandidates() {
   return useMutation({
     retry: false,
+    onMutate: captureAuthMutationContext,
     mutationFn: ({
       companyId,
       invoiceId,
@@ -125,6 +131,7 @@ export function useConfirmInvoiceMatch() {
 
   return useMutation({
     retry: false,
+    onMutate: captureAuthMutationContext,
     mutationFn: ({
       companyId,
       invoiceId,
@@ -139,9 +146,10 @@ export function useConfirmInvoiceMatch() {
       requireCompanyId(companyId);
       return confirmInvoiceMatch(companyId, invoiceId, ticketId, { signal });
     },
-    onSuccess: async (data, { companyId, invoiceId }) => {
-      if (isAuthSessionClosing()) return;
+    onSuccess: async (data, { companyId, invoiceId }, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
       writeInvoiceCache(queryClient, companyId, data.invoice);
+      if (!isAuthMutationContextCurrent(context)) return;
       await invalidateInvoiceQueries(queryClient, companyId, { invoiceId });
     },
   });
@@ -152,6 +160,7 @@ export function useUnlinkInvoiceMatch() {
 
   return useMutation({
     retry: false,
+    onMutate: captureAuthMutationContext,
     mutationFn: ({
       companyId,
       invoiceId,
@@ -164,9 +173,10 @@ export function useUnlinkInvoiceMatch() {
       requireCompanyId(companyId);
       return unlinkInvoiceMatch(companyId, invoiceId, { signal });
     },
-    onSuccess: async (data, { companyId, invoiceId }) => {
-      if (isAuthSessionClosing()) return;
+    onSuccess: async (data, { companyId, invoiceId }, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
       writeInvoiceCache(queryClient, companyId, data);
+      if (!isAuthMutationContextCurrent(context)) return;
       await invalidateInvoiceQueries(queryClient, companyId, { invoiceId });
     },
   });
@@ -177,6 +187,7 @@ export function useUpdateInvoiceMatchStatus() {
 
   return useMutation({
     retry: false,
+    onMutate: captureAuthMutationContext,
     mutationFn: ({
       companyId,
       invoiceId,
@@ -191,9 +202,10 @@ export function useUpdateInvoiceMatchStatus() {
       requireCompanyId(companyId);
       return updateInvoiceMatchStatus(companyId, invoiceId, matchStatus, { signal });
     },
-    onSuccess: async (data, { companyId, invoiceId }) => {
-      if (isAuthSessionClosing()) return;
+    onSuccess: async (data, { companyId, invoiceId }, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
       writeInvoiceCache(queryClient, companyId, data);
+      if (!isAuthMutationContextCurrent(context)) return;
       await invalidateInvoiceQueries(queryClient, companyId, { invoiceId });
     },
   });
@@ -204,6 +216,7 @@ export function useDeleteInvoice() {
 
   return useMutation({
     retry: false,
+    onMutate: captureAuthMutationContext,
     mutationFn: ({
       companyId,
       invoiceId,
@@ -216,9 +229,10 @@ export function useDeleteInvoice() {
       requireCompanyId(companyId);
       return deleteInvoice(companyId, invoiceId, { signal });
     },
-    onSuccess: async (_data, { companyId, invoiceId }) => {
-      if (isAuthSessionClosing()) return;
+    onSuccess: async (_data, { companyId, invoiceId }, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
       removeInvoiceFromCache(queryClient, companyId, invoiceId);
+      if (!isAuthMutationContextCurrent(context)) return;
       await invalidateInvoiceQueries(queryClient, companyId, { invoiceId });
     },
   });

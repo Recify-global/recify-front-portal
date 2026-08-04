@@ -16,11 +16,20 @@ export const AUTH_STORAGE_KEYS = {
 
 export const AUTH_EVENT = 'recify:auth-changed';
 
-/** Incrementa en cada `setAuthSession`; el cleanup solo borra si coincide. */
+/** Generación monotónica en memoria; nunca se persiste ni retrocede. */
 let authSessionGeneration = 0;
 
 export function getAuthSessionGeneration(): number {
   return authSessionGeneration;
+}
+
+export function advanceAuthSessionGeneration(): number {
+  authSessionGeneration += 1;
+  return authSessionGeneration;
+}
+
+export function isCurrentAuthSessionGeneration(generation: number): boolean {
+  return generation === authSessionGeneration;
 }
 
 function safeGet(key: string): string | null {
@@ -105,7 +114,7 @@ export interface PersistSessionInput {
 }
 
 export function setAuthSession({ token, user }: PersistSessionInput): void {
-  authSessionGeneration += 1;
+  advanceAuthSessionGeneration();
   safeSet(AUTH_STORAGE_KEYS.token, token);
   try {
     safeSet(AUTH_STORAGE_KEYS.user, JSON.stringify(user));
@@ -121,7 +130,10 @@ export function setAuthSession({ token, user }: PersistSessionInput): void {
   emitAuthChange();
 }
 
-export function clearAuthSession(): void {
+export function clearAuthSession(options: { advanceGeneration?: boolean } = {}): void {
+  if (options.advanceGeneration !== false) {
+    advanceAuthSessionGeneration();
+  }
   safeRemove(AUTH_STORAGE_KEYS.token);
   safeRemove(AUTH_STORAGE_KEYS.user);
   safeRemove(AUTH_STORAGE_KEYS.companyId);

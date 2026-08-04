@@ -9,7 +9,10 @@ import type {
   DashboardDailyReportTicketUpdate,
 } from '@/types/dashboard';
 import type { TicketsListParams } from '@/types/ticket';
-import { isAuthSessionClosing } from '@/auth/session-cleanup';
+import {
+  captureAuthMutationContext,
+  isAuthMutationContextCurrent,
+} from '@/auth/session-cleanup';
 import { invalidateTicketDerivedQueries } from '@/utils/ticket-derived-queries';
 import {
   normalizeTicketListParams,
@@ -24,7 +27,8 @@ export function useTickets(params: TicketsListParams = {}) {
 
   return useQuery({
     queryKey: ticketListQueryKey(companyId ?? '', params),
-    queryFn: () => listTickets(companyId as string, normalized),
+    queryFn: ({ signal }) =>
+      listTickets(companyId as string, normalized, { signal }),
     enabled: Boolean(companyId),
     ...ticketQueryCacheOptions,
   });
@@ -37,7 +41,8 @@ export function useDashboardDailyReport(
   const { companyId } = useAuth();
   return useQuery({
     queryKey: ['dashboard-daily-report', companyId, params],
-    queryFn: () => getDashboardDailyReport(companyId as string, params),
+    queryFn: ({ signal }) =>
+      getDashboardDailyReport(companyId as string, params, { signal }),
     enabled: Boolean(companyId),
     ...ticketQueryCacheOptions,
   });
@@ -48,6 +53,7 @@ export function useUpdateDashboardTicket() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    onMutate: captureAuthMutationContext,
     mutationFn: ({
       companyId,
       ticketId,
@@ -62,8 +68,8 @@ export function useUpdateDashboardTicket() {
       if (!companyId) return Promise.reject(new Error('No hay compañía activa.'));
       return updateDashboardDailyReportTicket(companyId, ticketId, payload, { signal });
     },
-    onSuccess: async (_data, { companyId, ticketId }) => {
-      if (isAuthSessionClosing()) return;
+    onSuccess: async (_data, { companyId, ticketId }, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
       // KPIs are owned by the caller (only when the payload is aggregation-relevant).
       await invalidateTicketDerivedQueries(queryClient, companyId, {
         tickets: true,

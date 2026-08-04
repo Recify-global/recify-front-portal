@@ -4,6 +4,10 @@ import { mapBackendTicket, mapPreprocessTicket } from '@/mappers/ticket.mapper';
 import type { UiTicket } from '@/types/ticket';
 import { useAuth } from './use-auth';
 import { ApiRequestError } from '@/api/http';
+import {
+  captureAuthMutationContext,
+  isAuthMutationContextCurrent,
+} from '@/auth/session-cleanup';
 
 export type BatchItemStatus =
   | 'queued'
@@ -67,6 +71,10 @@ export type BatchSaveResult = {
   companyId: string | null;
   /** La UI del lote pudo actualizarse (mismo generation / compañía). */
   uiUpdated: boolean;
+  /** Permite invalidaciones/toasts solo para la misma sesión que inició el save. */
+  effectsAllowed: boolean;
+  /** El upload auto-vinculó una factura existente. */
+  matchedInvoice: boolean;
 };
 
 function emptyCounts(): Record<BatchItemStatus, number> {
@@ -326,15 +334,27 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
       const controller = new AbortController();
       abortByIdRef.current.set(item.id, controller);
       const originCompanyId = item.companyId;
+      const authContext = captureAuthMutationContext();
 
       try {
         const response = await uploadTicket(originCompanyId, item.file, {
           signal: controller.signal,
         });
+        const effectsAllowed = isAuthMutationContextCurrent(authContext);
 
         // Persistió en la compañía de origen aunque la UI ya haya cambiado de tenant.
-        if (isStale(generation, originCompanyId) || controller.signal.aborted) {
-          return { persisted: true, companyId: originCompanyId, uiUpdated: false };
+        if (
+          !effectsAllowed ||
+          isStale(generation, originCompanyId) ||
+          controller.signal.aborted
+        ) {
+          return {
+            persisted: true,
+            companyId: originCompanyId,
+            uiUpdated: false,
+            effectsAllowed,
+            matchedInvoice: Boolean(response.matchedInvoice),
+          };
         }
 
         const mapped = mapBackendTicket(response.ticket);
@@ -346,19 +366,46 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
           },
           error: null,
         });
-        return { persisted: true, companyId: originCompanyId, uiUpdated: true };
+        return {
+          persisted: true,
+          companyId: originCompanyId,
+          uiUpdated: true,
+          effectsAllowed: true,
+          matchedInvoice: Boolean(response.matchedInvoice),
+        };
       } catch (err) {
         if (controller.signal.aborted || isAbortLike(err)) {
-          return { persisted: false, companyId: originCompanyId, uiUpdated: false };
+          return {
+            persisted: false,
+            companyId: originCompanyId,
+            uiUpdated: false,
+            effectsAllowed: isAuthMutationContextCurrent(authContext),
+            matchedInvoice: false,
+          };
         }
-        if (isStale(generation, originCompanyId)) {
-          return { persisted: false, companyId: originCompanyId, uiUpdated: false };
+        if (
+          !isAuthMutationContextCurrent(authContext) ||
+          isStale(generation, originCompanyId)
+        ) {
+          return {
+            persisted: false,
+            companyId: originCompanyId,
+            uiUpdated: false,
+            effectsAllowed: false,
+            matchedInvoice: false,
+          };
         }
         patchItem(item.id, {
           status: 'error',
           error: extractError(err, 'No se pudo guardar el ticket.'),
         });
-        return { persisted: false, companyId: originCompanyId, uiUpdated: true };
+        return {
+          persisted: false,
+          companyId: originCompanyId,
+          uiUpdated: true,
+          effectsAllowed: true,
+          matchedInvoice: false,
+        };
       } finally {
         abortByIdRef.current.delete(item.id);
       }
@@ -388,6 +435,8 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
           persisted: false,
           companyId: existing?.companyId ?? null,
           uiUpdated: false,
+          effectsAllowed: true,
+          matchedInvoice: false,
         };
       }
 
@@ -406,10 +455,18 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
     ok: number;
     failed: number;
     persistedCompanyIds: string[];
+    matchedInvoiceCompanyIds: string[];
   }> => {
     const generation = generationRef.current;
     const activeCompany = companyIdRef.current;
-    if (!activeCompany) return { ok: 0, failed: 0, persistedCompanyIds: [] };
+    if (!activeCompany) {
+      return {
+        ok: 0,
+        failed: 0,
+        persistedCompanyIds: [],
+        matchedInvoiceCompanyIds: [],
+      };
+    }
 
     const queue = itemsRef.current.filter(
       (it) => it.status === 'analyzed' && it.companyId === activeCompany,
@@ -418,6 +475,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
     let failed = 0;
     let index = 0;
     const persistedCompanyIds = new Set<string>();
+    const matchedInvoiceCompanyIds = new Set<string>();
 
     const workers = Array.from({ length: Math.min(saveConcurrency, queue.length) }, async () => {
       while (index < queue.length) {
@@ -440,7 +498,12 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
         try {
           const result = await runSave(claimed, generation);
           if (result.persisted && result.companyId) {
-            persistedCompanyIds.add(result.companyId);
+            if (result.effectsAllowed) {
+              persistedCompanyIds.add(result.companyId);
+              if (result.matchedInvoice) {
+                matchedInvoiceCompanyIds.add(result.companyId);
+              }
+            }
             ok += 1;
           } else if (!result.persisted) {
             failed += 1;
@@ -452,7 +515,12 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
     });
 
     await Promise.all(workers);
-    return { ok, failed, persistedCompanyIds: Array.from(persistedCompanyIds) };
+    return {
+      ok,
+      failed,
+      persistedCompanyIds: Array.from(persistedCompanyIds),
+      matchedInvoiceCompanyIds: Array.from(matchedInvoiceCompanyIds),
+    };
   }, [runSave, saveConcurrency, syncItems]);
 
   const counts = items.reduce((acc, it) => {
