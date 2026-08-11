@@ -13,7 +13,10 @@ import {
   captureAuthMutationContext,
   isAuthMutationContextCurrent,
 } from '@/auth/session-cleanup';
-import { invalidateTicketDerivedQueries } from '@/utils/ticket-derived-queries';
+import {
+  invalidateTicketDerivedQueries,
+  ticketUpdateAffectsDashboardAnalytics,
+} from '@/utils/ticket-derived-queries';
 import {
   normalizeTicketListParams,
   ticketListQueryKey,
@@ -68,13 +71,14 @@ export function useUpdateDashboardTicket() {
       if (!companyId) return Promise.reject(new Error('No hay compañía activa.'));
       return updateDashboardDailyReportTicket(companyId, ticketId, payload, { signal });
     },
-    onSuccess: async (_data, { companyId, ticketId }, context) => {
+    onSuccess: async (_data, { companyId, ticketId, payload }, context) => {
       if (!isAuthMutationContextCurrent(context)) return;
       // KPIs are owned by the caller (only when the payload is aggregation-relevant).
       await invalidateTicketDerivedQueries(queryClient, companyId, {
         tickets: true,
         ticketDetail: true,
         dailyReport: true,
+        dashboardAnalytics: ticketUpdateAffectsDashboardAnalytics(payload),
       }, ticketId);
     },
   });

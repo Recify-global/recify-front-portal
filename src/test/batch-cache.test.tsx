@@ -97,6 +97,7 @@ describe('batch cache effects', () => {
           tickets: true,
           dailyReport: true,
           financialKpis: true,
+          dashboardAnalytics: true,
         },
       );
       expect(mocks.invalidateInvoiceQueries).toHaveBeenCalledTimes(1);

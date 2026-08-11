@@ -314,6 +314,7 @@ export default function HistoryPage() {
         tickets: true,
         dailyReport: true,
         financialKpis: true,
+        dashboardAnalytics: true,
       });
     },
     onError: (_error, _variables, context) => {

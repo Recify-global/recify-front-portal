@@ -26,11 +26,31 @@ export const KPI_RELEVANT_TICKET_FIELDS = [
 
 export type KpiRelevantTicketField = (typeof KPI_RELEVANT_TICKET_FIELDS)[number];
 
+export const DASHBOARD_ANALYTICS_RELEVANT_TICKET_FIELDS = [
+  'type',
+  'amount',
+  'date',
+  'vendor',
+  'category',
+  'tax',
+  'isAccreditable',
+] as const;
+
+export const DASHBOARD_ANALYTICS_QUERY_ROOTS = [
+  'dashboard-cash-flow',
+  'dashboard-heatmap',
+  'dashboard-expenses-by-vendor',
+  'dashboard-invoiced-vs-uninvoiced',
+  'dashboard-deductible-tax-by-category',
+  'dashboard-invoiced-category-correlation',
+] as const;
+
 export type TicketDerivedQueryInvalidation = {
   tickets?: boolean;
   ticketDetail?: boolean;
   dailyReport?: boolean;
   financialKpis?: boolean;
+  dashboardAnalytics?: boolean;
 };
 
 /** Prefix shared by all History KPI queries for a company (dates are extra key parts). */
@@ -42,6 +62,14 @@ export function ticketUpdateAffectsFinancialKpis(
   payload: DashboardDailyReportTicketUpdate,
 ): boolean {
   return KPI_RELEVANT_TICKET_FIELDS.some((field) => payload[field] !== undefined);
+}
+
+export function ticketUpdateAffectsDashboardAnalytics(
+  payload: DashboardDailyReportTicketUpdate,
+): boolean {
+  return DASHBOARD_ANALYTICS_RELEVANT_TICKET_FIELDS.some(
+    (field) => payload[field] !== undefined,
+  );
 }
 
 /**
@@ -83,6 +111,15 @@ export async function invalidateTicketDerivedQueries(
         queryKey: financialKpiQueryKeyPrefix(originCompanyId),
       }),
     );
+  }
+  if (options.dashboardAnalytics) {
+    for (const root of DASHBOARD_ANALYTICS_QUERY_ROOTS) {
+      tasks.push(
+        queryClient.invalidateQueries({
+          queryKey: [root, originCompanyId],
+        }),
+      );
+    }
   }
 
   if (tasks.length > 0) await Promise.all(tasks);

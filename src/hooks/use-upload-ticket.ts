@@ -30,6 +30,7 @@ export function useUploadTicket() {
         tickets: true,
         dailyReport: true,
         financialKpis: true,
+        dashboardAnalytics: true,
       });
 
       // El upload de ticket puede auto-vincular una factura existente.

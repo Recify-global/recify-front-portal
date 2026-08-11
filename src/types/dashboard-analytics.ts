@@ -81,7 +81,8 @@ export interface InvoicedVsUninvoicedView {
 export interface DeductibleTaxRow {
   category: string;
   deductibleTax: number;
-  amount: number;
+  nonDeductibleTax: number;
+  totalTax: number;
   count: number;
 }
 

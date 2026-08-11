@@ -66,11 +66,23 @@ import {
   formatInvoicePaymentForm,
   formatInvoiceUuid,
   invoiceTicketRefObject,
-  invoiceUuidSearchText,
   resolveInvoiceFileUrl,
 } from '@/utils/invoice-display';
-import { HISTORY_TIMEZONE, formatMxn } from '@/utils/financial-kpis';
+import {
+  DATE_PRESETS,
+  HISTORY_TIMEZONE,
+  dateRangeForPreset,
+  detectActivePreset,
+  formatMxn,
+  isValidDateRange,
+  resolveCompanyTimeZone,
+} from '@/utils/financial-kpis';
+import {
+  formatCivilDateDisplay,
+  parseCivilDateInput,
+} from '@/utils/civil-date-input';
 import { getInvoiceUserErrorMessage, isInvoiceAbortError } from '@/utils/invoice-errors';
+import { cn } from '@/lib/utils';
 import { AlertCircle, FileText, Loader2, Search, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -92,15 +104,18 @@ const TAB_OPTIONS: { value: InvoiceTab; label: string }[] = [
 /** RFC mexicano típico (12–13 chars). No inventa filtro si no parece RFC. */
 function looksLikeIssuerRfc(value: string): boolean {
   const v = value.trim().toUpperCase();
-  return /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{2,3}$/.test(v);
+  return /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/.test(v);
 }
 
 export default function InvoicesPage() {
+  const [periodReference] = useState(() => new Date());
   const [tab, setTab] = useState<InvoiceTab>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | BackendInvoiceType>('all');
   const [searchFilter, setSearchFilter] = useState('');
   const [dateFromFilter, setDateFromFilter] = useState('');
   const [dateToFilter, setDateToFilter] = useState('');
+  const [dateFromDisplay, setDateFromDisplay] = useState('');
+  const [dateToDisplay, setDateToDisplay] = useState('');
   const [page, setPage] = useState(1);
   const [selection, setSelection] = useState<InvoiceSelection | null>(null);
   const [localDetail, setLocalDetail] = useState<BackendInvoice | null>(null);
@@ -111,12 +126,24 @@ export default function InvoicesPage() {
 
   const { companyId } = useAuth();
   const { activeCompany } = useCompanies();
-  const timeZone = activeCompany?.timezone?.trim() || HISTORY_TIMEZONE;
+  const timeZone = resolveCompanyTimeZone(activeCompany?.timezone || HISTORY_TIMEZONE);
   const companyIdRef = useRef(companyId);
   companyIdRef.current = companyId;
   const deleteClaimRef = useRef(false);
   const pdfClaimRef = useRef(false);
   const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
+
+  const dateRangeInvalid = !isValidDateRange(dateFromFilter, dateToFilter);
+  const activePreset = detectActivePreset(
+    dateFromFilter,
+    dateToFilter,
+    periodReference,
+    timeZone,
+  );
+  const lastValidListParamsRef = useRef<InvoicesListParams>({
+    page: 1,
+    limit: PAGE_SIZE,
+  });
 
   const listParams = useMemo((): InvoicesListParams => {
     const params: InvoicesListParams = {
@@ -131,8 +158,19 @@ export default function InvoicesPage() {
     if (search && looksLikeIssuerRfc(search)) {
       params.issuerRfc = search.toUpperCase();
     }
+
+    if (dateRangeInvalid) return lastValidListParamsRef.current;
+    lastValidListParamsRef.current = params;
     return params;
-  }, [page, tab, typeFilter, dateFromFilter, dateToFilter, searchFilter]);
+  }, [
+    dateFromFilter,
+    dateRangeInvalid,
+    dateToFilter,
+    page,
+    searchFilter,
+    tab,
+    typeFilter,
+  ]);
 
   const invoicesQuery = useInvoices(listParams);
   const detailQuery = useInvoice(selection);
@@ -145,6 +183,8 @@ export default function InvoicesPage() {
     setSearchFilter('');
     setDateFromFilter('');
     setDateToFilter('');
+    setDateFromDisplay('');
+    setDateToDisplay('');
     setPage(1);
     setSelection(null);
     setLocalDetail(null);
@@ -152,7 +192,13 @@ export default function InvoicesPage() {
     deleteClaimRef.current = false;
     pdfClaimRef.current = false;
     setPdfBusyId(null);
+    lastValidListParamsRef.current = { page: 1, limit: PAGE_SIZE };
   }, [companyId]);
+
+  useEffect(() => {
+    setDateFromDisplay(dateFromFilter ? formatCivilDateDisplay(dateFromFilter) : '');
+    setDateToDisplay(dateToFilter ? formatCivilDateDisplay(dateToFilter) : '');
+  }, [dateFromFilter, dateToFilter]);
 
   useEffect(() => {
     setLocalDetail(null);
@@ -162,25 +208,13 @@ export default function InvoicesPage() {
   const total = invoicesQuery.data?.total ?? 0;
   const pages = Math.max(1, invoicesQuery.data?.pages ?? 1);
 
-  const pageSearch = searchFilter.trim().toLowerCase();
-  const applyPageLocalSearch = Boolean(pageSearch) && !looksLikeIssuerRfc(searchFilter);
-
-  const visibleInvoices = useMemo(() => {
-    if (!applyPageLocalSearch) return invoices;
-    return invoices.filter((inv) => {
-      const rfc = (inv.issuerRfc ?? '').toLowerCase();
-      const name = (inv.issuerName ?? '').toLowerCase();
-      const uuid = invoiceUuidSearchText(inv.uuid);
-      return rfc.includes(pageSearch) || name.includes(pageSearch) || uuid.includes(pageSearch);
-    });
-  }, [invoices, applyPageLocalSearch, pageSearch]);
-
-  const hasFilters =
+  const hasActiveFilters =
     typeFilter !== 'all' ||
-    searchFilter !== '' ||
+    looksLikeIssuerRfc(searchFilter) ||
     dateFromFilter !== '' ||
     dateToFilter !== '' ||
     tab !== 'all';
+  const hasFilterInput = hasActiveFilters || searchFilter.trim() !== '';
 
   const clearFilters = () => {
     setTypeFilter('all');
@@ -188,6 +222,55 @@ export default function InvoicesPage() {
     setDateFromFilter('');
     setDateToFilter('');
     setTab('all');
+    setPage(1);
+  };
+
+  const applyDatePreset = (preset: (typeof DATE_PRESETS)[number]['id']) => {
+    if (activePreset === preset) {
+      setPage(1);
+      return;
+    }
+    const range = dateRangeForPreset(preset, periodReference, timeZone);
+    setDateFromFilter(range.dateFrom);
+    setDateToFilter(range.dateTo);
+    setPage(1);
+  };
+
+  const commitDateFromDisplay = () => {
+    const raw = dateFromDisplay.trim();
+    if (!raw) {
+      setDateFromFilter('');
+      setDateFromDisplay('');
+      setPage(1);
+      return;
+    }
+    const wire = parseCivilDateInput(raw);
+    if (!wire) {
+      setDateFromDisplay(dateFromFilter ? formatCivilDateDisplay(dateFromFilter) : '');
+      toast.error('Ingresa una fecha válida con el formato DD/MM/AAAA.');
+      return;
+    }
+    setDateFromFilter(wire);
+    setDateFromDisplay(formatCivilDateDisplay(wire));
+    setPage(1);
+  };
+
+  const commitDateToDisplay = () => {
+    const raw = dateToDisplay.trim();
+    if (!raw) {
+      setDateToFilter('');
+      setDateToDisplay('');
+      setPage(1);
+      return;
+    }
+    const wire = parseCivilDateInput(raw);
+    if (!wire) {
+      setDateToDisplay(dateToFilter ? formatCivilDateDisplay(dateToFilter) : '');
+      toast.error('Ingresa una fecha válida con el formato DD/MM/AAAA.');
+      return;
+    }
+    setDateToFilter(wire);
+    setDateToDisplay(formatCivilDateDisplay(wire));
     setPage(1);
   };
 
@@ -333,17 +416,17 @@ export default function InvoicesPage() {
         </Tabs>
 
         <div className="bg-card rounded-2xl border border-border/50 shadow-elegant p-4">
-          <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
-            <div className="flex-1 space-y-1.5">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_12rem]">
+            <div className="space-y-1.5">
               <Label htmlFor="invoice-search" className="text-xs text-muted-foreground">
-                Buscar
+                RFC del emisor
               </Label>
               <div className="flex items-center gap-2 bg-secondary rounded-xl px-3 py-2">
                 <Search size={16} className="text-muted-foreground shrink-0" aria-hidden />
                 <input
                   id="invoice-search"
                   type="search"
-                  placeholder="RFC exacto, o emisor/folio en esta página…"
+                  placeholder="RFC completo (12 o 13 caracteres)"
                   value={searchFilter}
                   onChange={(e) => {
                     setSearchFilter(e.target.value);
@@ -365,10 +448,9 @@ export default function InvoicesPage() {
                   </button>
                 ) : null}
               </div>
-              {applyPageLocalSearch ? (
+              {searchFilter.trim() && !looksLikeIssuerRfc(searchFilter) ? (
                 <p className="text-xs text-muted-foreground">
-                  La búsqueda por emisor o folio aplica solo a esta página. Un RFC completo se
-                  consulta en el servidor.
+                  Ingresa el RFC completo para aplicar la búsqueda.
                 </p>
               ) : null}
             </div>
@@ -379,7 +461,7 @@ export default function InvoicesPage() {
                 setPage(1);
               }}
             >
-              <SelectTrigger className="w-full sm:w-44 h-10 rounded-xl border-border">
+              <SelectTrigger className="w-full h-10 rounded-xl border-border">
                 <SelectValue placeholder="Tipo" />
               </SelectTrigger>
               <SelectContent>
@@ -388,19 +470,43 @@ export default function InvoicesPage() {
                 <SelectItem value="ingreso">{INVOICE_TYPE_LABELS.ingreso}</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {DATE_PRESETS.map((preset) => (
+              <Button
+                key={preset.id}
+                type="button"
+                size="sm"
+                variant={activePreset === preset.id ? 'default' : 'outline'}
+                aria-pressed={activePreset === preset.id}
+                onClick={() => applyDatePreset(preset.id)}
+              >
+                {preset.label}
+              </Button>
+            ))}
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
             <div className="space-y-1.5 w-full sm:w-40">
               <Label htmlFor="invoice-date-from" className="text-xs text-muted-foreground">
                 Desde
               </Label>
               <Input
                 id="invoice-date-from"
-                type="date"
-                value={dateFromFilter}
-                onChange={(e) => {
-                  setDateFromFilter(e.target.value);
-                  setPage(1);
+                inputMode="numeric"
+                placeholder="DD/MM/AAAA"
+                value={dateFromDisplay}
+                onChange={(event) => setDateFromDisplay(event.target.value)}
+                onBlur={commitDateFromDisplay}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') event.currentTarget.blur();
                 }}
-                className="h-10 rounded-xl border-border"
+                aria-invalid={dateRangeInvalid}
+                className={cn(
+                  'h-10 rounded-xl border-border',
+                  dateRangeInvalid && 'border-destructive focus-visible:ring-destructive',
+                )}
               />
             </div>
             <div className="space-y-1.5 w-full sm:w-40">
@@ -409,16 +515,22 @@ export default function InvoicesPage() {
               </Label>
               <Input
                 id="invoice-date-to"
-                type="date"
-                value={dateToFilter}
-                onChange={(e) => {
-                  setDateToFilter(e.target.value);
-                  setPage(1);
+                inputMode="numeric"
+                placeholder="DD/MM/AAAA"
+                value={dateToDisplay}
+                onChange={(event) => setDateToDisplay(event.target.value)}
+                onBlur={commitDateToDisplay}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') event.currentTarget.blur();
                 }}
-                className="h-10 rounded-xl border-border"
+                aria-invalid={dateRangeInvalid}
+                className={cn(
+                  'h-10 rounded-xl border-border',
+                  dateRangeInvalid && 'border-destructive focus-visible:ring-destructive',
+                )}
               />
             </div>
-            {hasFilters ? (
+            {hasFilterInput ? (
               <Button
                 type="button"
                 variant="outline"
@@ -429,6 +541,11 @@ export default function InvoicesPage() {
               </Button>
             ) : null}
           </div>
+          {dateRangeInvalid ? (
+            <p className="mt-2 text-sm text-destructive" role="alert">
+              La fecha inicial no puede ser posterior a la fecha final.
+            </p>
+          ) : null}
         </div>
 
         <div className="bg-card rounded-2xl border border-border/50 shadow-elegant overflow-hidden">
@@ -459,19 +576,17 @@ export default function InvoicesPage() {
                 </Button>
               }
             />
-          ) : visibleInvoices.length === 0 ? (
+          ) : invoices.length === 0 ? (
             <EmptyState
               icon={<FileText size={32} />}
-              title={total === 0 ? 'Sin facturas' : 'Sin resultados'}
+              title={hasActiveFilters ? 'Sin resultados' : 'Sin facturas'}
               description={
-                total === 0
-                  ? 'Sube un CFDI en PDF desde la pantalla de Subir ticket.'
-                  : applyPageLocalSearch
-                    ? 'Ninguna factura de esta página coincide con la búsqueda.'
-                    : 'Ninguna factura coincide con los filtros seleccionados.'
+                hasActiveFilters
+                  ? 'No encontramos facturas con estos filtros.'
+                  : 'Sube un CFDI en PDF desde la pantalla de Subir ticket.'
               }
               action={
-                hasFilters ? (
+                hasFilterInput ? (
                   <Button variant="outline" className="rounded-xl" onClick={clearFilters}>
                     Limpiar filtros
                   </Button>
@@ -493,7 +608,7 @@ export default function InvoicesPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {visibleInvoices.map((invoice) => (
+                    {invoices.map((invoice) => (
                       <TableRow
                         key={invoice._id}
                         className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"

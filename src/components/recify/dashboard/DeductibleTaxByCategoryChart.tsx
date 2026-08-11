@@ -93,7 +93,8 @@ export function DeductibleTaxByCategoryChart({
                   title={row.category}
                   rows={[
                     { label: 'IVA deducible', value: formatMxn(row.deductibleTax), color: ANALYTICS_COLORS.deductible },
-                    { label: 'Gasto base', value: formatMxn(row.amount) },
+                    { label: 'IVA no deducible', value: formatMxn(row.nonDeductibleTax) },
+                    { label: 'IVA total', value: formatMxn(row.totalTax) },
                     { label: 'Movimientos', value: ticketsLabel(row.count) },
                   ]}
                 />

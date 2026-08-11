@@ -401,7 +401,7 @@ describe('invoices cache', () => {
     expect(mocks.listInvoices).toHaveBeenCalledTimes(1);
   });
 
-  it('uses a distinct key when page or dates change', async () => {
+  it('uses a distinct key for the full normalized invoice filter set', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -418,7 +418,15 @@ describe('invoices cache', () => {
     expect(mocks.listInvoices).toHaveBeenCalledTimes(1);
 
     rerender({
-      filters: { page: 2, limit: 20, dateFrom: '2026-07-01' } satisfies InvoicesListParams,
+      filters: {
+        page: 2,
+        limit: 20,
+        matchStatus: 'unmatched',
+        type: 'egreso',
+        issuerRfc: 'XAXX010101000',
+        dateFrom: '2026-07-01',
+        dateTo: '2026-07-31',
+      } satisfies InvoicesListParams,
     });
 
     await waitFor(() => expect(mocks.listInvoices).toHaveBeenCalledTimes(2));
@@ -426,11 +434,19 @@ describe('invoices cache', () => {
     const keys = queryClient.getQueryCache().getAll().map((q) => q.queryKey);
     expect(keys).toContainEqual(invoiceListQueryKey('company-a', { page: 1, limit: 20 }));
     expect(keys).toContainEqual(
-      invoiceListQueryKey('company-a', { page: 2, limit: 20, dateFrom: '2026-07-01' }),
+      invoiceListQueryKey('company-a', {
+        page: 2,
+        limit: 20,
+        matchStatus: 'unmatched',
+        type: 'egreso',
+        issuerRfc: 'XAXX010101000',
+        dateFrom: '2026-07-01',
+        dateTo: '2026-07-31',
+      }),
     );
   });
 
-  it('keeps invoice data isolated by company', async () => {
+  it('keeps identical invoice filters isolated by company', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -438,7 +454,16 @@ describe('invoices cache', () => {
       .mockResolvedValueOnce({ ...emptyInvoices, data: [{ _id: 'inv-a' }] })
       .mockResolvedValueOnce({ ...emptyInvoices, data: [{ _id: 'inv-b' }] });
 
-    const { result, rerender } = renderHook(() => useInvoices({ page: 1, limit: 20 }), {
+    const filters = {
+      page: 1,
+      limit: 20,
+      matchStatus: 'unmatched' as const,
+      type: 'egreso' as const,
+      issuerRfc: 'XAXX010101000',
+      dateFrom: '2026-07-01',
+      dateTo: '2026-07-31',
+    };
+    const { result, rerender } = renderHook(() => useInvoices(filters), {
       wrapper: createWrapper(queryClient),
     });
 
@@ -520,6 +545,20 @@ describe('invoices cache', () => {
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    const companyAKey = invoiceListQueryKey('company-a', {
+      page: 2,
+      limit: 20,
+      type: 'egreso',
+      dateFrom: '2026-07-01',
+    });
+    const companyBKey = invoiceListQueryKey('company-b', {
+      page: 2,
+      limit: 20,
+      type: 'egreso',
+      dateFrom: '2026-07-01',
+    });
+    queryClient.setQueryData(companyAKey, emptyInvoices);
+    queryClient.setQueryData(companyBKey, emptyInvoices);
 
     const { result } = renderHook(() => useDeleteInvoice(), {
       wrapper: createWrapper(queryClient),
@@ -534,6 +573,8 @@ describe('invoices cache', () => {
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['invoices', 'company-a'] });
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['invoices', 'company-b'] });
+    expect(queryClient.getQueryState(companyAKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(companyBKey)?.isInvalidated).toBe(false);
   });
 
   it('late delete for A after switching to B invalidates A only', async () => {

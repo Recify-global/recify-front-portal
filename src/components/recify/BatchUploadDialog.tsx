@@ -92,6 +92,7 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
         tickets: true,
         dailyReport: true,
         financialKpis: true,
+        dashboardAnalytics: true,
       });
       if (options.invoices && isAuthMutationContextCurrent(authContext)) {
         await invalidateInvoiceQueries(queryClient, targetCompanyId);
