@@ -127,6 +127,40 @@ describe('session cache cleanup', () => {
     expect(queryClient.getQueryData(['tickets', 'company-b'])).toBeUndefined();
   });
 
+  it('aborts an in-flight team request when switching companies', async () => {
+    setAuthSession({
+      token: 'token-a',
+      user: { ...userA, companies: ['company-a', 'company-b'] },
+    });
+    markAuthSessionActive();
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    let requestSignal: AbortSignal | undefined;
+    const request = queryClient.fetchQuery({
+      queryKey: ['team-members', 'company-a'],
+      queryFn: ({ signal }) => {
+        requestSignal = signal;
+        return new Promise<string>((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
+        });
+      },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionCacheBoundary />
+      </QueryClientProvider>,
+    );
+    setActiveCompany('company-b');
+
+    await waitFor(() => expect(requestSignal?.aborted).toBe(true));
+    await request.catch(() => undefined);
+    expect(queryClient.getQueryData(['team-members', 'company-b'])).toBeUndefined();
+  });
+
   it('clears auth storage even when query cancellation fails', async () => {
     seedSession();
     const unregister = registerSessionCacheCleanup(async () => {

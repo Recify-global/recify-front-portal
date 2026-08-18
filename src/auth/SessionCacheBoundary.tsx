@@ -17,6 +17,7 @@ import {
   TICKET_DETAIL_QUERY_ROOT,
   TICKET_LIST_QUERY_ROOT,
 } from '@/utils/ticket-queries';
+import { TEAM_MEMBERS_QUERY_ROOT } from '@/utils/team-queries';
 
 /**
  * Conecta el coordinador de sesión con la misma instancia de QueryClient
@@ -67,6 +68,9 @@ export function SessionCacheBoundary() {
         });
         void queryClient.cancelQueries({
           queryKey: ['dashboard-daily-report', previousCompanyId],
+        });
+        void queryClient.cancelQueries({
+          queryKey: [TEAM_MEMBERS_QUERY_ROOT, previousCompanyId],
         });
       }
 

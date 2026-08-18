@@ -2,82 +2,113 @@
 
 ## Feature: Mi equipo
 
+Actualizado: 2026-08-17. El frontend de Mi equipo ya está implementado y espera este contrato. No se inventó URL, método HTTP ni persistencia local.
+
 ### Contexto
 
-El frontend necesita mostrar y administrar, según permisos, a los integrantes de la compañía activa.
+La pantalla **Mi equipo** lista integrantes de la compañía activa y permite cambiar el rol entre únicamente:
+
+```ts
+type TeamRole = 'admin' | 'user'
+```
+
+No se deben exponer ni aceptar otros roles (`owner`, `manager`, `editor`, `viewer`, `accountant`, `superadmin`, etc.) en este recurso.
+
+El `UserRole` global de sesión (`admin | accountant | viewer`) **no** es el rol de compañía. Backend debe definir si existe equivalencia; el frontend no la asume ni la mapea.
 
 ### Hallazgos frontend
 
-- Endpoint existente: ninguno para listar, consultar o administrar integrantes de una compañía.
-- Campos disponibles: la sesión solo expone el usuario autenticado con `_id`, `name`, `email`, `role`, `companies`, `status` y timestamps opcionales. No existe un contrato de listado de integrantes.
-- Roles disponibles: `admin`, `accountant` y `viewer`. No existe una equivalencia confirmada hacia los roles de producto `Admin` y `Usuario`.
-- Permisos disponibles: únicamente el `role` global del usuario autenticado y su lista de `companies`; no existe un contrato de permisos por compañía.
-- Operaciones faltantes: listado de integrantes, actualización de rol, invitación y eliminación o desactivación.
+- Endpoint existente: ninguno para listar o actualizar integrantes de una compañía.
+- La sesión solo expone el usuario autenticado: `_id`, `name`, `email`, `role` (global), `companies`, `status`.
+- No existe `CompanyMember` ni permisos por compañía.
+- La UI no llama ninguna ruta de miembros. El punto de integración es `src/services/team.service.ts` (`listTeamMembers`, `updateTeamMemberRole`) + mapper `src/mappers/team.mapper.ts`.
+- La autorización en UI es solo UX. Backend debe autorizar de verdad.
 
 ### Requerimientos mínimos
 
 #### TEAM-BACK-001 — Listar integrantes
 
-- Método esperado: `GET`.
-- Ruta conceptual: recurso de integrantes anidado bajo la compañía activa, siguiendo la convención existente de recursos por compañía. El nombre definitivo del recurso debe establecerlo backend.
-- Tenant scope: `companyId` obligatorio y validado por backend contra la sesión autenticada.
-- Permiso mínimo: usuario autenticado con acceso de lectura a la compañía. Admin y Usuario deben poder consultar.
-- Query params: paginación; búsqueda por nombre o correo y filtro por rol si backend decide soportarlos.
-- Response mínima: listado paginado con identificador estable, nombre, correo, rol canónico y estado real. La fecha de incorporación solo debe incluirse si backend confirma su semántica.
-- Errores esperados: `401` sin sesión, `403` sin permiso y respuesta segura para compañía inexistente o inaccesible.
+- Operación: obtener los miembros de la compañía activa.
+- Ruta/método: los define backend. Recurso anidado bajo la compañía, siguiendo el resto de `/companies/:companyId/...`.
+- Tenant scope: `companyId` obligatorio; validar autenticación y acceso a esa compañía.
+- Permiso mínimo: usuario autenticado con acceso de lectura a la compañía. Quién puede consultar es decisión de producto/backend.
+- Response mínima (cada integrante):
+
+```ts
+{
+  id: string // o `_id`; el mapper acepta ambos
+  email: string
+  role: 'admin' | 'user'
+}
+```
+
+Campos opcionales si ya existen con semántica confirmada:
+
+```ts
+name?: string | null
+firstName?: string | null
+lastName?: string | null
+avatarUrl?: string | null
+status?: 'active' | 'inactive' | 'suspended' | null
+```
+
+No incluir fecha de incorporación hasta confirmar su semántica.
+
+- Errores esperados: `401` sin sesión, `403` sin permiso, respuesta segura (`404` o equivalente) para compañía inexistente o inaccesible. Payload de error sin secretos ni datos internos.
 
 #### TEAM-BACK-002 — Actualizar rol
 
-- Método esperado: `PATCH`.
-- Ruta conceptual: integrante específico dentro de la compañía.
-- Tenant scope: compañía e integrante validados por backend.
+- Operación conceptual: `companyId` + `memberId` + `role: 'admin' | 'user'`.
+- Ruta/método: los define backend.
+- Tenant scope: compañía e integrante validados en servidor. El miembro debe pertenecer a esa compañía (evitar IDOR).
+- Permiso mínimo: el servidor confirma quién puede cambiar roles. No confiar en el rol enviado por el cliente.
+- Payload: únicamente el rol canónico `admin | user`. Rechazar cualquier otro valor (`400`/`422`).
+- Response mínima: el integrante actualizado con los mismos campos seguros del listado.
+- Errores esperados: `400`/`422` rol inválido, `401`, `403`, `404` seguro, `409` si una regla de negocio confirmada lo impide.
+
+### Seguridad requerida (backend)
+
+- Usuario autenticado.
+- Acceso a la compañía objetivo.
+- Permisos suficientes resueltos en servidor para esa compañía (deny-by-default).
+- El integrante pertenece a esa compañía.
+- Rol permitido exclusivamente `admin | user`.
+- Evitar escalamiento de privilegios.
+- Evitar IDOR.
+- Validar payload.
+- No confiar en el role enviado por el cliente.
+- Respuestas controladas: `401`, `403`, `404` sin filtrar existencia cross-tenant cuando corresponda.
+- Sin secretos, hashes, tokens ni datos internos.
+
+### Decisiones de producto/backend pendientes
+
+No implementadas en frontend porque no están confirmadas:
+
+- Impedir dejar una compañía sin administradores.
+- Permitir o bloquear que un usuario cambie su propio rol (incl. de `admin` a `user`).
+- Relación entre `UserRole` global (`admin | accountant | viewer`) y `TeamRole` de compañía (`admin | user`).
+- Si el permiso de edición es por compañía o global.
+- Invitaciones, alta, baja o desactivación de integrantes.
+
+#### TEAM-BACK-003 — Invitar integrante (fuera del alcance UI actual)
+
+- Método esperado: `POST`. Recurso de invitaciones de la compañía.
 - Permiso mínimo: Admin confirmado por backend.
-- Payload: únicamente el rol canónico permitido. Backend debe definir la equivalencia entre `admin | accountant | viewer` y los roles de producto `Admin | Usuario`; el frontend no la asumirá.
-- Response mínima: integrante actualizado con los mismos campos seguros del listado.
-- Errores esperados: `400` o `422` para rol inválido, `401`, `403`, `404` seguro y `409` para una restricción de negocio confirmada.
+- Payload: correo y rol `admin | user`.
+- Sin tokens ni secretos en la respuesta.
+- Errores: `400`/`422`, `401`, `403`, `409` si ya existe invitación o membresía.
 
-#### TEAM-BACK-003 — Invitar integrante
+#### TEAM-BACK-004 — Eliminar o desactivar integrante (fuera del alcance UI actual)
 
-- Método esperado: `POST`.
-- Ruta conceptual: recurso de invitaciones de la compañía.
-- Tenant scope: compañía validada contra la sesión.
+- Método: `DELETE` o `PATCH`, según semántica que elija backend.
 - Permiso mínimo: Admin confirmado por backend.
-- Payload: correo y rol canónico permitido.
-- Response mínima: estado real de la invitación sin tokens, secretos ni datos internos.
-- Errores esperados: `400` o `422`, `401`, `403` y `409` para una invitación o membresía ya existente.
-
-#### TEAM-BACK-004 — Eliminar o desactivar integrante
-
-- Método esperado: `DELETE` o `PATCH`, según la semántica definitiva elegida por backend.
-- Ruta conceptual: integrante específico dentro de la compañía.
-- Tenant scope: compañía e integrante validados por backend.
-- Permiso mínimo: Admin confirmado por backend.
-- Payload: ninguno para eliminación o estado permitido para desactivación.
-- Response mínima: confirmación sin exponer datos internos.
-- Errores esperados: `401`, `403`, `404` seguro y `409` cuando una regla de negocio confirmada impida la operación.
-
-### Seguridad requerida
-
-- Scope obligatorio por `companyId`.
-- El usuario debe pertenecer a la compañía.
-- Solo Admin puede modificar.
-- Usuario solo puede consultar.
-- Deny-by-default.
-- No confiar en el role enviado por cliente.
-- No permitir modificar al último Admin si esa regla aplica y el producto la confirma.
-- No permitir escalamiento de privilegios.
-- Respuestas sin secretos ni datos internos.
-- `401` para no autenticado.
-- `403` para autenticado sin permiso.
-- `404` sin filtrar existencia cross-tenant cuando corresponda.
-- Los permisos y el rol efectivo deben resolverse en backend para la compañía objetivo.
+- Errores: `401`, `403`, `404` seguro, `409` si una regla confirmada lo impide (p. ej. último admin, si producto lo define).
 
 ### Fuera de alcance frontend
 
-- Modelo de datos.
-- Migraciones.
-- Implementación backend.
-- Políticas definitivas no confirmadas.
+- Modelo de datos, migraciones e implementación backend.
+- Inventar URLs o mapeos de roles.
+- Políticas no confirmadas (último admin, self-service de rol).
 
 ## Feature: Dashboard
 
