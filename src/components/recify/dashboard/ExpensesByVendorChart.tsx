@@ -46,7 +46,7 @@ export function ExpensesByVendorChart({ query, enabled }: ExpensesByVendorChartP
       highlight={
         view && view.total > 0 ? (
           <div>
-            <p className="text-xs text-muted-foreground">Gasto total del período</p>
+            <p className="text-xs text-muted-foreground">Gasto de proveedores mostrados</p>
             <p className="text-2xl font-bold text-foreground tabular-nums">
               {formatMxn(view.total)}
             </p>

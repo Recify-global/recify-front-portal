@@ -9,16 +9,31 @@ import type {
   DashboardDailyReportTicketUpdate,
 } from '@/types/dashboard';
 import type { TicketsListParams } from '@/types/ticket';
-import { isAuthSessionClosing } from '@/auth/session-cleanup';
-import { invalidateTicketDerivedQueries } from '@/utils/ticket-derived-queries';
+import {
+  captureAuthMutationContext,
+  isAuthMutationContextCurrent,
+} from '@/auth/session-cleanup';
+import {
+  invalidateTicketDerivedQueries,
+  ticketUpdateAffectsDashboardAnalytics,
+} from '@/utils/ticket-derived-queries';
+import {
+  normalizeTicketListParams,
+  ticketListQueryKey,
+  ticketQueryCacheOptions,
+} from '@/utils/ticket-queries';
 import { useAuth } from './use-auth';
 
 export function useTickets(params: TicketsListParams = {}) {
   const { companyId } = useAuth();
+  const normalized = normalizeTicketListParams(params);
+
   return useQuery({
-    queryKey: ['tickets', companyId, params],
-    queryFn: () => listTickets(companyId as string, params),
+    queryKey: ticketListQueryKey(companyId ?? '', params),
+    queryFn: ({ signal }) =>
+      listTickets(companyId as string, normalized, { signal }),
     enabled: Boolean(companyId),
+    ...ticketQueryCacheOptions,
   });
 }
 
@@ -29,8 +44,10 @@ export function useDashboardDailyReport(
   const { companyId } = useAuth();
   return useQuery({
     queryKey: ['dashboard-daily-report', companyId, params],
-    queryFn: () => getDashboardDailyReport(companyId as string, params),
+    queryFn: ({ signal }) =>
+      getDashboardDailyReport(companyId as string, params, { signal }),
     enabled: Boolean(companyId),
+    ...ticketQueryCacheOptions,
   });
 }
 
@@ -39,6 +56,7 @@ export function useUpdateDashboardTicket() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    onMutate: captureAuthMutationContext,
     mutationFn: ({
       companyId,
       ticketId,
@@ -53,13 +71,14 @@ export function useUpdateDashboardTicket() {
       if (!companyId) return Promise.reject(new Error('No hay compañía activa.'));
       return updateDashboardDailyReportTicket(companyId, ticketId, payload, { signal });
     },
-    onSuccess: async (_data, { companyId, ticketId }) => {
-      if (isAuthSessionClosing()) return;
+    onSuccess: async (_data, { companyId, ticketId, payload }, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
       // KPIs are owned by the caller (only when the payload is aggregation-relevant).
       await invalidateTicketDerivedQueries(queryClient, companyId, {
         tickets: true,
         ticketDetail: true,
         dailyReport: true,
+        dashboardAnalytics: ticketUpdateAffectsDashboardAnalytics(payload),
       }, ticketId);
     },
   });

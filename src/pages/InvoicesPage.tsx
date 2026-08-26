@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppLayout } from '@/components/recify/AppLayout';
 import { EmptyState } from '@/components/recify/EmptyState';
 import { InvoiceMatchStatusBadge } from '@/components/recify/InvoiceMatchStatusBadge';
@@ -20,6 +20,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from '@/components/ui/dialog';
 import {
   Table,
@@ -31,7 +32,6 @@ import {
 } from '@/components/ui/table';
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -39,127 +39,351 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
 import { useAuth } from '@/hooks/use-auth';
+import {
+  captureAuthMutationContext,
+  isAuthMutationContextCurrent,
+} from '@/auth/session-cleanup';
+import { useCompanies } from '@/hooks/use-companies';
 import { useDeleteInvoice, useInvoice, useInvoices } from '@/hooks/use-invoices';
-import type { BackendInvoice, InvoiceMatchStatus } from '@/types/invoice';
+import { getInvoice } from '@/services/invoices.service';
+import type {
+  BackendInvoice,
+  BackendInvoiceType,
+  InvoiceMatchStatus,
+  InvoicesListParams,
+} from '@/types/invoice';
 import {
   INVOICE_TYPE_LABELS,
   formatInvoiceDate,
   formatInvoicePaymentForm,
+  formatInvoiceUuid,
   invoiceTicketRefObject,
   resolveInvoiceFileUrl,
 } from '@/utils/invoice-display';
-import { formatMxn } from '@/utils/financial-kpis';
-import { ApiRequestError } from '@/api/http';
+import {
+  DATE_PRESETS,
+  HISTORY_TIMEZONE,
+  dateRangeForPreset,
+  detectActivePreset,
+  formatMxn,
+  isValidDateRange,
+  resolveCompanyTimeZone,
+} from '@/utils/financial-kpis';
+import {
+  formatCivilDateDisplay,
+  parseCivilDateInput,
+} from '@/utils/civil-date-input';
+import { getInvoiceUserErrorMessage, isInvoiceAbortError } from '@/utils/invoice-errors';
+import { cn } from '@/lib/utils';
 import { AlertCircle, FileText, Loader2, Search, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
-type InvoiceTab = 'all' | 'sin-ticket' | 'faltante' | 'conciliadas';
+type InvoiceTab = 'all' | InvoiceMatchStatus;
 
-const TAB_STATUSES: Record<Exclude<InvoiceTab, 'all'>, InvoiceMatchStatus[]> = {
-  'sin-ticket': ['unmatched', 'suggested'],
-  faltante: ['missing_ticket'],
-  conciliadas: ['auto', 'confirmed'],
-};
+type InvoiceSelection = { companyId: string; invoiceId: string };
 
-/** Fecha de la factura como clave YYYY-MM-DD (parte de fecha del ISO en UTC). */
-function invoiceDateKey(iso: string): string {
-  return iso.slice(0, 10);
+const PAGE_SIZE = 20;
+
+const TAB_OPTIONS: { value: InvoiceTab; label: string }[] = [
+  { value: 'all', label: 'Todas' },
+  { value: 'unmatched', label: 'Sin ticket' },
+  { value: 'suggested', label: 'Sugeridas' },
+  { value: 'missing_ticket', label: 'Ticket faltante' },
+  { value: 'auto', label: 'Auto' },
+  { value: 'confirmed', label: 'Confirmadas' },
+];
+
+/** RFC mexicano típico (12–13 chars). No inventa filtro si no parece RFC. */
+function looksLikeIssuerRfc(value: string): boolean {
+  const v = value.trim().toUpperCase();
+  return /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/.test(v);
 }
 
 export default function InvoicesPage() {
+  const [periodReference] = useState(() => new Date());
   const [tab, setTab] = useState<InvoiceTab>('all');
-  const [typeFilter, setTypeFilter] = useState('all');
-  const [rfcFilter, setRfcFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState<'all' | BackendInvoiceType>('all');
+  const [searchFilter, setSearchFilter] = useState('');
   const [dateFromFilter, setDateFromFilter] = useState('');
   const [dateToFilter, setDateToFilter] = useState('');
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<BackendInvoice | null>(null);
+  const [dateFromDisplay, setDateFromDisplay] = useState('');
+  const [dateToDisplay, setDateToDisplay] = useState('');
+  const [page, setPage] = useState(1);
+  const [selection, setSelection] = useState<InvoiceSelection | null>(null);
+  const [localDetail, setLocalDetail] = useState<BackendInvoice | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{
+    companyId: string;
+    invoice: BackendInvoice;
+  } | null>(null);
 
   const { companyId } = useAuth();
-  const invoicesQuery = useInvoices({ page: 1, limit: 100 });
-  const detailQuery = useInvoice(selectedInvoiceId);
+  const { activeCompany } = useCompanies();
+  const timeZone = resolveCompanyTimeZone(activeCompany?.timezone || HISTORY_TIMEZONE);
+  const companyIdRef = useRef(companyId);
+  companyIdRef.current = companyId;
+  const deleteClaimRef = useRef(false);
+  const pdfClaimRef = useRef(false);
+  const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
+
+  const dateRangeInvalid = !isValidDateRange(dateFromFilter, dateToFilter);
+  const activePreset = detectActivePreset(
+    dateFromFilter,
+    dateToFilter,
+    periodReference,
+    timeZone,
+  );
+  const lastValidListParamsRef = useRef<InvoicesListParams>({
+    page: 1,
+    limit: PAGE_SIZE,
+  });
+
+  const listParams = useMemo((): InvoicesListParams => {
+    const params: InvoicesListParams = {
+      page,
+      limit: PAGE_SIZE,
+    };
+    if (tab !== 'all') params.matchStatus = tab;
+    if (typeFilter !== 'all') params.type = typeFilter;
+    if (dateFromFilter) params.dateFrom = dateFromFilter;
+    if (dateToFilter) params.dateTo = dateToFilter;
+    const search = searchFilter.trim();
+    if (search && looksLikeIssuerRfc(search)) {
+      params.issuerRfc = search.toUpperCase();
+    }
+
+    if (dateRangeInvalid) return lastValidListParamsRef.current;
+    lastValidListParamsRef.current = params;
+    return params;
+  }, [
+    dateFromFilter,
+    dateRangeInvalid,
+    dateToFilter,
+    page,
+    searchFilter,
+    tab,
+    typeFilter,
+  ]);
+
+  const invoicesQuery = useInvoices(listParams);
+  const detailQuery = useInvoice(selection);
   const deleteMutation = useDeleteInvoice();
 
-  // P0 multitenant: al cambiar compañía se cierra el detalle abierto.
+  // Reset de filtros/selección al cambiar compañía (sincrónico con el render activo).
   useEffect(() => {
-    setSelectedInvoiceId(null);
+    setTab('all');
+    setTypeFilter('all');
+    setSearchFilter('');
+    setDateFromFilter('');
+    setDateToFilter('');
+    setDateFromDisplay('');
+    setDateToDisplay('');
+    setPage(1);
+    setSelection(null);
+    setLocalDetail(null);
     setPendingDelete(null);
+    deleteClaimRef.current = false;
+    pdfClaimRef.current = false;
+    setPdfBusyId(null);
+    lastValidListParamsRef.current = { page: 1, limit: PAGE_SIZE };
   }, [companyId]);
 
+  useEffect(() => {
+    setDateFromDisplay(dateFromFilter ? formatCivilDateDisplay(dateFromFilter) : '');
+    setDateToDisplay(dateToFilter ? formatCivilDateDisplay(dateToFilter) : '');
+  }, [dateFromFilter, dateToFilter]);
+
+  useEffect(() => {
+    setLocalDetail(null);
+  }, [selection?.invoiceId, selection?.companyId]);
+
   const invoices = useMemo(() => invoicesQuery.data?.data ?? [], [invoicesQuery.data]);
+  const total = invoicesQuery.data?.total ?? 0;
+  const pages = Math.max(1, invoicesQuery.data?.pages ?? 1);
 
-  const filtered = useMemo(() => {
-    let data = invoices;
-    if (tab !== 'all') {
-      const statuses = TAB_STATUSES[tab];
-      data = data.filter((inv) => statuses.includes(inv.matchStatus));
-    }
-    if (typeFilter !== 'all') data = data.filter((inv) => inv.type === typeFilter);
-    const rfc = rfcFilter.trim().toLowerCase();
-    if (rfc) {
-      data = data.filter(
-        (inv) =>
-          (inv.issuerRfc ?? '').toLowerCase().includes(rfc) ||
-          (inv.issuerName ?? '').toLowerCase().includes(rfc) ||
-          inv.uuid.toLowerCase().includes(rfc),
-      );
-    }
-    if (dateFromFilter) data = data.filter((inv) => invoiceDateKey(inv.date) >= dateFromFilter);
-    if (dateToFilter) data = data.filter((inv) => invoiceDateKey(inv.date) <= dateToFilter);
-    return data;
-  }, [invoices, tab, typeFilter, rfcFilter, dateFromFilter, dateToFilter]);
-
-  const hasFilters =
-    typeFilter !== 'all' || rfcFilter !== '' || dateFromFilter !== '' || dateToFilter !== '';
+  const hasActiveFilters =
+    typeFilter !== 'all' ||
+    looksLikeIssuerRfc(searchFilter) ||
+    dateFromFilter !== '' ||
+    dateToFilter !== '' ||
+    tab !== 'all';
+  const hasFilterInput = hasActiveFilters || searchFilter.trim() !== '';
 
   const clearFilters = () => {
     setTypeFilter('all');
-    setRfcFilter('');
+    setSearchFilter('');
     setDateFromFilter('');
     setDateToFilter('');
+    setTab('all');
+    setPage(1);
   };
 
-  const tabCounts = useMemo(() => {
-    const count = (statuses: InvoiceMatchStatus[]) =>
-      invoices.filter((inv) => statuses.includes(inv.matchStatus)).length;
-    return {
-      all: invoices.length,
-      'sin-ticket': count(TAB_STATUSES['sin-ticket']),
-      faltante: count(TAB_STATUSES.faltante),
-      conciliadas: count(TAB_STATUSES.conciliadas),
-    };
-  }, [invoices]);
+  const applyDatePreset = (preset: (typeof DATE_PRESETS)[number]['id']) => {
+    if (activePreset === preset) {
+      setPage(1);
+      return;
+    }
+    const range = dateRangeForPreset(preset, periodReference, timeZone);
+    setDateFromFilter(range.dateFrom);
+    setDateToFilter(range.dateTo);
+    setPage(1);
+  };
 
-  // El detalle populado manda; el registro del listado es fallback mientras carga.
-  const selectedInvoice: BackendInvoice | null = useMemo(() => {
-    if (!selectedInvoiceId) return null;
-    if (detailQuery.data && detailQuery.data._id === selectedInvoiceId) return detailQuery.data;
-    return invoices.find((inv) => inv._id === selectedInvoiceId) ?? null;
-  }, [selectedInvoiceId, detailQuery.data, invoices]);
+  const commitDateFromDisplay = () => {
+    const raw = dateFromDisplay.trim();
+    if (!raw) {
+      setDateFromFilter('');
+      setDateFromDisplay('');
+      setPage(1);
+      return;
+    }
+    const wire = parseCivilDateInput(raw);
+    if (!wire) {
+      setDateFromDisplay(dateFromFilter ? formatCivilDateDisplay(dateFromFilter) : '');
+      toast.error('Ingresa una fecha válida con el formato DD/MM/AAAA.');
+      return;
+    }
+    setDateFromFilter(wire);
+    setDateFromDisplay(formatCivilDateDisplay(wire));
+    setPage(1);
+  };
+
+  const commitDateToDisplay = () => {
+    const raw = dateToDisplay.trim();
+    if (!raw) {
+      setDateToFilter('');
+      setDateToDisplay('');
+      setPage(1);
+      return;
+    }
+    const wire = parseCivilDateInput(raw);
+    if (!wire) {
+      setDateToDisplay(dateToFilter ? formatCivilDateDisplay(dateToFilter) : '');
+      toast.error('Ingresa una fecha válida con el formato DD/MM/AAAA.');
+      return;
+    }
+    setDateToFilter(wire);
+    setDateToDisplay(formatCivilDateDisplay(wire));
+    setPage(1);
+  };
+
+  const openDetail = (invoice: BackendInvoice) => {
+    if (!companyId) return;
+    setSelection({ companyId, invoiceId: invoice._id });
+  };
+
+  const closeDetail = () => {
+    setSelection(null);
+    setLocalDetail(null);
+  };
+
+  const listPreview =
+    selection && selection.companyId === companyId
+      ? invoices.find((inv) => inv._id === selection.invoiceId) ?? null
+      : null;
+
+  const detailMatchesSelection =
+    detailQuery.data &&
+    selection &&
+    detailQuery.data._id === selection.invoiceId;
+
+  const selectedInvoice: BackendInvoice | null = (() => {
+    if (!selection || selection.companyId !== companyId) return null;
+    if (localDetail && localDetail._id === selection.invoiceId) return localDetail;
+    if (detailMatchesSelection) return detailQuery.data ?? null;
+    return listPreview;
+  })();
+
+  const detailError =
+    Boolean(selection) &&
+    selection?.companyId === companyId &&
+    detailQuery.isError &&
+    !detailMatchesSelection;
 
   const handleDelete = async () => {
     if (!pendingDelete) return;
+    if (deleteClaimRef.current) return;
+    deleteClaimRef.current = true;
+    const origin = pendingDelete;
+    const originCompanyId = origin.companyId;
+    const invoiceId = origin.invoice._id;
+    const authContext = captureAuthMutationContext();
     try {
-      await deleteMutation.mutateAsync({ invoiceId: pendingDelete._id });
-      toast.success('Factura eliminada.');
-      if (selectedInvoiceId === pendingDelete._id) setSelectedInvoiceId(null);
+      await deleteMutation.mutateAsync({
+        companyId: originCompanyId,
+        invoiceId,
+      });
+      if (
+        isAuthMutationContextCurrent(authContext) &&
+        companyIdRef.current === originCompanyId
+      ) {
+        toast.success('Factura eliminada.');
+        if (selection?.invoiceId === invoiceId) closeDetail();
+        setPendingDelete(null);
+      }
     } catch (err) {
-      const message =
-        err instanceof ApiRequestError || err instanceof Error
-          ? err.message
-          : 'No fue posible eliminar la factura.';
-      toast.error(message || 'No fue posible eliminar la factura.');
+      if (
+        isAuthMutationContextCurrent(authContext) &&
+        !isInvoiceAbortError(err) &&
+        companyIdRef.current === originCompanyId
+      ) {
+        const message = getInvoiceUserErrorMessage(err, 'No fue posible eliminar la factura.');
+        if (message) toast.error(message);
+      }
     } finally {
-      setPendingDelete(null);
+      deleteClaimRef.current = false;
     }
   };
 
-  const openPdf = (invoice: BackendInvoice) => {
-    // La URL viene firmada y vale 1 hora; nunca se abre un protocolo no seguro.
-    const pdfUrl = resolveInvoiceFileUrl(invoice.fileUrl);
-    if (pdfUrl) window.open(pdfUrl, '_blank', 'noopener,noreferrer');
+  const openPdf = async (invoice: BackendInvoice) => {
+    if (!companyId) return;
+    if (pdfClaimRef.current) return;
+    const originCompanyId = companyId;
+    const authContext = captureAuthMutationContext();
+    pdfClaimRef.current = true;
+    setPdfBusyId(invoice._id);
+    try {
+      const fresh = await getInvoice(originCompanyId, invoice._id);
+      if (
+        !isAuthMutationContextCurrent(authContext) ||
+        companyIdRef.current !== originCompanyId
+      ) return;
+      const pdfUrl = resolveInvoiceFileUrl(fresh.fileUrl);
+      if (!pdfUrl) {
+        toast.error('No hay un PDF disponible para esta factura.');
+        return;
+      }
+      const popup = window.open(pdfUrl, '_blank', 'noopener,noreferrer');
+      if (!popup) {
+        toast.error('El navegador bloqueó la ventana del PDF. Permite ventanas emergentes e intenta de nuevo.');
+      }
+    } catch (err) {
+      if (isInvoiceAbortError(err)) return;
+      if (
+        !isAuthMutationContextCurrent(authContext) ||
+        companyIdRef.current !== originCompanyId
+      ) return;
+      const message = getInvoiceUserErrorMessage(
+        err,
+        'No se pudo obtener el PDF. Intenta de nuevo.',
+      );
+      if (message) toast.error(message);
+    } finally {
+      pdfClaimRef.current = false;
+      if (isAuthMutationContextCurrent(authContext)) {
+        setPdfBusyId(null);
+      }
+    }
   };
+
+  const dialogOpen = Boolean(selection && selection.companyId === companyId);
 
   return (
     <AppLayout>
@@ -171,43 +395,73 @@ export default function InvoicesPage() {
           </p>
         </div>
 
-        <Tabs value={tab} onValueChange={(v) => setTab(v as InvoiceTab)}>
-          <TabsList className="rounded-xl">
-            <TabsTrigger value="all" className="rounded-lg">
-              Todas ({tabCounts.all})
-            </TabsTrigger>
-            <TabsTrigger value="sin-ticket" className="rounded-lg">
-              Sin ticket ({tabCounts['sin-ticket']})
-            </TabsTrigger>
-            <TabsTrigger value="faltante" className="rounded-lg">
-              Ticket faltante ({tabCounts.faltante})
-            </TabsTrigger>
-            <TabsTrigger value="conciliadas" className="rounded-lg">
-              Conciliadas ({tabCounts.conciliadas})
-            </TabsTrigger>
+        <Tabs
+          value={tab}
+          onValueChange={(v) => {
+            setTab(v as InvoiceTab);
+            setPage(1);
+          }}
+        >
+          <TabsList className="rounded-xl w-full max-w-full justify-start overflow-x-auto flex-nowrap h-auto p-1">
+            {TAB_OPTIONS.map((option) => (
+              <TabsTrigger
+                key={option.value}
+                value={option.value}
+                className="rounded-lg shrink-0"
+              >
+                {option.label}
+              </TabsTrigger>
+            ))}
           </TabsList>
         </Tabs>
 
-        {/* Filters */}
         <div className="bg-card rounded-2xl border border-border/50 shadow-elegant p-4">
-          <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
-            <div className="flex-1 flex items-center gap-2 bg-secondary rounded-xl px-3 py-2">
-              <Search size={16} className="text-muted-foreground shrink-0" />
-              <input
-                type="text"
-                placeholder="Buscar por RFC, emisor o folio fiscal..."
-                value={rfcFilter}
-                onChange={(e) => setRfcFilter(e.target.value)}
-                className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground"
-              />
-              {rfcFilter && (
-                <button type="button" onClick={() => setRfcFilter('')}>
-                  <X size={14} className="text-muted-foreground" />
-                </button>
-              )}
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_12rem]">
+            <div className="space-y-1.5">
+              <Label htmlFor="invoice-search" className="text-xs text-muted-foreground">
+                RFC del emisor
+              </Label>
+              <div className="flex items-center gap-2 bg-secondary rounded-xl px-3 py-2">
+                <Search size={16} className="text-muted-foreground shrink-0" aria-hidden />
+                <input
+                  id="invoice-search"
+                  type="search"
+                  placeholder="RFC completo (12 o 13 caracteres)"
+                  value={searchFilter}
+                  onChange={(e) => {
+                    setSearchFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground"
+                />
+                {searchFilter ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchFilter('');
+                      setPage(1);
+                    }}
+                    aria-label="Limpiar búsqueda"
+                    className="shrink-0 rounded-md p-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <X size={14} className="text-muted-foreground" aria-hidden />
+                  </button>
+                ) : null}
+              </div>
+              {searchFilter.trim() && !looksLikeIssuerRfc(searchFilter) ? (
+                <p className="text-xs text-muted-foreground">
+                  Ingresa el RFC completo para aplicar la búsqueda.
+                </p>
+              ) : null}
             </div>
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-full sm:w-44 h-10 rounded-xl border-border">
+            <Select
+              value={typeFilter}
+              onValueChange={(v) => {
+                setTypeFilter(v as 'all' | BackendInvoiceType);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-full h-10 rounded-xl border-border">
                 <SelectValue placeholder="Tipo" />
               </SelectTrigger>
               <SelectContent>
@@ -216,16 +470,43 @@ export default function InvoicesPage() {
                 <SelectItem value="ingreso">{INVOICE_TYPE_LABELS.ingreso}</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {DATE_PRESETS.map((preset) => (
+              <Button
+                key={preset.id}
+                type="button"
+                size="sm"
+                variant={activePreset === preset.id ? 'default' : 'outline'}
+                aria-pressed={activePreset === preset.id}
+                onClick={() => applyDatePreset(preset.id)}
+              >
+                {preset.label}
+              </Button>
+            ))}
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
             <div className="space-y-1.5 w-full sm:w-40">
               <Label htmlFor="invoice-date-from" className="text-xs text-muted-foreground">
                 Desde
               </Label>
               <Input
                 id="invoice-date-from"
-                type="date"
-                value={dateFromFilter}
-                onChange={(e) => setDateFromFilter(e.target.value)}
-                className="h-10 rounded-xl border-border"
+                inputMode="numeric"
+                placeholder="DD/MM/AAAA"
+                value={dateFromDisplay}
+                onChange={(event) => setDateFromDisplay(event.target.value)}
+                onBlur={commitDateFromDisplay}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') event.currentTarget.blur();
+                }}
+                aria-invalid={dateRangeInvalid}
+                className={cn(
+                  'h-10 rounded-xl border-border',
+                  dateRangeInvalid && 'border-destructive focus-visible:ring-destructive',
+                )}
               />
             </div>
             <div className="space-y-1.5 w-full sm:w-40">
@@ -234,13 +515,22 @@ export default function InvoicesPage() {
               </Label>
               <Input
                 id="invoice-date-to"
-                type="date"
-                value={dateToFilter}
-                onChange={(e) => setDateToFilter(e.target.value)}
-                className="h-10 rounded-xl border-border"
+                inputMode="numeric"
+                placeholder="DD/MM/AAAA"
+                value={dateToDisplay}
+                onChange={(event) => setDateToDisplay(event.target.value)}
+                onBlur={commitDateToDisplay}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') event.currentTarget.blur();
+                }}
+                aria-invalid={dateRangeInvalid}
+                className={cn(
+                  'h-10 rounded-xl border-border',
+                  dateRangeInvalid && 'border-destructive focus-visible:ring-destructive',
+                )}
               />
             </div>
-            {hasFilters && (
+            {hasFilterInput ? (
               <Button
                 type="button"
                 variant="outline"
@@ -249,14 +539,19 @@ export default function InvoicesPage() {
               >
                 Limpiar filtros
               </Button>
-            )}
+            ) : null}
           </div>
+          {dateRangeInvalid ? (
+            <p className="mt-2 text-sm text-destructive" role="alert">
+              La fecha inicial no puede ser posterior a la fecha final.
+            </p>
+          ) : null}
         </div>
 
-        {/* Listado */}
         <div className="bg-card rounded-2xl border border-border/50 shadow-elegant overflow-hidden">
-          {invoicesQuery.isPending ? (
-            <div className="p-6 space-y-3">
+          {invoicesQuery.isPending && !invoicesQuery.data ? (
+            <div className="p-6 space-y-3" aria-busy="true" aria-live="polite">
+              <span className="sr-only">Cargando facturas</span>
               {Array.from({ length: 5 }).map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
               ))}
@@ -265,7 +560,12 @@ export default function InvoicesPage() {
             <EmptyState
               icon={<AlertCircle size={32} />}
               title="No se pudieron cargar las facturas"
-              description="Ocurrió un error al consultar el servidor. Intenta de nuevo."
+              description={
+                getInvoiceUserErrorMessage(
+                  invoicesQuery.error,
+                  'Ocurrió un error al consultar el servidor. Intenta de nuevo.',
+                ) || 'Ocurrió un error al consultar el servidor. Intenta de nuevo.'
+              }
               action={
                 <Button
                   variant="outline"
@@ -276,234 +576,344 @@ export default function InvoicesPage() {
                 </Button>
               }
             />
-          ) : filtered.length === 0 ? (
+          ) : invoices.length === 0 ? (
             <EmptyState
               icon={<FileText size={32} />}
-              title={invoices.length === 0 ? 'Sin facturas' : 'Sin resultados'}
+              title={hasActiveFilters ? 'Sin resultados' : 'Sin facturas'}
               description={
-                invoices.length === 0
-                  ? 'Sube un CFDI en PDF desde la pantalla de Subir ticket.'
-                  : 'Ninguna factura coincide con los filtros seleccionados.'
+                hasActiveFilters
+                  ? 'No encontramos facturas con estos filtros.'
+                  : 'Sube un CFDI en PDF desde la pantalla de Subir ticket.'
               }
               action={
-                invoices.length > 0 && (hasFilters || tab !== 'all') ? (
-                  <Button
-                    variant="outline"
-                    className="rounded-xl"
-                    onClick={() => {
-                      clearFilters();
-                      setTab('all');
-                    }}
-                  >
+                hasFilterInput ? (
+                  <Button variant="outline" className="rounded-xl" onClick={clearFilters}>
                     Limpiar filtros
                   </Button>
                 ) : undefined
               }
             />
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Fecha</TableHead>
-                    <TableHead>Emisor</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                    <TableHead>Conciliación</TableHead>
-                    <TableHead className="text-right">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filtered.map((invoice) => (
-                    <TableRow
-                      key={invoice._id}
-                      className="cursor-pointer"
-                      onClick={() => setSelectedInvoiceId(invoice._id)}
-                    >
-                      <TableCell className="whitespace-nowrap">
-                        {formatInvoiceDate(invoice.date)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="min-w-0 max-w-[280px]">
-                          <p className="truncate text-sm font-medium text-foreground">
-                            {invoice.issuerName ?? 'Sin emisor'}
-                          </p>
-                          <p className="truncate text-xs text-muted-foreground">
-                            {invoice.issuerRfc ?? '—'}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-sm">
-                        {INVOICE_TYPE_LABELS[invoice.type] ?? invoice.type}
-                      </TableCell>
-                      <TableCell className="text-right whitespace-nowrap font-medium">
-                        {formatMxn(invoice.total)}
-                      </TableCell>
-                      <TableCell>
-                        <InvoiceMatchStatusBadge status={invoice.matchStatus} />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div
-                          className="flex items-center justify-end gap-1"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 rounded-lg"
-                            onClick={() => openPdf(invoice)}
-                            aria-label="Abrir PDF"
-                          >
-                            <FileText size={15} />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 rounded-lg text-destructive hover:text-destructive"
-                            onClick={() => setPendingDelete(invoice)}
-                            disabled={deleteMutation.isPending}
-                            aria-label="Eliminar factura"
-                          >
-                            {deleteMutation.isPending &&
-                            pendingDelete?._id === invoice._id ? (
-                              <Loader2 size={15} className="animate-spin" />
-                            ) : (
-                              <Trash2 size={15} />
-                            )}
-                          </Button>
-                        </div>
-                      </TableCell>
+            <>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Fecha</TableHead>
+                      <TableHead>Emisor</TableHead>
+                      <TableHead>Tipo</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead>Conciliación</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {invoices.map((invoice) => (
+                      <TableRow
+                        key={invoice._id}
+                        className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                        tabIndex={0}
+                        role="button"
+                        aria-label={`Abrir factura de ${invoice.issuerName ?? 'emisor desconocido'}`}
+                        onClick={() => openDetail(invoice)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            openDetail(invoice);
+                          }
+                        }}
+                      >
+                        <TableCell className="whitespace-nowrap">
+                          {formatInvoiceDate(invoice.date, timeZone)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="min-w-0 max-w-[280px]">
+                            <p className="truncate text-sm font-medium text-foreground">
+                              {invoice.issuerName ?? 'Sin emisor'}
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {invoice.issuerRfc ?? '—'}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-sm">
+                          {INVOICE_TYPE_LABELS[invoice.type] ?? invoice.type}
+                        </TableCell>
+                        <TableCell className="text-right whitespace-nowrap font-medium">
+                          {formatMxn(invoice.total)}
+                        </TableCell>
+                        <TableCell>
+                          <InvoiceMatchStatusBadge status={invoice.matchStatus} />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div
+                            className="flex items-center justify-end gap-1"
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
+                          >
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 rounded-lg"
+                              onClick={() => void openPdf(invoice)}
+                              disabled={pdfBusyId === invoice._id}
+                              aria-label="Abrir PDF"
+                            >
+                              {pdfBusyId === invoice._id ? (
+                                <Loader2 size={15} className="animate-spin" />
+                              ) : (
+                                <FileText size={15} />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 rounded-lg text-destructive hover:text-destructive"
+                              onClick={() => {
+                                if (!companyId) return;
+                                setPendingDelete({ companyId, invoice });
+                              }}
+                              disabled={deleteMutation.isPending}
+                              aria-label="Eliminar factura"
+                            >
+                              {deleteMutation.isPending &&
+                              pendingDelete?.invoice._id === invoice._id ? (
+                                <Loader2 size={15} className="animate-spin" />
+                              ) : (
+                                <Trash2 size={15} />
+                              )}
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-border/50">
+                <p className="text-xs text-muted-foreground" aria-live="polite">
+                  {total === 0
+                    ? 'Sin resultados'
+                    : `Página ${page} de ${pages} · ${total} factura${total === 1 ? '' : 's'}`}
+                </p>
+                <Pagination className="mx-0 w-auto">
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        href="#"
+                        aria-disabled={page <= 1 || invoicesQuery.isFetching}
+                        className={
+                          page <= 1 || invoicesQuery.isFetching
+                            ? 'pointer-events-none opacity-50'
+                            : undefined
+                        }
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (page > 1) setPage((p) => p - 1);
+                        }}
+                      />
+                    </PaginationItem>
+                    <PaginationItem>
+                      <PaginationNext
+                        href="#"
+                        aria-disabled={page >= pages || invoicesQuery.isFetching}
+                        className={
+                          page >= pages || invoicesQuery.isFetching
+                            ? 'pointer-events-none opacity-50'
+                            : undefined
+                        }
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (page < pages) setPage((p) => p + 1);
+                        }}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              </div>
+            </>
           )}
         </div>
       </div>
 
-      {/* Detalle */}
       <Dialog
-        open={Boolean(selectedInvoice)}
+        open={dialogOpen}
         onOpenChange={(open) => {
-          if (!open) setSelectedInvoiceId(null);
+          if (!open) closeDetail();
         }}
       >
         <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="pr-8">
+              {selectedInvoice
+                ? `Factura de ${selectedInvoice.issuerName ?? 'emisor desconocido'}`
+                : 'Detalle de factura'}
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              Detalle fiscal y conciliación de la factura seleccionada
+            </DialogDescription>
+          </DialogHeader>
+
+          {detailQuery.isPending && !selectedInvoice ? (
+            <div className="space-y-3 py-4" aria-busy="true">
+              <span className="sr-only">Cargando detalle</span>
+              <Skeleton className="h-8 w-1/2" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          ) : null}
+
+          {detailError ? (
+            <div
+              className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 space-y-3"
+              role="alert"
+            >
+              <p className="text-sm text-foreground">
+                {getInvoiceUserErrorMessage(
+                  detailQuery.error,
+                  'No se pudo cargar el detalle de la factura.',
+                ) || 'No se pudo cargar el detalle de la factura.'}
+              </p>
+              {listPreview ? (
+                <p className="text-xs text-muted-foreground">
+                  Se muestra un resumen parcial del listado mientras el detalle no carga.
+                </p>
+              ) : null}
+              <Button
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => void detailQuery.refetch()}
+              >
+                Reintentar
+              </Button>
+            </div>
+          ) : null}
+
           {selectedInvoice ? (
-            <>
-              <DialogHeader>
-                <DialogTitle className="pr-8">
-                  Factura de {selectedInvoice.issuerName ?? 'emisor desconocido'}
-                </DialogTitle>
-              </DialogHeader>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <InvoiceMatchStatusBadge status={selectedInvoice.matchStatus} />
+                {detailQuery.isFetching ? (
+                  <Loader2 size={14} className="animate-spin text-muted-foreground" aria-hidden />
+                ) : null}
+              </div>
 
-              <div className="space-y-4">
-                <div className="flex items-center justify-between gap-3">
-                  <InvoiceMatchStatusBadge status={selectedInvoice.matchStatus} />
-                  {detailQuery.isFetching && (
-                    <Loader2 size={14} className="animate-spin text-muted-foreground" />
-                  )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <div className="space-y-0.5 sm:col-span-2">
+                  <p className="text-xs text-muted-foreground">Folio fiscal (UUID)</p>
+                  <p className="font-mono text-xs break-all text-foreground">
+                    {formatInvoiceUuid(selectedInvoice.uuid)}
+                  </p>
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                  <div className="space-y-0.5 sm:col-span-2">
-                    <p className="text-xs text-muted-foreground">Folio fiscal (UUID)</p>
-                    <p className="font-mono text-xs break-all text-foreground">
-                      {selectedInvoice.uuid}
-                    </p>
-                  </div>
-                  <div className="space-y-0.5">
-                    <p className="text-xs text-muted-foreground">Emisor</p>
-                    <p className="font-medium text-foreground">
-                      {selectedInvoice.issuerName ?? '—'}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {selectedInvoice.issuerRfc ?? '—'}
-                    </p>
-                  </div>
-                  <div className="space-y-0.5">
-                    <p className="text-xs text-muted-foreground">Receptor</p>
-                    <p className="font-medium text-foreground">
-                      {selectedInvoice.receiverName ?? '—'}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {selectedInvoice.receiverRfc ?? '—'}
-                    </p>
-                  </div>
-                  <div className="space-y-0.5">
-                    <p className="text-xs text-muted-foreground">Fecha</p>
-                    <p className="text-foreground">{formatInvoiceDate(selectedInvoice.date)}</p>
-                  </div>
-                  <div className="space-y-0.5">
-                    <p className="text-xs text-muted-foreground">Tipo</p>
-                    <p className="text-foreground">
-                      {INVOICE_TYPE_LABELS[selectedInvoice.type] ?? selectedInvoice.type}
-                    </p>
-                  </div>
-                  <div className="space-y-0.5">
-                    <p className="text-xs text-muted-foreground">Subtotal</p>
-                    <p className="text-foreground">
-                      {selectedInvoice.subtotal !== null
-                        ? formatMxn(selectedInvoice.subtotal)
-                        : '—'}
-                    </p>
-                  </div>
-                  <div className="space-y-0.5">
-                    <p className="text-xs text-muted-foreground">IVA</p>
-                    <p className="text-foreground">
-                      {selectedInvoice.tax !== null ? formatMxn(selectedInvoice.tax) : '—'}
-                    </p>
-                  </div>
-                  <div className="space-y-0.5">
-                    <p className="text-xs text-muted-foreground">Total</p>
-                    <p className="text-lg font-bold text-foreground">
-                      {formatMxn(selectedInvoice.total)}
-                    </p>
-                  </div>
-                  <div className="space-y-0.5">
-                    <p className="text-xs text-muted-foreground">Forma / método de pago</p>
-                    <p className="text-foreground">
-                      {formatInvoicePaymentForm(selectedInvoice.paymentForm)}
-                      {selectedInvoice.paymentMethod ? ` · ${selectedInvoice.paymentMethod}` : ''}
-                    </p>
-                  </div>
+                <div className="space-y-0.5">
+                  <p className="text-xs text-muted-foreground">Emisor</p>
+                  <p className="font-medium text-foreground">
+                    {selectedInvoice.issuerName ?? '—'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedInvoice.issuerRfc ?? '—'}
+                  </p>
                 </div>
+                <div className="space-y-0.5">
+                  <p className="text-xs text-muted-foreground">Receptor</p>
+                  <p className="font-medium text-foreground">
+                    {selectedInvoice.receiverName ?? '—'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedInvoice.receiverRfc ?? '—'}
+                  </p>
+                </div>
+                <div className="space-y-0.5">
+                  <p className="text-xs text-muted-foreground">Fecha</p>
+                  <p className="text-foreground">
+                    {formatInvoiceDate(selectedInvoice.date, timeZone)}
+                  </p>
+                </div>
+                <div className="space-y-0.5">
+                  <p className="text-xs text-muted-foreground">Tipo</p>
+                  <p className="text-foreground">
+                    {INVOICE_TYPE_LABELS[selectedInvoice.type] ?? selectedInvoice.type}
+                  </p>
+                </div>
+                <div className="space-y-0.5">
+                  <p className="text-xs text-muted-foreground">Subtotal</p>
+                  <p className="text-foreground">
+                    {selectedInvoice.subtotal !== null
+                      ? formatMxn(selectedInvoice.subtotal)
+                      : '—'}
+                  </p>
+                </div>
+                <div className="space-y-0.5">
+                  <p className="text-xs text-muted-foreground">IVA</p>
+                  <p className="text-foreground">
+                    {selectedInvoice.tax !== null ? formatMxn(selectedInvoice.tax) : '—'}
+                  </p>
+                </div>
+                <div className="space-y-0.5">
+                  <p className="text-xs text-muted-foreground">Total</p>
+                  <p className="text-lg font-bold text-foreground">
+                    {formatMxn(selectedInvoice.total)}
+                  </p>
+                </div>
+                <div className="space-y-0.5">
+                  <p className="text-xs text-muted-foreground">Forma / método de pago</p>
+                  <p className="text-foreground">
+                    {formatInvoicePaymentForm(selectedInvoice.paymentForm)}
+                    {selectedInvoice.paymentMethod ? ` · ${selectedInvoice.paymentMethod}` : ''}
+                  </p>
+                </div>
+              </div>
 
+              {companyId && selection?.companyId === companyId ? (
                 <InvoiceMatchPanel
+                  companyId={selection.companyId}
+                  activeCompanyId={companyId}
                   invoice={selectedInvoice}
                   linkedTicket={invoiceTicketRefObject(selectedInvoice.ticketId)}
                   initialCandidates={selectedInvoice.matchCandidates}
+                  onInvoiceChange={setLocalDetail}
+                  timeZone={timeZone}
                 />
+              ) : null}
 
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <Button
-                    variant="outline"
-                    className="flex-1 h-10 rounded-xl"
-                    onClick={() => openPdf(selectedInvoice)}
-                  >
-                    <FileText size={15} className="mr-2" /> Abrir PDF
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="h-10 rounded-xl text-destructive hover:text-destructive"
-                    onClick={() => setPendingDelete(selectedInvoice)}
-                    disabled={deleteMutation.isPending}
-                  >
-                    <Trash2 size={15} className="mr-2" /> Eliminar
-                  </Button>
-                </div>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button
+                  variant="outline"
+                  className="flex-1 h-10 rounded-xl"
+                  onClick={() => void openPdf(selectedInvoice)}
+                  disabled={pdfBusyId === selectedInvoice._id}
+                >
+                  {pdfBusyId === selectedInvoice._id ? (
+                    <Loader2 size={15} className="mr-2 animate-spin" />
+                  ) : (
+                    <FileText size={15} className="mr-2" />
+                  )}
+                  Abrir PDF
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-10 rounded-xl text-destructive hover:text-destructive"
+                  onClick={() => {
+                    if (!companyId) return;
+                    setPendingDelete({ companyId, invoice: selectedInvoice });
+                  }}
+                  disabled={deleteMutation.isPending}
+                >
+                  <Trash2 size={15} className="mr-2" /> Eliminar
+                </Button>
               </div>
-            </>
+            </div>
           ) : null}
         </DialogContent>
       </Dialog>
 
-      {/* Confirmación de borrado */}
       <AlertDialog
-        open={Boolean(pendingDelete)}
+        open={Boolean(pendingDelete && pendingDelete.companyId === companyId)}
         onOpenChange={(open) => {
-          if (!open) setPendingDelete(null);
+          // No limpiar el payload mientras hay un DELETE en vuelo (claim).
+          if (!open && !deleteClaimRef.current && !deleteMutation.isPending) {
+            setPendingDelete(null);
+          }
         }}
       >
         <AlertDialogContent>
@@ -515,13 +925,24 @@ export default function InvoicesPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
+            <AlertDialogCancel disabled={deleteMutation.isPending || deleteClaimRef.current}>
+              Cancelar
+            </AlertDialogCancel>
+            <Button
+              type="button"
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteMutation.isPending}
               onClick={() => void handleDelete()}
             >
-              Eliminar factura
-            </AlertDialogAction>
+              {deleteMutation.isPending ? (
+                <>
+                  <Loader2 size={14} className="mr-2 animate-spin" />
+                  Eliminando…
+                </>
+              ) : (
+                'Eliminar factura'
+              )}
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

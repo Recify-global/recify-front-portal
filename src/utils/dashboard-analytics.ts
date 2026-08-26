@@ -272,13 +272,27 @@ export function normalizeExpensesByVendor(raw: unknown): ExpensesByVendorView {
       vendor: toStr(field(row, ['vendor', 'name', 'label', '_id'])).trim() || 'Sin proveedor',
       amount: toNum(field(row, ['amount', 'total', 'expense', 'expenses', 'value', 'sum'])),
       count: toNum(field(row, ['count', 'tickets', 'transactions'])),
-      percentage: 0,
+      percentage: (() => {
+        // El contrato backend expresa `percentage` en puntos porcentuales (12.5 = 12.5%).
+        const percentage = field(row, ['percentage']);
+        if (percentage !== undefined) return toNum(percentage) / 100;
+
+        // Compatibilidad con respuestas antiguas que exponían una proporción 0..1.
+        const ratio = field(row, ['share', 'ratio']);
+        if (ratio === undefined) return Number.NaN;
+        const normalizedRatio = toNum(ratio);
+        return normalizedRatio > 1 ? normalizedRatio / 100 : normalizedRatio;
+      })(),
     }))
     .filter((row) => row.amount > 0 || row.count > 0);
 
   rows.sort((a, b) => b.amount - a.amount);
   const total = rows.reduce((sum, row) => sum + row.amount, 0);
-  for (const row of rows) row.percentage = total > 0 ? row.amount / total : 0;
+  for (const row of rows) {
+    if (!Number.isFinite(row.percentage)) {
+      row.percentage = total > 0 ? row.amount / total : 0;
+    }
+  }
 
   return { period: pickPeriod(raw), rows, total };
 }
@@ -331,10 +345,18 @@ export function normalizeDeductibleTaxByCategory(
       deductibleTax: toNum(
         field(row, ['deductibleTax', 'deductible', 'ivaDeducible', 'iva', 'tax', 'vat']),
       ),
-      amount: toNum(field(row, ['amount', 'total', 'expense', 'base', 'subtotal'])),
+      nonDeductibleTax: toNum(
+        field(row, ['nonDeductibleTax', 'nonDeductible', 'ivaNoDeducible']),
+      ),
+      totalTax: toNum(field(row, ['totalTax', 'taxTotal', 'totalIva'])),
       count: toNum(field(row, ['count', 'tickets', 'transactions'])),
     }))
-    .filter((row) => row.deductibleTax > 0 || row.amount > 0 || row.count > 0);
+    .map((row) => ({
+      ...row,
+      totalTax:
+        row.totalTax > 0 ? row.totalTax : row.deductibleTax + row.nonDeductibleTax,
+    }))
+    .filter((row) => row.totalTax > 0 || row.count > 0);
 
   rows.sort((a, b) => b.deductibleTax - a.deductibleTax);
   const totalDeductible = rows.reduce((sum, row) => sum + row.deductibleTax, 0);
@@ -425,7 +447,7 @@ export function normalizeCashFlow(raw: unknown, requestedGroupBy: CashFlowGroupB
     const netRaw = field(row, ['net', 'balance', 'neto', 'netBalance']);
     const periodStartRaw = field(row, ['periodStart', 'start', 'from', 'date']);
     return {
-      label: toStr(field(row, ['label', 'period', 'bucket', 'week', 'month', 'date', '_id'])),
+      label: cashFlowBucketLabel(row, requestedGroupBy),
       periodStart: typeof periodStartRaw === 'string' ? periodStartRaw : null,
       income,
       expense,
@@ -455,4 +477,124 @@ export function normalizeCashFlow(raw: unknown, requestedGroupBy: CashFlowGroupB
     totalExpense,
     netTotal: totalIncome - totalExpense,
   };
+}
+
+const MONTH_LABELS = [
+  'ene',
+  'feb',
+  'mar',
+  'abr',
+  'may',
+  'jun',
+  'jul',
+  'ago',
+  'sept',
+  'oct',
+  'nov',
+  'dic',
+] as const;
+
+function cashFlowBucketLabel(row: unknown, requestedGroupBy: CashFlowGroupBy): string {
+  const explicit = field(row, ['label', 'bucket', 'date', '_id']);
+  if (explicit !== undefined && typeof explicit !== 'object') return toStr(explicit);
+
+  const period = asRecord(field(row, ['period', '_id']));
+  const year = toNum(period.year);
+  const month = toNum(period.month);
+  const week = toNum(period.week);
+
+  if (requestedGroupBy === 'month' && year > 0 && month >= 1 && month <= 12) {
+    return `${MONTH_LABELS[month - 1]} ${year}`;
+  }
+  if (requestedGroupBy === 'week' && week > 0) return `Semana ${week}`;
+
+  const legacyPeriod = field(row, ['period', 'week', 'month']);
+  return typeof legacyPeriod === 'object' ? '' : toStr(legacyPeriod);
+}
+
+export interface HeatmapCalendarCell {
+  date: string;
+  /** Valores contractuales del día; cero cuando la respuesta sparse no incluyó la fecha. */
+  day: HeatmapDay;
+  /** False cuando la celda completa las 13 semanas pero queda fuera del filtro activo. */
+  isInRange: boolean;
+}
+
+const HEATMAP_WEEK_COUNT = 13;
+const DAYS_PER_WEEK = 7;
+
+function parseCivilDate(dateKey: string): Date {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function civilDateKey(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+}
+
+function mondayIndex(date: Date): number {
+  return (date.getUTCDay() + 6) % DAYS_PER_WEEK;
+}
+
+function heatmapQueryRange(
+  query: AnalyticsQuery,
+  now: Date,
+): { dateFrom: string; dateTo: string } {
+  if (query.datePreset) return resolveAnalyticsPresetRange(query.datePreset, now);
+  const today = civilDateInTimeZone(now);
+  return {
+    dateFrom: query.dateFrom?.slice(0, 10) || today,
+    dateTo: query.dateTo?.slice(0, 10) || today,
+  };
+}
+
+/** Construye siempre 13 semanas lunes-domingo y fusiona la respuesta sparse. */
+export function buildHeatmapCalendar(
+  days: HeatmapDay[],
+  query: AnalyticsQuery,
+  now = new Date(),
+): HeatmapCalendarCell[][] {
+  const range = heatmapQueryRange(query, now);
+  const byDate = new Map(days.map((day) => [day.date, day]));
+  const end = parseCivilDate(range.dateTo);
+  end.setUTCDate(end.getUTCDate() + (DAYS_PER_WEEK - 1 - mondayIndex(end)));
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - (HEATMAP_WEEK_COUNT * DAYS_PER_WEEK - 1));
+
+  const weeks: HeatmapCalendarCell[][] = [];
+  const cursor = new Date(start);
+  for (let weekIndex = 0; weekIndex < HEATMAP_WEEK_COUNT; weekIndex += 1) {
+    const week: HeatmapCalendarCell[] = [];
+    for (let dayIndex = 0; dayIndex < DAYS_PER_WEEK; dayIndex += 1) {
+      const date = civilDateKey(cursor);
+      const day = byDate.get(date) ?? { date, income: 0, expense: 0, count: 0 };
+      week.push({
+        date,
+        day,
+        isInRange: date >= range.dateFrom && date <= range.dateTo,
+      });
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+    weeks.push(week);
+  }
+  return weeks;
+}
+
+/** Umbrales por cuartiles para cuatro niveles positivos resistentes a outliers. */
+export function buildHeatmapThresholds(values: number[]): number[] {
+  const sorted = values.filter((value) => value > 0 && Number.isFinite(value)).sort((a, b) => a - b);
+  if (sorted.length === 0) return [];
+  return [0.25, 0.5, 0.75].map((quantile) => {
+    const index = Math.ceil(sorted.length * quantile) - 1;
+    return sorted[Math.max(0, index)];
+  });
+}
+
+export function heatmapLevel(value: number, thresholds: number[]): 0 | 1 | 2 | 3 | 4 {
+  if (value <= 0 || !Number.isFinite(value)) return 0;
+  if (thresholds.length === 0 || value <= thresholds[0]) return 1;
+  if (value <= thresholds[1]) return 2;
+  if (value <= thresholds[2]) return 3;
+  return 4;
 }

@@ -6,7 +6,7 @@ import type {
   InvoiceMatchStatus,
   InvoiceTicketRef,
 } from '@/types/invoice';
-import { HISTORY_TIMEZONE } from '@/utils/financial-kpis';
+import { HISTORY_TIMEZONE, civilDateInTimeZone } from '@/utils/financial-kpis';
 
 export const INVOICE_MATCH_STATUS_LABELS: Record<InvoiceMatchStatus, string> = {
   unmatched: 'Sin ticket',
@@ -54,16 +54,60 @@ export function formatInvoiceMatchReason(reason: string): string {
  * Las fechas llegan como medianoche de la TZ de la empresa en UTC;
  * se toma la parte de fecha resuelta en esa TZ (nunca la local del browser).
  */
-export function formatInvoiceDate(iso: string | null | undefined): string {
+export function formatInvoiceDate(
+  iso: string | null | undefined,
+  timeZone: string = HISTORY_TIMEZONE,
+): string {
   if (!iso) return 'Sin fecha';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return 'Sin fecha';
-  return new Intl.DateTimeFormat('es-MX', {
-    timeZone: HISTORY_TIMEZONE,
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-  }).format(d);
+  const zone = timeZone.trim() || HISTORY_TIMEZONE;
+  try {
+    return new Intl.DateTimeFormat('es-MX', {
+      timeZone: zone,
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+    }).format(d);
+  } catch {
+    return new Intl.DateTimeFormat('es-MX', {
+      timeZone: HISTORY_TIMEZONE,
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+    }).format(d);
+  }
+}
+
+/** Clave civil YYYY-MM-DD en la timezone de la compañía (no `iso.slice(0,10)`). */
+export function invoiceCivilDateKey(
+  iso: string | null | undefined,
+  timeZone: string = HISTORY_TIMEZONE,
+): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  try {
+    return civilDateInTimeZone(d, timeZone.trim() || HISTORY_TIMEZONE);
+  } catch {
+    return civilDateInTimeZone(d, HISTORY_TIMEZONE);
+  }
+}
+
+/** Folio fiscal seguro para UI (nunca `null`/`undefined` literales). */
+export function formatInvoiceUuid(uuid: string | null | undefined): string {
+  if (typeof uuid !== 'string') return 'Sin folio fiscal';
+  const trimmed = uuid.trim();
+  return trimmed.length > 0 ? trimmed : 'Sin folio fiscal';
+}
+
+/**
+ * Haystack de búsqueda para UUID. Vacío si ausente — no inventa coincidencias.
+ * Nunca llamar `.toLowerCase()` sobre `uuid` crudo.
+ */
+export function invoiceUuidSearchText(uuid: string | null | undefined): string {
+  if (typeof uuid !== 'string') return '';
+  return uuid.trim().toLowerCase();
 }
 
 /** Normaliza `ticketId` (string u objeto populado) al id plano. */

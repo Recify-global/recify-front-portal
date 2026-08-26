@@ -43,12 +43,20 @@ import {
   createIndividualUploadFlow,
   type ActiveUploadContext,
 } from '@/utils/individual-upload-flow';
+import { getInvoiceUploadErrorMessage, isInvoiceAbortError } from '@/utils/invoice-errors';
+import { validateInvoicePdfFile } from '@/utils/invoice-file';
 
 type UploadState = 'idle' | 'uploaded' | 'analyzing' | 'done';
 type UploadMode = 'ticket' | 'invoice';
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const PDF_MIME_TYPE = 'application/pdf';
 const MAX_SIZE_BYTES = 10 * 1024 * 1024;
+
+function isPdfUploadCandidate(file: File): boolean {
+  const mime = (file.type || '').toLowerCase();
+  if (mime === PDF_MIME_TYPE) return true;
+  return /\.pdf$/i.test(file.name || '');
+}
 
 const PAYMENT_OPTIONS: { value: BackendPaymentMethod; label: string }[] = [
   { value: 'card', label: 'Tarjeta' },
@@ -78,6 +86,7 @@ export default function UploadPage() {
   const [state, setState] = useState<UploadState>('idle');
   const [uploadMode, setUploadMode] = useState<UploadMode>('ticket');
   const [invoiceResult, setInvoiceResult] = useState<UploadInvoiceResponse | null>(null);
+  const [invoiceOriginCompanyId, setInvoiceOriginCompanyId] = useState<string | null>(null);
   const [ticket, setTicket] = useState<UiTicket | null>(null);
   const [editBaseline, setEditBaseline] = useState<TicketEditDraft | null>(null);
   const [draft, setDraft] = useState<TicketEditDraft | null>(null);
@@ -131,6 +140,7 @@ export default function UploadPage() {
     setState('idle');
     setUploadMode('ticket');
     setInvoiceResult(null);
+    setInvoiceOriginCompanyId(null);
     setTicket(null);
     setEditBaseline(null);
     setDraft(null);
@@ -216,31 +226,14 @@ export default function UploadPage() {
     return true;
   };
 
-  const extractInvoiceError = (err: unknown): string => {
-    if (err instanceof ApiRequestError) {
-      switch (err.status) {
-        case 400:
-          return err.message || 'El archivo no es un PDF válido.';
-        case 409:
-          return 'Esta factura ya existe: hay otra con el mismo folio fiscal.';
-        case 422:
-          return 'No pudimos leer los datos del CFDI. Intenta con un PDF legible de una página.';
-        case 429:
-          return 'Alcanzaste el límite de subidas. Espera unos minutos e intenta de nuevo.';
-        default:
-          return err.message || 'No se pudo procesar la factura.';
-      }
-    }
-    if (err instanceof Error) return err.message || 'No se pudo procesar la factura.';
-    return 'No se pudo procesar la factura.';
-  };
-
   const runInvoiceUpload = async (file: File) => {
     if (invoiceClaimRef.current) return;
     if (!validateSession()) return;
     if (!companyId) return;
-    if (file.size > MAX_SIZE_BYTES) {
-      toast.error('El archivo supera el máximo de 10 MB.');
+
+    const pdfCheck = validateInvoicePdfFile(file);
+    if (!pdfCheck.ok) {
+      toast.error(pdfCheck.message);
       return;
     }
 
@@ -256,6 +249,7 @@ export default function UploadPage() {
     setSelectedFile(file);
     setUploadMode('invoice');
     setInvoiceResult(null);
+    setInvoiceOriginCompanyId(null);
     setTicket(null);
     setEditBaseline(null);
     setDraft(null);
@@ -270,14 +264,19 @@ export default function UploadPage() {
       });
       if (!isCurrentFlow(context, controller.signal)) return;
 
+      setInvoiceOriginCompanyId(context.companyId);
       setInvoiceResult(response);
       setState('done');
       toast.success('Factura procesada correctamente.');
     } catch (err) {
-      if (!isCurrentFlow(context, controller.signal) || isAbortLike(err)) return;
+      if (!isCurrentFlow(context, controller.signal) || isAbortLike(err) || isInvoiceAbortError(err)) {
+        return;
+      }
       setState('idle');
       setSelectedFile(null);
-      toast.error(extractInvoiceError(err));
+      setInvoiceOriginCompanyId(null);
+      const message = getInvoiceUploadErrorMessage(err);
+      if (message) toast.error(message);
     } finally {
       uploadFlowRef.current.releaseController(controller);
       const active = uploadFlowRef.current.getActive();
@@ -333,7 +332,7 @@ export default function UploadPage() {
     if (!validateSession()) return;
 
     // Los PDF son facturas CFDI: van directo al flujo de facturas.
-    if (file && file.type === PDF_MIME_TYPE) {
+    if (file && isPdfUploadCandidate(file)) {
       await runInvoiceUpload(file);
       return;
     }
@@ -630,7 +629,7 @@ export default function UploadPage() {
                     </p>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    PNG, JPG o PDF · Máx. 10 MB
+                    Imágenes PNG/JPG o PDF CFDI · Máx. 10 MB
                   </p>
                 </div>
               )}
@@ -968,9 +967,16 @@ export default function UploadPage() {
               </>
             )}
 
-            {state === 'done' && uploadMode === 'invoice' && invoiceResult && (
+            {state === 'done' &&
+              uploadMode === 'invoice' &&
+              invoiceResult &&
+              invoiceOriginCompanyId && (
               <>
-                <InvoiceUploadResult key={invoiceResult.invoice._id} response={invoiceResult} />
+                <InvoiceUploadResult
+                  key={invoiceResult.invoice._id}
+                  companyId={invoiceOriginCompanyId}
+                  response={invoiceResult}
+                />
                 <Button
                   variant="outline"
                   className="w-full h-11 rounded-xl"

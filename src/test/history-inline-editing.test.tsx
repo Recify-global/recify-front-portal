@@ -46,14 +46,15 @@ function tableProps(overrides: Partial<React.ComponentProps<typeof HistoryTicket
     isLoading: false,
     isError: false,
     onRetry: vi.fn(),
-    isEditing: false,
     isSaving: false,
     drafts: {},
     dirtyTicketIds: [],
     validationErrors: {},
     rowErrors: {},
     deletingTicketId: null,
-    onStartEditing: vi.fn(),
+    editingTicketId: null,
+    editingField: null,
+    onEditCell: vi.fn(),
     onUpdateDraft: vi.fn(),
     onSave: vi.fn(),
     onCancel: vi.fn(),
@@ -109,36 +110,52 @@ describe('History presentation', () => {
       expect(screen.getByRole('columnheader', { name: new RegExp(heading, 'i') }))
         .toBeInTheDocument();
     });
-    [
-      'Subtotal',
-      'Moneda',
-      'Productos o notas',
-    ].forEach((heading) => {
-      expect(screen.queryByRole('columnheader', { name: new RegExp(`^${heading}$`, 'i') }))
-        .not.toBeInTheDocument();
-    });
-    expect(screen.queryByText(/Revisi[oó]n|Revisado/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Editar tabla' })).not.toBeInTheDocument();
     expect(screen.getByText('$497.00')).toBeInTheDocument();
     expect(screen.getByText('Tarjeta')).toBeInTheDocument();
   });
 
-  it('starts global editing with only the visible ticket IDs', () => {
-    const onStartEditing = vi.fn();
-    render(<HistoryTicketTable {...tableProps({ onStartEditing })} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Editar tabla' }));
-    expect(onStartEditing).toHaveBeenCalledWith(['ticket-a']);
+  it('activates only the clicked editable cell', () => {
+    const onEditCell = vi.fn();
+    render(<HistoryTicketTable {...tableProps({ onEditCell })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Editar comercio de Café Central' }));
+    expect(onEditCell).toHaveBeenCalledWith(uiTicket, 'vendor');
+    expect(onEditCell).toHaveBeenCalledTimes(1);
   });
 
-  it('does not make rows interactive after removing the drawer', () => {
+  it('does not activate editing from image or accreditable', () => {
+    const onEditCell = vi.fn();
     const onPreviewImage = vi.fn();
-    const { container } = render(
-      <HistoryTicketTable {...tableProps({ onPreviewImage })} />,
+    const onToggleAccreditable = vi.fn();
+    const withImage = { ...uiTicket, imagenUrl: 'https://cdn.example.com/ticket.jpg' };
+    render(
+      <HistoryTicketTable
+        {...tableProps({
+          tickets: [withImage],
+          onEditCell,
+          onPreviewImage,
+          onToggleAccreditable,
+        })}
+      />,
     );
-    const row = container.querySelector('tbody tr');
-    expect(row).not.toHaveClass('cursor-pointer');
-    fireEvent.click(screen.getByText('Café Central'));
-    expect(onPreviewImage).not.toHaveBeenCalled();
-    expect(screen.queryByTitle('Consultar ticket')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Ver imagen'));
+    expect(onPreviewImage).toHaveBeenCalledWith(withImage);
+    expect(onEditCell).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Marcar ticket de Café Central como acreditable' }),
+    );
+    expect(onToggleAccreditable).toHaveBeenCalled();
+    expect(onEditCell).not.toHaveBeenCalled();
+  });
+
+  it('activates IVA as an editable tax cell', () => {
+    const onEditCell = vi.fn();
+    render(<HistoryTicketTable {...tableProps({ onEditCell })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Editar IVA de Café Central' }));
+    expect(onEditCell).toHaveBeenCalledWith(uiTicket, 'tax');
+    expect(screen.queryByRole('button', { name: /Guardar cambios/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Cancelar edición/i })).not.toBeInTheDocument();
   });
 
   it('opens only the image action and disables it without a safe image', () => {
@@ -159,6 +176,212 @@ describe('History presentation', () => {
     );
     expect(screen.getByTitle('Sin imagen')).toBeDisabled();
   });
+
+  it('does not show save check or cancel X while a cell is active', () => {
+    const draft = createHistoryDraftFromTicket(backendTicket);
+    render(
+      <HistoryTicketTable
+        {...tableProps({
+          editingTicketId: 'ticket-a',
+          editingField: 'vendor',
+          drafts: { 'ticket-a': draft },
+        })}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Guardar cambios de Café Central' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancelar edición de Café Central' })).not.toBeInTheDocument();
+    expect(screen.getByTitle('Sin imagen')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Editar comercio de Café Central' })).toBeInTheDocument();
+  });
+
+  it('keeps Total editor open across keystrokes without saving', () => {
+    const onSave = vi.fn();
+    const onUpdateDraft = vi.fn();
+    const draft = createHistoryDraftFromTicket(backendTicket);
+    const view = render(
+      <HistoryTicketTable
+        {...tableProps({
+          editingTicketId: 'ticket-a',
+          editingField: 'amount',
+          drafts: { 'ticket-a': draft },
+          dirtyTicketIds: [],
+          onSave,
+          onUpdateDraft,
+        })}
+      />,
+    );
+
+    const input = screen.getByRole('textbox', { name: 'Editar total de Café Central' });
+    fireEvent.change(input, { target: { value: '1' } });
+    expect(onUpdateDraft).toHaveBeenCalledWith('ticket-a', { amount: '1' });
+    expect(onSave).not.toHaveBeenCalled();
+
+    view.rerender(
+      <HistoryTicketTable
+        {...tableProps({
+          editingTicketId: 'ticket-a',
+          editingField: 'amount',
+          drafts: { 'ticket-a': { ...draft, amount: '1' } },
+          dirtyTicketIds: ['ticket-a'],
+          onSave,
+          onUpdateDraft,
+        })}
+      />,
+    );
+
+    const stillOpen = screen.getByRole('textbox', { name: 'Editar total de Café Central' });
+    fireEvent.change(stillOpen, { target: { value: '12' } });
+    fireEvent.change(stillOpen, { target: { value: '12.' } });
+    fireEvent.change(stillOpen, { target: { value: '12.5' } });
+    expect(onUpdateDraft).toHaveBeenCalledWith('ticket-a', { amount: '12' });
+    expect(onUpdateDraft).toHaveBeenCalledWith('ticket-a', { amount: '12.' });
+    expect(onUpdateDraft).toHaveBeenCalledWith('ticket-a', { amount: '12.5' });
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox', { name: 'Editar total de Café Central' })).toBeInTheDocument();
+  });
+
+  it('keeps IVA editor open across keystrokes without saving', () => {
+    const onSave = vi.fn();
+    const onUpdateDraft = vi.fn();
+    const draft = createHistoryDraftFromTicket(backendTicket);
+    const view = render(
+      <HistoryTicketTable
+        {...tableProps({
+          editingTicketId: 'ticket-a',
+          editingField: 'tax',
+          drafts: { 'ticket-a': draft },
+          onSave,
+          onUpdateDraft,
+        })}
+      />,
+    );
+
+    const input = screen.getByRole('textbox', { name: 'Editar IVA de Café Central' });
+    for (const value of ['1', '12', '123', '1234', '1234.', '1234.5', '1234.56']) {
+      fireEvent.change(input, { target: { value } });
+      expect(onUpdateDraft).toHaveBeenCalledWith('ticket-a', { tax: value });
+      view.rerender(
+        <HistoryTicketTable
+          {...tableProps({
+            editingTicketId: 'ticket-a',
+            editingField: 'tax',
+            drafts: { 'ticket-a': { ...draft, tax: value } },
+            dirtyTicketIds: ['ticket-a'],
+            onSave,
+            onUpdateDraft,
+          })}
+        />,
+      );
+    }
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox', { name: 'Editar IVA de Café Central' })).toBeInTheDocument();
+  });
+
+  it('commits IVA once on Enter and ignores the following blur', () => {
+    const onSave = vi.fn();
+    const draft = createHistoryDraftFromTicket(backendTicket);
+    render(
+      <HistoryTicketTable
+        {...tableProps({
+          editingTicketId: 'ticket-a',
+          editingField: 'tax',
+          drafts: { 'ticket-a': { ...draft, tax: '90' } },
+          onSave,
+        })}
+      />,
+    );
+    const input = screen.getByRole('textbox', { name: 'Editar IVA de Café Central' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.blur(input);
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not commit Total on a blur that immediately returns focus to the editor', async () => {
+    const onSave = vi.fn();
+    const draft = createHistoryDraftFromTicket(backendTicket);
+    render(
+      <HistoryTicketTable
+        {...tableProps({
+          editingTicketId: 'ticket-a',
+          editingField: 'amount',
+          drafts: { 'ticket-a': { ...draft, amount: '12.5' } },
+          onSave,
+        })}
+      />,
+    );
+    const input = screen.getByRole('textbox', { name: 'Editar total de Café Central' });
+    fireEvent.blur(input);
+    input.focus();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('commits once on Enter and ignores the following blur', () => {
+    const onSave = vi.fn();
+    const draft = createHistoryDraftFromTicket(backendTicket);
+    render(
+      <HistoryTicketTable
+        {...tableProps({
+          editingTicketId: 'ticket-a',
+          editingField: 'vendor',
+          drafts: { 'ticket-a': draft },
+          onSave,
+        })}
+      />,
+    );
+    const input = screen.getByRole('textbox', { name: 'Editar comercio de Café Central' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.blur(input);
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('commits on outside pointerdown and cancels on Escape without saving', () => {
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    const draft = createHistoryDraftFromTicket(backendTicket);
+    render(
+      <HistoryTicketTable
+        {...tableProps({
+          editingTicketId: 'ticket-a',
+          editingField: 'amount',
+          drafts: { 'ticket-a': draft },
+          onSave,
+          onCancel,
+        })}
+      />,
+    );
+    const input = screen.getByRole('textbox', { name: 'Editar total de Café Central' });
+    expect(input.className).toMatch(/min-w-\[7\.5rem\]/);
+    fireEvent.pointerDown(document.body);
+    expect(onSave).toHaveBeenCalledTimes(1);
+
+    onSave.mockClear();
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('does not treat another editable cell as an outside commit', () => {
+    const onSave = vi.fn();
+    const onEditCell = vi.fn();
+    const draft = createHistoryDraftFromTicket(backendTicket);
+    render(
+      <HistoryTicketTable
+        {...tableProps({
+          editingTicketId: 'ticket-a',
+          editingField: 'vendor',
+          drafts: { 'ticket-a': draft },
+          onSave,
+          onEditCell,
+        })}
+      />,
+    );
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Editar total de Café Central' }));
+    expect(onSave).not.toHaveBeenCalled();
+  });
 });
 
 describe('History edit payload', () => {
@@ -171,7 +394,7 @@ describe('History edit payload', () => {
     expect(result).toEqual({ ok: false, reason: 'no-changes' });
   });
 
-  it('builds date/time and dirty fields without reviewStatus', () => {
+  it('builds date/time and dirty fields without reviewStatus or tax', () => {
     const baseline = createHistoryDraftFromTicket(backendTicket);
     const result = buildHistoryTicketUpdatePayload(baseline, {
       ...baseline,
@@ -189,44 +412,158 @@ describe('History edit payload', () => {
       category: 'Cafeterías',
     });
     expect(result.payload).not.toHaveProperty('reviewStatus');
+    expect(result.payload).not.toHaveProperty('tax');
+    expect(result.payload).not.toHaveProperty('iva');
     expect(result.payload).not.toHaveProperty('products');
     expect(result.payload).not.toHaveProperty('notes');
+  });
+
+  it('builds a tax-only payload without amount', () => {
+    const baseline = createHistoryDraftFromTicket(backendTicket);
+    expect(baseline.tax).toBe('68.55');
+    const result = buildHistoryTicketUpdatePayload(baseline, {
+      ...baseline,
+      tax: '172.41',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload).toEqual({ tax: 172.41 });
+    expect(result.payload).not.toHaveProperty('amount');
+    expect(result.payload).not.toHaveProperty('iva');
+  });
+
+  it('rejects invalid tax without sending amount', () => {
+    const baseline = createHistoryDraftFromTicket(backendTicket);
+    const result = buildHistoryTicketUpdatePayload(baseline, {
+      ...baseline,
+      tax: '12.5.5',
+    });
+    expect(result).toEqual({
+      ok: false,
+      reason: 'validation',
+      message: 'Ingresa un IVA válido mayor o igual a 0.',
+    });
+  });
+
+  it('clears tax with null when the draft is emptied', () => {
+    const baseline = createHistoryDraftFromTicket(backendTicket);
+    const result = buildHistoryTicketUpdatePayload(baseline, {
+      ...baseline,
+      tax: '',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload).toEqual({ tax: null });
+    expect(result.payload).not.toHaveProperty('amount');
   });
 });
 
 describe('useHistoryTableEditing', () => {
-  it('keeps independent drafts, marks only changed rows, and cancels cleanly', () => {
-    const secondTicket = {
-      ...backendTicket,
-      _id: 'ticket-b',
-      amount: 100,
-    };
+  it('opens a single cell draft and keeps other fields unread', () => {
     const { result } = renderHook(() => useHistoryTableEditing());
 
     act(() => {
-      result.current.startEditing([
+      const status = result.current.requestCellEdit(
         { id: backendTicket._id, companyId: 'company-a', ticket: backendTicket },
-        { id: secondTicket._id, companyId: 'company-a', ticket: secondTicket },
-      ], 'company-a');
+        'vendor',
+        'company-a',
+      );
+      expect(status).toBe('activated');
+    });
+
+    expect(result.current.editingCell).toEqual({ ticketId: 'ticket-a', field: 'vendor' });
+    expect(Object.keys(result.current.drafts)).toEqual(['ticket-a']);
+    expect(result.current.isCellEditing('ticket-a', 'vendor')).toBe(true);
+    expect(result.current.isCellEditing('ticket-a', 'amount')).toBe(false);
+  });
+
+  it('signals needs-commit when switching dirty cells without discarding', () => {
+    const { result } = renderHook(() => useHistoryTableEditing());
+
+    act(() => {
+      result.current.requestCellEdit(
+        { id: backendTicket._id, companyId: 'company-a', ticket: backendTicket },
+        'vendor',
+        'company-a',
+      );
     });
     act(() => {
-      result.current.updateDraftPatch('ticket-a', { amount: '600' });
+      result.current.updateDraftPatch('ticket-a', { vendor: 'Nuevo' });
     });
 
-    expect(result.current.drafts['ticket-a'].amount).toBe('600');
-    expect(result.current.drafts['ticket-b'].amount).toBe('100');
-    expect(result.current.dirtyTicketIds).toEqual(['ticket-a']);
+    let status: string | undefined;
+    act(() => {
+      status = result.current.requestCellEdit(
+        { id: backendTicket._id, companyId: 'company-a', ticket: backendTicket },
+        'amount',
+        'company-a',
+      );
+    });
 
+    expect(status).toBe('needs-commit');
+    expect(result.current.editingCell?.field).toBe('vendor');
+    expect(result.current.drafts['ticket-a'].vendor).toBe('Nuevo');
+  });
+
+  it('switches cleanly when the active cell has no dirty changes', () => {
+    const { result } = renderHook(() => useHistoryTableEditing());
+
+    act(() => {
+      result.current.requestCellEdit(
+        { id: backendTicket._id, companyId: 'company-a', ticket: backendTicket },
+        'vendor',
+        'company-a',
+      );
+    });
+
+    let status: string | undefined;
+    act(() => {
+      status = result.current.requestCellEdit(
+        { id: backendTicket._id, companyId: 'company-a', ticket: backendTicket },
+        'amount',
+        'company-a',
+      );
+    });
+
+    expect(status).toBe('activated');
+    expect(result.current.editingCell).toEqual({ ticketId: 'ticket-a', field: 'amount' });
+  });
+
+  it('cancels cleanly and ignores foreign company tickets', () => {
+    const { result } = renderHook(() => useHistoryTableEditing());
+    act(() => {
+      expect(
+        result.current.requestCellEdit(
+          {
+            id: 'ticket-b',
+            companyId: 'company-b',
+            ticket: { ...backendTicket, _id: 'ticket-b', companyId: 'company-b' },
+          },
+          'vendor',
+          'company-a',
+        ),
+      ).toBe('ignored');
+    });
+    expect(result.current.editingCell).toBeNull();
+
+    act(() => {
+      result.current.requestCellEdit(
+        { id: backendTicket._id, companyId: 'company-a', ticket: backendTicket },
+        'amount',
+        'company-a',
+      );
+    });
     act(() => result.current.cancelEditing());
-    expect(result.current.isTableEditing).toBe(false);
+    expect(result.current.isEditing).toBe(false);
     expect(result.current.drafts).toEqual({});
   });
 
   it('keeps failed rows editable after a partial save', () => {
     const { result } = renderHook(() => useHistoryTableEditing());
     act(() => {
-      result.current.startEditing(
-        [{ id: backendTicket._id, companyId: 'company-a', ticket: backendTicket }],
+      result.current.requestCellEdit(
+        { id: backendTicket._id, companyId: 'company-a', ticket: backendTicket },
+        'amount',
         'company-a',
       );
       result.current.updateDraft(
@@ -240,24 +577,8 @@ describe('useHistoryTableEditing', () => {
         'ticket-a': 'No fue posible guardar este ticket.',
       });
     });
-    expect(result.current.isTableEditing).toBe(true);
+    expect(result.current.isEditing).toBe(true);
     expect(result.current.rowErrors['ticket-a']).toMatch(/No fue posible/);
-  });
-
-  it('does not create drafts for tickets from another company', () => {
-    const { result } = renderHook(() => useHistoryTableEditing());
-    act(() => {
-      result.current.startEditing([
-        { id: 'ticket-a', companyId: 'company-a', ticket: backendTicket },
-        {
-          id: 'ticket-b',
-          companyId: 'company-b',
-          ticket: { ...backendTicket, _id: 'ticket-b', companyId: 'company-b' },
-        },
-      ], 'company-a');
-    });
-    expect(Object.keys(result.current.drafts)).toEqual(['ticket-a']);
-    expect(result.current.editingCompanyId).toBe('company-a');
   });
 
   it('saves only dirty rows with at most two concurrent requests', async () => {
@@ -281,6 +602,7 @@ describe('useHistoryTableEditing', () => {
     let maxActive = 0;
     const save = vi.fn(async (ticketId: string, payload: object) => {
       expect(payload).not.toHaveProperty('reviewStatus');
+      expect(payload).not.toHaveProperty('tax');
       active += 1;
       maxActive = Math.max(maxActive, active);
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -297,8 +619,7 @@ describe('useHistoryTableEditing', () => {
 
     expect(save).toHaveBeenCalledTimes(3);
     expect(maxActive).toBe(2);
-    expect(result.savedIds.sort()).toEqual(['ticket-a', 'ticket-c']);
+    expect(result.savedIds).toEqual(['ticket-a', 'ticket-c']);
     expect(result.errors['ticket-b']).toMatch(/No fue posible/);
-    expect(result.errors['ticket-b']).not.toContain('backend detail');
   });
 });

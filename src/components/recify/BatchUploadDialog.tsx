@@ -27,7 +27,13 @@ import {
   type BatchItemStatus,
 } from '@/hooks/use-batch-upload';
 import { cn } from '@/lib/utils';
-import { isAuthSessionClosing } from '@/auth/session-cleanup';
+import {
+  captureAuthMutationContext,
+  isAuthMutationContextCurrent,
+  type AuthMutationContext,
+} from '@/auth/session-cleanup';
+import { invalidateInvoiceQueries } from '@/utils/invoice-queries';
+import { invalidateTicketDerivedQueries } from '@/utils/ticket-derived-queries';
 
 interface BatchUploadDialogProps {
   open: boolean;
@@ -75,10 +81,22 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
     }
   }, [open, clear]);
 
-  const invalidateCompanyTickets = useCallback(
-    (targetCompanyId: string | null | undefined) => {
+  const invalidateCompanyData = useCallback(
+    async (
+      targetCompanyId: string | null | undefined,
+      authContext: AuthMutationContext,
+      options: { invoices?: boolean } = {},
+    ) => {
       if (!targetCompanyId) return;
-      void queryClient.invalidateQueries({ queryKey: ['tickets', targetCompanyId] });
+      await invalidateTicketDerivedQueries(queryClient, targetCompanyId, {
+        tickets: true,
+        dailyReport: true,
+        financialKpis: true,
+        dashboardAnalytics: true,
+      });
+      if (options.invoices && isAuthMutationContextCurrent(authContext)) {
+        await invalidateInvoiceQueries(queryClient, targetCompanyId);
+      }
     },
     [queryClient],
   );
@@ -117,11 +135,20 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
       if (counts.analyzed === 0) toast.info('No hay tickets listos para guardar.');
       return;
     }
+    const authContext = captureAuthMutationContext();
     setSavingBusy(true);
     try {
       const result = await saveAll();
-      if (isAuthSessionClosing()) return;
-      result.persistedCompanyIds.forEach((id) => invalidateCompanyTickets(id));
+      if (!isAuthMutationContextCurrent(authContext)) return;
+      const matchedCompanies = new Set(result.matchedInvoiceCompanyIds);
+      await Promise.all(
+        Array.from(new Set(result.persistedCompanyIds)).map((id) =>
+          invalidateCompanyData(id, authContext, {
+            invoices: matchedCompanies.has(id),
+          }),
+        ),
+      );
+      if (!isAuthMutationContextCurrent(authContext)) return;
       if (result.ok > 0) {
         toast.success(`${result.ok} ticket(s) guardado(s).`);
       }
@@ -129,18 +156,22 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
         toast.error(`${result.failed} ticket(s) no se pudieron guardar.`);
       }
     } finally {
-      if (!isAuthSessionClosing()) setSavingBusy(false);
+      if (isAuthMutationContextCurrent(authContext)) setSavingBusy(false);
     }
   };
 
   const handleSaveOne = async (id: string) => {
     if (savingBusy) return;
+    const authContext = captureAuthMutationContext();
     setSavingBusy(true);
     try {
       const result = await saveItem(id);
-      if (isAuthSessionClosing()) return;
-      if (result.persisted) {
-        invalidateCompanyTickets(result.companyId);
+      if (!isAuthMutationContextCurrent(authContext)) return;
+      if (result.persisted && result.effectsAllowed) {
+        await invalidateCompanyData(result.companyId, authContext, {
+          invoices: result.matchedInvoice,
+        });
+        if (!isAuthMutationContextCurrent(authContext)) return;
         toast.success(
           result.uiUpdated
             ? 'Ticket guardado.'
@@ -150,7 +181,7 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
         toast.error('No se pudo guardar el ticket.');
       }
     } finally {
-      if (!isAuthSessionClosing()) setSavingBusy(false);
+      if (isAuthMutationContextCurrent(authContext)) setSavingBusy(false);
     }
   };
 

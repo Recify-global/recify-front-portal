@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, HelpCircle, Link2Off, Loader2, RefreshCw, SearchX, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -17,9 +17,18 @@ import {
   isInvoiceLinked,
 } from '@/utils/invoice-display';
 import { formatMxn } from '@/utils/financial-kpis';
-import { ApiRequestError } from '@/api/http';
+import { getInvoiceUserErrorMessage, isInvoiceAbortError } from '@/utils/invoice-errors';
+import {
+  captureAuthMutationContext,
+  isAuthMutationContextCurrent,
+  type AuthMutationContext,
+} from '@/auth/session-cleanup';
 
 interface InvoiceMatchPanelProps {
+  /** Compañía origen de la factura (capturada al abrir/subir). */
+  companyId: string;
+  /** Compañía activa actual: si diverge, no se aplica feedback UI. */
+  activeCompanyId: string | null;
   invoice: BackendInvoice;
   /** Ticket enlazado ya populado (detalle o respuesta del upload). */
   linkedTicket?: BackendTicket | null;
@@ -27,26 +36,25 @@ interface InvoiceMatchPanelProps {
   initialCandidates?: InvoiceMatchCandidate[];
   /** Notifica a la vista dueña la factura actualizada tras cada acción. */
   onInvoiceChange?: (invoice: BackendInvoice) => void;
-}
-
-function extractError(err: unknown, fallback: string): string {
-  if (err instanceof ApiRequestError || err instanceof Error) return err.message || fallback;
-  return fallback;
+  timeZone?: string;
 }
 
 export function InvoiceMatchPanel({
+  companyId,
+  activeCompanyId,
   invoice,
   linkedTicket,
   initialCandidates,
   onInvoiceChange,
+  timeZone,
 }: InvoiceMatchPanelProps) {
   const [candidates, setCandidates] = useState<InvoiceMatchCandidate[]>(
     initialCandidates ?? invoice.matchCandidates ?? [],
   );
   const [confirmingTicketId, setConfirmingTicketId] = useState<string | null>(null);
-  // Ticket confirmado en esta sesión; pisa al `linkedTicket` original si el
-  // usuario desvinculó y volvió a vincular con otro ticket.
   const [sessionTicket, setSessionTicket] = useState<BackendTicket | null>(null);
+  const activeCompanyIdRef = useRef(activeCompanyId);
+  activeCompanyIdRef.current = activeCompanyId;
 
   const confirmMutation = useConfirmInvoiceMatch();
   const unlinkMutation = useUnlinkInvoiceMatch();
@@ -65,66 +73,109 @@ export function InvoiceMatchPanel({
 
   const ticket = sessionTicket ?? invoiceTicketRefObject(invoice.ticketId) ?? linkedTicket;
 
+  const isStillOriginCompany = () => activeCompanyIdRef.current === companyId;
+
+  const notifyError = (
+    err: unknown,
+    fallback: string,
+    authContext: AuthMutationContext,
+  ) => {
+    if (isInvoiceAbortError(err)) return;
+    if (!isAuthMutationContextCurrent(authContext)) return;
+    if (!isStillOriginCompany()) return;
+    const message = getInvoiceUserErrorMessage(err, fallback);
+    if (message) toast.error(message);
+  };
+
   const handleConfirm = async (ticketId: string) => {
+    if (busy || confirmingTicketId) return;
+    const authContext = captureAuthMutationContext();
     setConfirmingTicketId(ticketId);
     try {
-      const result = await confirmMutation.mutateAsync({ invoiceId: invoice._id, ticketId });
+      const result = await confirmMutation.mutateAsync({
+        companyId,
+        invoiceId: invoice._id,
+        ticketId,
+      });
+      if (!isAuthMutationContextCurrent(authContext) || !isStillOriginCompany()) return;
       toast.success('Factura vinculada al ticket.');
       setSessionTicket(result.ticket ?? null);
       onInvoiceChange?.(result.invoice);
     } catch (err) {
-      toast.error(extractError(err, 'No se pudo vincular la factura.'));
+      notifyError(err, 'No se pudo vincular la factura.', authContext);
     } finally {
-      setConfirmingTicketId(null);
+      if (isAuthMutationContextCurrent(authContext)) {
+        setConfirmingTicketId(null);
+      }
     }
   };
 
   const handleUnlink = async () => {
+    if (busy) return;
+    const authContext = captureAuthMutationContext();
     try {
-      const updated = await unlinkMutation.mutateAsync({ invoiceId: invoice._id });
+      const updated = await unlinkMutation.mutateAsync({
+        companyId,
+        invoiceId: invoice._id,
+      });
+      if (!isAuthMutationContextCurrent(authContext) || !isStillOriginCompany()) return;
       toast.success('Factura desvinculada del ticket.');
       setSessionTicket(null);
       onInvoiceChange?.(updated);
     } catch (err) {
-      toast.error(extractError(err, 'No se pudo desvincular la factura.'));
+      notifyError(err, 'No se pudo desvincular la factura.', authContext);
     }
   };
 
   const handleMarkMissing = async () => {
+    if (busy) return;
+    const authContext = captureAuthMutationContext();
     try {
       const updated = await statusMutation.mutateAsync({
+        companyId,
         invoiceId: invoice._id,
         matchStatus: 'missing_ticket',
       });
+      if (!isAuthMutationContextCurrent(authContext) || !isStillOriginCompany()) return;
       toast.success('Factura marcada como ticket faltante.');
       onInvoiceChange?.(updated);
     } catch (err) {
-      toast.error(extractError(err, 'No se pudo marcar la factura.'));
+      notifyError(err, 'No se pudo marcar la factura.', authContext);
     }
   };
 
   const handleRevertMissing = async () => {
+    if (busy) return;
+    const authContext = captureAuthMutationContext();
     try {
       const updated = await statusMutation.mutateAsync({
+        companyId,
         invoiceId: invoice._id,
         matchStatus: 'unmatched',
       });
+      if (!isAuthMutationContextCurrent(authContext) || !isStillOriginCompany()) return;
       toast.success('La factura volvió a "Sin ticket".');
       onInvoiceChange?.(updated);
     } catch (err) {
-      toast.error(extractError(err, 'No se pudo actualizar la factura.'));
+      notifyError(err, 'No se pudo actualizar la factura.', authContext);
     }
   };
 
   const handleRecalculate = async () => {
+    if (busy) return;
+    const authContext = captureAuthMutationContext();
     try {
-      const response = await recalcMutation.mutateAsync({ invoiceId: invoice._id });
+      const response = await recalcMutation.mutateAsync({
+        companyId,
+        invoiceId: invoice._id,
+      });
+      if (!isAuthMutationContextCurrent(authContext) || !isStillOriginCompany()) return;
       setCandidates(response.candidates);
       if (response.candidates.length === 0) {
         toast.info('No encontramos tickets que coincidan con esta factura.');
       }
     } catch (err) {
-      toast.error(extractError(err, 'No se pudieron buscar tickets.'));
+      notifyError(err, 'No se pudieron buscar tickets.', authContext);
     }
   };
 
@@ -145,7 +196,7 @@ export function InvoiceMatchPanel({
               {ticket.vendor ?? ticket.rawData?.vendor ?? 'Ticket sin comercio'}
             </p>
             <p className="text-xs text-muted-foreground">
-              {formatInvoiceDate(ticket.date)} · {formatMxn(ticket.amount)}
+              {formatInvoiceDate(ticket.date, timeZone)} · {formatMxn(ticket.amount)}
             </p>
           </div>
         ) : (
@@ -157,7 +208,7 @@ export function InvoiceMatchPanel({
           size="sm"
           variant="outline"
           className="h-8 rounded-lg"
-          onClick={handleUnlink}
+          onClick={() => void handleUnlink()}
           disabled={busy}
         >
           {unlinkMutation.isPending ? (
@@ -190,7 +241,7 @@ export function InvoiceMatchPanel({
           size="sm"
           variant="ghost"
           className="h-8 rounded-lg text-muted-foreground"
-          onClick={handleMarkMissing}
+          onClick={() => void handleMarkMissing()}
           disabled={busy}
         >
           Ninguno corresponde — marcar ticket faltante
@@ -212,7 +263,7 @@ export function InvoiceMatchPanel({
           size="sm"
           variant="outline"
           className="h-8 rounded-lg"
-          onClick={handleRevertMissing}
+          onClick={() => void handleRevertMissing()}
           disabled={busy}
         >
           {statusMutation.isPending ? (
@@ -220,13 +271,12 @@ export function InvoiceMatchPanel({
           ) : (
             <Undo2 size={14} className="mr-1.5" />
           )}
-          Volver a "Sin ticket"
+          Volver a &quot;Sin ticket&quot;
         </Button>
       </div>
     );
   }
 
-  // unmatched
   return (
     <div className="rounded-xl border border-border/50 bg-secondary/30 p-4 space-y-3">
       <div className="flex items-center gap-2 text-warning">
@@ -248,7 +298,7 @@ export function InvoiceMatchPanel({
           size="sm"
           variant="outline"
           className="h-8 rounded-lg"
-          onClick={handleRecalculate}
+          onClick={() => void handleRecalculate()}
           disabled={busy}
         >
           {recalcMutation.isPending ? (
@@ -262,7 +312,7 @@ export function InvoiceMatchPanel({
           size="sm"
           variant="outline"
           className="h-8 rounded-lg"
-          onClick={handleMarkMissing}
+          onClick={() => void handleMarkMissing()}
           disabled={busy}
         >
           {statusMutation.isPending ? (

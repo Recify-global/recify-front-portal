@@ -27,6 +27,22 @@ vi.mock('@/hooks/use-auth', () => ({
   }),
 }));
 
+vi.mock('@/hooks/use-companies', () => ({
+  useCompanies: () => ({
+    activeCompany: {
+      _id: mocks.companyId ?? 'company-a',
+      name: 'Acme',
+      timezone: 'America/Mexico_City',
+    },
+    companies: [],
+    allowedIds: [mocks.companyId ?? 'company-a'],
+    hasNames: true,
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  }),
+}));
+
 vi.mock('@/hooks/use-upload-ticket', () => ({
   usePreprocessTicket: () => ({
     mutateAsync: mocks.preprocess,

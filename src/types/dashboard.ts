@@ -65,6 +65,8 @@ export interface DashboardDailyReportTicketUpdate {
   category?: string;
   paymentMethod?: BackendPaymentMethod;
   vendor?: string;
+  /** IVA persistido; independiente de `amount`. `null` limpia el valor. */
+  tax?: number | null;
   status?: BackendTicketStatus;
   reviewStatus?: BackendTicketReviewStatus;
   isAccreditable?: boolean;

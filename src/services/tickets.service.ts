@@ -20,9 +20,10 @@ function toQueryString(params: Record<string, unknown>): string {
 export async function listTickets(
   companyId: string,
   params: TicketsListParams = {},
+  opts: { signal?: AbortSignal } = {},
 ): Promise<Paginated<BackendTicket>> {
   const url = `${endpoints.tickets.list(companyId)}${toQueryString(params as Record<string, unknown>)}`;
-  return apiRequest<Paginated<BackendTicket>>(url);
+  return apiRequest<Paginated<BackendTicket>>(url, { signal: opts.signal });
 }
 
 export async function updateTicket(

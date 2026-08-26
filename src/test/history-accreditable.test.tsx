@@ -22,10 +22,10 @@ const backendTicket: BackendTicket = {
 };
 
 function mergeAccreditable(
-  ticket: { isAccreditable?: boolean },
-  dailyTicket: { isAccreditable?: boolean } | undefined,
+  ticket: { isAccreditable?: boolean | null },
+  dailyTicket: { isAccreditable?: boolean | null } | undefined,
 ): boolean {
-  return ticket.isAccreditable ?? dailyTicket?.isAccreditable ?? false;
+  return ticket.isAccreditable ?? dailyTicket?.isAccreditable ?? true;
 }
 
 function tableProps(
@@ -39,14 +39,15 @@ function tableProps(
     isLoading: false,
     isError: false,
     onRetry: vi.fn(),
-    isEditing: false,
     isSaving: false,
     drafts: {},
     dirtyTicketIds: [],
     validationErrors: {},
     rowErrors: {},
     deletingTicketId: null,
-    onStartEditing: vi.fn(),
+    editingTicketId: null,
+    editingField: null,
+    onEditCell: vi.fn(),
     onUpdateDraft: vi.fn(),
     onSave: vi.fn(),
     onCancel: vi.fn(),
@@ -66,15 +67,30 @@ describe('History accreditable column', () => {
     expect(screen.getByRole('button', { name: 'Qué significa Acreditable' })).toBeInTheDocument();
   });
 
-  it('normalizes missing isAccreditable to No with a controlled switch', () => {
+  it('normalizes missing isAccreditable to Sí with a controlled switch', () => {
     const ticket = mapBackendTicket({ ...backendTicket, isAccreditable: undefined });
-    expect(ticket.isAccreditable).toBe(false);
+    expect(ticket.isAccreditable).toBe(true);
     render(<HistoryTicketTable {...tableProps(ticket)} />);
     const toggle = screen.getByRole('switch', {
       name: 'Marcar ticket de Café Central como acreditable',
     });
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
     expect(toggle).not.toHaveAttribute('data-state', 'indeterminate');
+    expect(screen.getByText('Sí')).toBeInTheDocument();
+  });
+
+  it('normalizes null isAccreditable to Sí', () => {
+    const ticket = mapBackendTicket({ ...backendTicket, isAccreditable: null });
+    expect(ticket.isAccreditable).toBe(true);
+  });
+
+  it('preserves explicit false as No', () => {
+    const ticket = mapBackendTicket({ ...backendTicket, isAccreditable: false });
+    expect(ticket.isAccreditable).toBe(false);
+    render(<HistoryTicketTable {...tableProps(ticket)} />);
+    expect(
+      screen.getByRole('switch', { name: 'Marcar ticket de Café Central como acreditable' }),
+    ).toHaveAttribute('aria-checked', 'false');
     expect(screen.getByText('No')).toBeInTheDocument();
   });
 
@@ -152,6 +168,22 @@ describe('History accreditable column', () => {
     expect(screen.getByText('Sí')).toBeInTheDocument();
   });
 
+  it('requests false when changing Sí to No', () => {
+    const onToggleAccreditable = vi.fn();
+    const ticket = mapBackendTicket({ ...backendTicket, isAccreditable: true });
+    render(
+      <HistoryTicketTable
+        {...tableProps(ticket, { onToggleAccreditable })}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Marcar ticket de Café Central como acreditable' }),
+    );
+    expect(onToggleAccreditable).toHaveBeenCalledOnce();
+    expect(onToggleAccreditable).toHaveBeenCalledWith(ticket, false);
+  });
+
   it('tracks pending independently for two tickets', () => {
     const ticketA = mapBackendTicket(backendTicket);
     const ticketB = mapBackendTicket({
@@ -187,9 +219,10 @@ describe('History accreditable merge priority', () => {
     expect(mergeAccreditable({ isAccreditable: false }, { isAccreditable: undefined })).toBe(false);
   });
 
-  it('falls back to daily then false', () => {
+  it('falls back to daily then true', () => {
     expect(mergeAccreditable({ isAccreditable: undefined }, { isAccreditable: true })).toBe(true);
-    expect(mergeAccreditable({}, undefined)).toBe(false);
+    expect(mergeAccreditable({ isAccreditable: null }, { isAccreditable: false })).toBe(false);
+    expect(mergeAccreditable({}, undefined)).toBe(true);
   });
 });
 

@@ -19,6 +19,12 @@ interface CameraCaptureDialogProps {
   quality?: number;
 }
 
+function isConstraintError(err: unknown): boolean {
+  const name =
+    err instanceof DOMException || err instanceof Error ? err.name : '';
+  return name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError';
+}
+
 /**
  * Captura una foto con getUserMedia y la entrega como File.
  * Solicita la cámara solo al abrir y detiene todos los tracks al cerrar/desmontar.
@@ -34,9 +40,11 @@ export function CameraCaptureDialog({
   const streamRef = useRef<MediaStream | null>(null);
   const openRef = useRef(open);
   openRef.current = open;
+  const confirmingRef = useRef(false);
   const [snapshot, setSnapshot] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const stopStream = useCallback(() => {
     if (streamRef.current) {
@@ -63,6 +71,8 @@ export function CameraCaptureDialog({
   const startStream = useCallback(async () => {
     setError(null);
     setSnapshot(null);
+    confirmingRef.current = false;
+    setConfirming(false);
     setStarting(true);
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -78,7 +88,13 @@ export function CameraCaptureDialog({
           video: { facingMode: { ideal: 'environment' } },
           audio: false,
         });
-      } catch {
+      } catch (firstError) {
+        // Solo reintentar cuando el dispositivo no satisface facingMode.
+        // NotAllowedError / NotReadableError / SecurityError / etc. no deben
+        // disparar una segunda solicitud de permiso.
+        if (!isConstraintError(firstError)) {
+          throw firstError;
+        }
         stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: false,
@@ -111,11 +127,15 @@ export function CameraCaptureDialog({
 
   useEffect(() => {
     if (open) {
+      confirmingRef.current = false;
+      setConfirming(false);
       void startStream();
     } else {
       stopStream();
       setSnapshot(null);
       setError(null);
+      confirmingRef.current = false;
+      setConfirming(false);
     }
     return () => {
       stopStream();
@@ -128,7 +148,9 @@ export function CameraCaptureDialog({
       attachStreamToVideo();
     }
   }, [open, snapshot, error, attachStreamToVideo, starting]);
+
   const handleCapture = () => {
+    if (confirmingRef.current) return;
     const video = videoRef.current;
     if (!video || !video.videoWidth) {
       setError('La cámara aún no está lista.');
@@ -149,20 +171,34 @@ export function CameraCaptureDialog({
   };
 
   const handleRetake = () => {
+    if (confirmingRef.current) return;
     setSnapshot(null);
     void startStream();
   };
 
   const handleConfirm = async () => {
-    if (!snapshot) return;
+    if (!snapshot || confirmingRef.current) return;
+
+    confirmingRef.current = true;
+    setConfirming(true);
+
     try {
       const res = await fetch(snapshot);
       const blob = await res.blob();
+      // Cancelar / cerrar durante la conversión: no entregar el archivo.
+      if (!openRef.current) {
+        confirmingRef.current = false;
+        setConfirming(false);
+        return;
+      }
       const ext = mimeType.split('/')[1] ?? 'jpg';
       const file = new File([blob], `camera-${Date.now()}.${ext}`, { type: mimeType });
       onCapture(file);
       onOpenChange(false);
+      // Lock se libera cuando open pasa a false (efecto de cierre).
     } catch {
+      confirmingRef.current = false;
+      setConfirming(false);
       setError('No se pudo preparar la imagen capturada.');
     }
   };
@@ -189,7 +225,7 @@ export function CameraCaptureDialog({
         </DialogHeader>
 
         <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-muted">
-          {starting && (
+          {(starting || confirming) && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
@@ -216,20 +252,23 @@ export function CameraCaptureDialog({
             Cancelar
           </Button>
           {!error && !snapshot && (
-            <Button onClick={handleCapture} disabled={starting}>
+            <Button onClick={handleCapture} disabled={starting || confirming}>
               <Camera size={16} className="mr-2" /> Capturar
             </Button>
           )}
-          {snapshot && (
+          {snapshot && !error && (
             <>
-              <Button variant="outline" onClick={handleRetake}>
+              <Button variant="outline" onClick={handleRetake} disabled={confirming}>
                 <RefreshCcw size={16} className="mr-2" /> Repetir
               </Button>
-              <Button onClick={() => void handleConfirm()}>Usar foto</Button>
+              <Button onClick={() => void handleConfirm()} disabled={confirming}>
+                {confirming ? <Loader2 size={16} className="mr-2 animate-spin" /> : null}
+                Usar foto
+              </Button>
             </>
           )}
           {error && (
-            <Button onClick={() => void startStream()}>
+            <Button onClick={() => void startStream()} disabled={confirming}>
               <RefreshCcw size={16} className="mr-2" /> Reintentar
             </Button>
           )}

@@ -60,9 +60,10 @@ export async function getDashboardByPaymentMethod(
 export async function getDashboardDailyReport(
   companyId: string,
   params: DashboardDailyReportFilters = {},
+  opts: { signal?: AbortSignal } = {},
 ): Promise<DashboardDailyReportResponse> {
   const url = `${endpoints.dashboard.dailyReport(companyId)}${toQueryString(params as Record<string, unknown>)}`;
-  return apiRequest<DashboardDailyReportResponse>(url);
+  return apiRequest<DashboardDailyReportResponse>(url, { signal: opts.signal });
 }
 
 export async function updateDashboardDailyReportTicket(

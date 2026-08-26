@@ -3,6 +3,8 @@ import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionCacheBoundary } from '@/auth/SessionCacheBoundary';
 import {
+  captureAuthMutationContext,
+  isAuthMutationContextCurrent,
   markAuthSessionActive,
   registerSessionCacheCleanup,
   terminateAuthSession,
@@ -12,6 +14,7 @@ import {
   getStoredCompanyId,
   getStoredToken,
   getStoredUser,
+  setActiveCompany,
   setAuthSession,
 } from '@/auth/storage';
 import { apiRequest, ApiRequestError } from '@/api/http';
@@ -68,6 +71,60 @@ describe('session cache cleanup', () => {
     expect(clearClient).toHaveBeenCalledOnce();
     expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
     expect(queryClient.getMutationCache().getAll()).toHaveLength(0);
+  });
+
+  it('invalidates mutation contexts as soon as logout cleanup starts', async () => {
+    seedSession();
+    let releaseCleanup!: () => void;
+    const unregister = registerSessionCacheCleanup(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseCleanup = resolve;
+        }),
+    );
+    const mutationContext = captureAuthMutationContext();
+
+    const cleanupTask = terminateAuthSession();
+
+    expect(isAuthMutationContextCurrent(mutationContext)).toBe(false);
+    releaseCleanup();
+    await cleanupTask;
+    expect(isAuthMutationContextCurrent(mutationContext)).toBe(false);
+    unregister();
+  });
+
+  it('aborts an in-flight ticket request when switching companies', async () => {
+    setAuthSession({
+      token: 'token-a',
+      user: { ...userA, companies: ['company-a', 'company-b'] },
+    });
+    markAuthSessionActive();
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    let requestSignal: AbortSignal | undefined;
+    const request = queryClient.fetchQuery({
+      queryKey: ['tickets', 'company-a', { page: 1 }],
+      queryFn: ({ signal }) => {
+        requestSignal = signal;
+        return new Promise<string>((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
+        });
+      },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionCacheBoundary />
+      </QueryClientProvider>,
+    );
+    setActiveCompany('company-b');
+
+    await waitFor(() => expect(requestSignal?.aborted).toBe(true));
+    await request.catch(() => undefined);
+    expect(queryClient.getQueryData(['tickets', 'company-b'])).toBeUndefined();
   });
 
   it('clears auth storage even when query cancellation fails', async () => {

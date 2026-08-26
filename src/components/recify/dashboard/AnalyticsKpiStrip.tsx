@@ -1,8 +1,16 @@
-import { ArrowDownCircle, ArrowUpCircle, FileCheck2, Scale } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowDownCircle,
+  ArrowUpCircle,
+  FileCheck2,
+  RefreshCw,
+  Scale,
+} from 'lucide-react';
 import { MetricCard } from '@/components/recify/MetricCard';
 import { SkeletonCard } from '@/components/recify/SkeletonCard';
+import { Button } from '@/components/ui/button';
 import { useCashFlow, useInvoicedVsUninvoiced } from '@/hooks/use-dashboard-analytics';
-import { formatMxn, formatPercent, ticketsLabel } from '@/utils/dashboard-analytics';
+import { formatMxn, formatPercent } from '@/utils/dashboard-analytics';
 import type { AnalyticsQuery, CashFlowGroupBy } from '@/types/dashboard-analytics';
 
 interface AnalyticsKpiStripProps {
@@ -24,6 +32,30 @@ export function AnalyticsKpiStrip({ query, enabled, groupBy, invalid }: Analytic
         {Array.from({ length: 4 }).map((_, index) => (
           <SkeletonCard key={index} lines={1} />
         ))}
+      </div>
+    );
+  }
+
+  if (enabled && (cashFlow.isError || invoiced.isError)) {
+    return (
+      <div
+        className="flex min-h-32 flex-col items-center justify-center gap-3 rounded-2xl border border-destructive/20 bg-card p-5 text-center shadow-elegant"
+        role="alert"
+      >
+        <AlertCircle size={22} className="text-destructive" />
+        <p className="text-sm text-muted-foreground">
+          No fue posible cargar los indicadores del período.
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="rounded-xl"
+          onClick={() => void Promise.all([cashFlow.refetch(), invoiced.refetch()])}
+        >
+          <RefreshCw size={14} className="mr-2" />
+          Reintentar
+        </Button>
       </div>
     );
   }
@@ -53,11 +85,7 @@ export function AnalyticsKpiStrip({ query, enabled, groupBy, invalid }: Analytic
       <MetricCard
         title="Cobertura de facturación"
         value={invoicedView ? formatPercent(invoicedView.invoicedRatio) : fallback}
-        subtitle={
-          invoicedView && invoicedView.totalCount > 0
-            ? `${ticketsLabel(invoicedView.invoiced.count)} facturados`
-            : undefined
-        }
+        subtitle={invoicedView ? 'Monto facturado sobre el total de egresos' : undefined}
         icon={<FileCheck2 size={20} />}
       />
     </div>

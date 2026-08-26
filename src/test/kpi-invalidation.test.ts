@@ -16,6 +16,7 @@ const baseline: HistoryTicketEditDraft = {
   time: '12:00',
   vendor: 'Café',
   amount: '100',
+  tax: '16',
   category: 'Restaurantes',
   paymentMethod: 'card',
   status: 'processed',
@@ -33,6 +34,11 @@ describe('ticketUpdateAffectsFinancialKpis', () => {
 
   it('does not treat vendor-only updates as KPI-relevant', () => {
     expect(ticketUpdateAffectsFinancialKpis({ vendor: 'OXXO' })).toBe(false);
+  });
+
+  it('does not treat tax-only updates as KPI-relevant', () => {
+    expect(ticketUpdateAffectsFinancialKpis({ tax: 20 })).toBe(false);
+    expect(ticketUpdateAffectsFinancialKpis({ tax: null })).toBe(false);
   });
 
   it('does not treat isAccreditable-only updates as KPI-relevant', () => {

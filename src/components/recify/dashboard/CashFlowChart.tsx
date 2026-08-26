@@ -46,6 +46,7 @@ export function CashFlowChart({ query, enabled, groupBy, onGroupByChange }: Cash
               key={option}
               type="button"
               onClick={() => onGroupByChange(option)}
+              aria-pressed={groupBy === option}
               className={cn(
                 'rounded-lg px-3 py-1 text-xs font-medium transition-colors',
                 groupBy === option

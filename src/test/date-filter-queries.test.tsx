@@ -76,13 +76,13 @@ describe('shared History and KPI date filters', () => {
         limit: 100,
         dateFrom,
         dateTo,
-      });
+      }, { signal: expect.any(AbortSignal) });
       expect(mocks.getDashboardDailyReport).toHaveBeenCalledWith('company-a', {
         page: 1,
         limit: 100,
         dateFrom,
         dateTo,
-      });
+      }, { signal: expect.any(AbortSignal) });
       expect(mocks.getDashboardKpis).toHaveBeenCalledWith('company-a', {
         dateFrom: '2026-07-06T00:00:00.000-06:00',
         dateTo: '2026-07-12T23:59:59.999-06:00',
@@ -106,5 +106,43 @@ describe('shared History and KPI date filters', () => {
       '2026-07-06T00:00:00.000-06:00',
       '2026-07-12T23:59:59.999-06:00',
     ]);
+  });
+
+  it('omits dates for Todo el historial and uses a distinct KPI key', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    renderHook(
+      () => {
+        useTickets({ page: 1, limit: 100 });
+        useDashboardDailyReport({ page: 1, limit: 100 });
+        useFinancialKpis({ dateFrom: '', dateTo: '', category: 'all' });
+      },
+      { wrapper: createWrapper(queryClient) },
+    );
+
+    await waitFor(() => {
+      expect(mocks.listTickets).toHaveBeenCalledWith('company-a', {
+        page: 1,
+        limit: 100,
+      }, { signal: expect.any(AbortSignal) });
+      expect(mocks.getDashboardDailyReport).toHaveBeenCalledWith('company-a', {
+        page: 1,
+        limit: 100,
+      }, { signal: expect.any(AbortSignal) });
+      expect(mocks.getDashboardKpis).toHaveBeenCalledWith('company-a', {});
+    });
+
+    const keys = queryClient.getQueryCache().getAll().map((query) => query.queryKey);
+    expect(keys).toContainEqual(['tickets', 'company-a', { page: 1, limit: 100 }]);
+    expect(keys).toContainEqual([
+      'dashboard-daily-report',
+      'company-a',
+      { page: 1, limit: 100 },
+    ]);
+    expect(keys).toContainEqual(['dashboard-kpis', 'company-a', null, null]);
+    expect(mocks.listTickets.mock.calls[0][1]).not.toHaveProperty('dateFrom');
+    expect(mocks.listTickets.mock.calls[0][1]).not.toHaveProperty('dateTo');
   });
 });

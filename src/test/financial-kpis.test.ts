@@ -136,14 +136,45 @@ describe('paymentMethodKpiFromTop', () => {
 describe('date presets and range', () => {
   it('exposes every required preset without the ambiguous month label', () => {
     expect(DATE_PRESETS.map((preset) => preset.label)).toEqual([
+      'Hoy',
+      'Ayer',
       '7 días',
       '15 días',
       '30 días',
       '60 días',
       '90 días',
       'Último año',
+      'Todo el historial',
     ]);
     expect(DATE_PRESETS.map((preset) => preset.label)).not.toContain('Último mes');
+  });
+
+  it('builds today as a single civil day', () => {
+    const now = new Date('2026-07-12T18:00:00.000-06:00');
+    const range = dateRangeForPreset('today', now);
+    expect(range.dateFrom).toBe('2026-07-12');
+    expect(range.dateTo).toBe('2026-07-12');
+  });
+
+  it('builds yesterday as a single civil day', () => {
+    const now = new Date('2026-07-12T18:00:00.000-06:00');
+    const range = dateRangeForPreset('yesterday', now);
+    expect(range.dateFrom).toBe('2026-07-11');
+    expect(range.dateTo).toBe('2026-07-11');
+  });
+
+  it('builds yesterday across a month boundary', () => {
+    const now = new Date('2026-07-01T10:00:00.000-06:00');
+    const range = dateRangeForPreset('yesterday', now);
+    expect(range.dateFrom).toBe('2026-06-30');
+    expect(range.dateTo).toBe('2026-06-30');
+  });
+
+  it('builds yesterday across a year boundary', () => {
+    const now = new Date('2026-01-01T10:00:00.000-06:00');
+    const range = dateRangeForPreset('yesterday', now);
+    expect(range.dateFrom).toBe('2025-12-31');
+    expect(range.dateTo).toBe('2025-12-31');
   });
 
   it.each([
@@ -197,6 +228,21 @@ describe('date presets and range', () => {
     const year = last12MonthsRange(now);
     expect(detectActivePreset(year.dateFrom, year.dateTo, now)).toBe('last_12_months');
     expect(detectActivePreset('2026-01-01', '2026-01-31', now)).toBe(null);
+  });
+
+  it('builds Todo el historial without artificial dates', () => {
+    const range = dateRangeForPreset('all');
+    expect(range).toEqual({ dateFrom: '', dateTo: '' });
+    expect(detectActivePreset('', '')).toBe('all');
+    expect(detectActivePreset('  ', '  ')).toBe('all');
+  });
+
+  it('keeps Último año as a ranged preset distinct from all', () => {
+    const now = new Date('2026-07-12T18:00:00.000-06:00');
+    const year = dateRangeForPreset('last_12_months', now);
+    expect(year.dateFrom).not.toBe('');
+    expect(year.dateTo).not.toBe('');
+    expect(detectActivePreset(year.dateFrom, year.dateTo, now)).toBe('last_12_months');
   });
 
   it('resolves civil date in America/Chihuahua', () => {

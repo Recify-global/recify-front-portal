@@ -9,16 +9,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -34,10 +24,16 @@ import {
 import {
   saveHistoryTicketDrafts,
   useHistoryTableEditing,
+  type HistoryEditableField,
 } from '@/hooks/use-history-table-editing';
 import { useFinancialKpis } from '@/hooks/use-financial-kpis';
 import { useAuth } from '@/hooks/use-auth';
-import { isAuthSessionClosing } from '@/auth/session-cleanup';
+import { useCompanies } from '@/hooks/use-companies';
+import {
+  captureAuthMutationContext,
+  isAuthMutationContextCurrent,
+  isAuthSessionClosing,
+} from '@/auth/session-cleanup';
 import { deleteTicket } from '@/services/tickets.service';
 import {
   DATE_PRESETS,
@@ -46,13 +42,25 @@ import {
   formatMxn,
   isValidDateRange,
   last12MonthsRange,
+  resolveCompanyTimeZone,
   type DatePresetId,
 } from '@/utils/financial-kpis';
+import {
+  formatCivilDateDisplay,
+  parseCivilDateInput,
+} from '@/utils/civil-date-input';
+import {
+  ticketCompanyQueryKey,
+  ticketListQueryKey,
+} from '@/utils/ticket-queries';
 import {
   invalidateTicketDerivedQueries,
   ticketUpdateAffectsFinancialKpis,
 } from '@/utils/ticket-derived-queries';
-import { buildHistoryTicketUpdatePayload } from '@/utils/ticket-edit';
+import {
+  buildHistoryTicketUpdatePayload,
+  type HistoryTicketEditDraft,
+} from '@/utils/ticket-edit';
 import { selectTicketImageUrl, mergeTicketImageUrl } from '@/utils/ticket-image';
 import { cn } from '@/lib/utils';
 import type { UiTicket } from '@/types/ticket';
@@ -67,14 +75,6 @@ interface SelectedTicketImage {
 const formatMXN = (n: number) => formatMxn(n);
 
 const statusOptions = ['analizado', 'pendiente', 'error'] as const;
-
-/** Normaliza `UiTicket.fecha` (YYYY-MM-DD) para comparar por día completo. */
-function ticketDateKey(fecha: string | undefined | null): string | null {
-  if (!fecha || typeof fecha !== 'string') return null;
-  const trimmed = fecha.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
-  return trimmed;
-}
 
 function clearHistoryFilters(
   setGlobalFilter: (v: string) => void,
@@ -99,8 +99,13 @@ export default function HistoryPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFromFilter, setDateFromFilter] = useState(initialDateRange.dateFrom);
   const [dateToFilter, setDateToFilter] = useState(initialDateRange.dateTo);
+  const [dateFromDisplay, setDateFromDisplay] = useState(() =>
+    formatCivilDateDisplay(initialDateRange.dateFrom),
+  );
+  const [dateToDisplay, setDateToDisplay] = useState(() =>
+    formatCivilDateDisplay(initialDateRange.dateTo),
+  );
   const [isSavingTable, setIsSavingTable] = useState(false);
-  const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
   const [savingAccreditableIds, setSavingAccreditableIds] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -108,6 +113,8 @@ export default function HistoryPage() {
   const [isImageRetrying, setIsImageRetrying] = useState(false);
 
   const { companyId } = useAuth();
+  const { activeCompany } = useCompanies();
+  const companyTimeZone = resolveCompanyTimeZone(activeCompany?.timezone);
   const queryClient = useQueryClient();
   const companyIdRef = useRef(companyId);
   const previousCompanyIdRef = useRef(companyId);
@@ -115,7 +122,7 @@ export default function HistoryPage() {
   const savingAccreditableRef = useRef<Set<string>>(new Set());
   const imageRetryCountRef = useRef(0);
   const tableEditing = useHistoryTableEditing();
-  const { cancelEditing, isTableEditing } = tableEditing;
+  const { cancelEditing, isEditing } = tableEditing;
   companyIdRef.current = companyId;
 
   // P0 multitenant: una imagen nunca sobrevive al cambio de compañía.
@@ -125,7 +132,7 @@ export default function HistoryPage() {
       imageRetryCountRef.current = 0;
       savingAccreditableRef.current = new Set();
       setSavingAccreditableIds(new Set());
-      if (previousCompanyIdRef.current && isTableEditing) {
+      if (previousCompanyIdRef.current && isEditing) {
         cancelEditing();
         if (companyId && !isAuthSessionClosing()) {
           toast.info('La edición se canceló al cambiar de compañía.');
@@ -133,29 +140,66 @@ export default function HistoryPage() {
       }
     }
     previousCompanyIdRef.current = companyId;
-  }, [cancelEditing, companyId, isTableEditing]);
+  }, [cancelEditing, companyId, isEditing]);
 
-  const ticketsQuery = useTickets({
+  // Mantener displays alineados cuando el wire cambia por presets / limpiar.
+  useEffect(() => {
+    setDateFromDisplay(dateFromFilter ? formatCivilDateDisplay(dateFromFilter) : '');
+    setDateToDisplay(dateToFilter ? formatCivilDateDisplay(dateToFilter) : '');
+  }, [dateFromFilter, dateToFilter]);
+
+  const dateRangeInvalid = !isValidDateRange(dateFromFilter, dateToFilter);
+
+  const effectiveDateRange = useMemo(
+    () => ({
+      dateFrom: dateFromFilter.trim(),
+      dateTo: dateToFilter.trim(),
+    }),
+    [dateFromFilter, dateToFilter],
+  );
+
+  const lastValidListParamsRef = useRef<{
+    page: number;
+    limit: number;
+    dateFrom?: string;
+    dateTo?: string;
+  }>({
     page: 1,
     limit: 100,
-    dateFrom: dateFromFilter,
-    dateTo: dateToFilter,
+    dateFrom: initialDateRange.dateFrom,
+    dateTo: initialDateRange.dateTo,
   });
-  const dailyReportQuery = useDashboardDailyReport({
-    page: 1,
-    limit: 100,
-    dateFrom: dateFromFilter,
-    dateTo: dateToFilter,
-  });
+
+  const ticketsListParams = useMemo(() => {
+    if (dateRangeInvalid) return lastValidListParamsRef.current;
+    const params: { page: number; limit: number; dateFrom?: string; dateTo?: string } = {
+      page: 1,
+      limit: 100,
+    };
+    if (effectiveDateRange.dateFrom) params.dateFrom = effectiveDateRange.dateFrom;
+    if (effectiveDateRange.dateTo) params.dateTo = effectiveDateRange.dateTo;
+    lastValidListParamsRef.current = params;
+    return params;
+  }, [effectiveDateRange, dateRangeInvalid]);
+
+  const ticketsQuery = useTickets(ticketsListParams);
+  const dailyReportQuery = useDashboardDailyReport(ticketsListParams);
   const updateMutation = useUpdateDashboardTicket();
 
   const financialKpis = useFinancialKpis({
-    dateFrom: dateFromFilter,
-    dateTo: dateToFilter,
+    dateFrom: ticketsListParams.dateFrom ?? '',
+    dateTo: ticketsListParams.dateTo ?? '',
     category: categoryFilter,
   });
-  const activePreset = detectActivePreset(dateFromFilter, dateToFilter, periodReference);
-  const dateRangeInvalid = !isValidDateRange(dateFromFilter, dateToFilter);
+  const activePreset = detectActivePreset(
+    effectiveDateRange.dateFrom,
+    effectiveDateRange.dateTo,
+    periodReference,
+    companyTimeZone,
+  );
+  const hasDateFilter = Boolean(
+    effectiveDateRange.dateFrom || effectiveDateRange.dateTo,
+  );
 
   const backendTickets = useMemo(() => {
     const dailyById = new Map(
@@ -172,11 +216,14 @@ export default function HistoryPage() {
         imageUrl: mergeTicketImageUrl(ticket, dailyTicket),
         tax: dailyTicket.tax ?? ticket.tax,
         subtotal: dailyTicket.subtotal ?? ticket.subtotal,
-        isAccreditable: ticket.isAccreditable ?? dailyTicket.isAccreditable ?? false,
+        isAccreditable: ticket.isAccreditable ?? dailyTicket.isAccreditable ?? true,
       };
     });
   }, [dailyReportQuery.data?.tickets, ticketsQuery.data?.data]);
-  const tickets = useMemo(() => mapBackendTickets(backendTickets), [backendTickets]);
+  const tickets = useMemo(
+    () => mapBackendTickets(backendTickets, companyTimeZone),
+    [backendTickets, companyTimeZone],
+  );
   const backendTicketById = useMemo(
     () => new Map(backendTickets.map((ticket) => [ticket._id, ticket])),
     [backendTickets],
@@ -191,21 +238,9 @@ export default function HistoryPage() {
     let data = [...tickets];
     if (categoryFilter !== 'all') data = data.filter((t) => t.categoria === categoryFilter);
     if (statusFilter !== 'all') data = data.filter((t) => t.estatus === statusFilter);
-
-    const fromKey = dateFromFilter.trim() || null;
-    const toKey = dateToFilter.trim() || null;
-    if (fromKey || toKey) {
-      data = data.filter((t) => {
-        const key = ticketDateKey(t.fecha);
-        if (!key) return false;
-        if (fromKey && key < fromKey) return false;
-        if (toKey && key > toKey) return false;
-        return true;
-      });
-    }
-
+    // Las fechas las aplica el servidor (dateFrom/dateTo). No refiltrar en cliente.
     return data;
-  }, [tickets, categoryFilter, statusFilter, dateFromFilter, dateToFilter]);
+  }, [tickets, categoryFilter, statusFilter]);
 
   const handleClearFilters = () => {
     clearHistoryFilters(
@@ -218,9 +253,44 @@ export default function HistoryPage() {
   };
 
   const applyDatePreset = (preset: DatePresetId) => {
-    const range = dateRangeForPreset(preset, periodReference);
+    if (activePreset === preset) return;
+    const range = dateRangeForPreset(preset, periodReference, companyTimeZone);
     setDateFromFilter(range.dateFrom);
     setDateToFilter(range.dateTo);
+  };
+
+  const commitDateFromDisplay = () => {
+    const raw = dateFromDisplay.trim();
+    if (!raw) {
+      setDateFromFilter('');
+      setDateFromDisplay('');
+      return;
+    }
+    const wire = parseCivilDateInput(raw);
+    if (!wire) {
+      setDateFromDisplay(dateFromFilter ? formatCivilDateDisplay(dateFromFilter) : '');
+      toast.error('Ingresa una fecha válida con el formato DD/MM/AAAA.');
+      return;
+    }
+    setDateFromFilter(wire);
+    setDateFromDisplay(formatCivilDateDisplay(wire));
+  };
+
+  const commitDateToDisplay = () => {
+    const raw = dateToDisplay.trim();
+    if (!raw) {
+      setDateToFilter('');
+      setDateToDisplay('');
+      return;
+    }
+    const wire = parseCivilDateInput(raw);
+    if (!wire) {
+      setDateToDisplay(dateToFilter ? formatCivilDateDisplay(dateToFilter) : '');
+      toast.error('Ingresa una fecha válida con el formato DD/MM/AAAA.');
+      return;
+    }
+    setDateToFilter(wire);
+    setDateToDisplay(formatCivilDateDisplay(wire));
   };
 
   const deleteMutation = useMutation({
@@ -235,22 +305,24 @@ export default function HistoryPage() {
     },
     onMutate: ({ ticketId }) => {
       setDeletingTicketId(ticketId);
+      return captureAuthMutationContext();
     },
-    onSuccess: async (_data, { originCompanyId }) => {
-      if (isAuthSessionClosing()) return;
+    onSuccess: async (_data, { originCompanyId }, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
       toast.success('Ticket eliminado.');
       await invalidateTicketDerivedQueries(queryClient, originCompanyId, {
         tickets: true,
         dailyReport: true,
         financialKpis: true,
+        dashboardAnalytics: true,
       });
     },
-    onError: () => {
-      if (isAuthSessionClosing()) return;
+    onError: (_error, _variables, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
       toast.error('No fue posible eliminar el ticket.');
     },
-    onSettled: () => {
-      if (isAuthSessionClosing()) return;
+    onSettled: (_data, _error, _variables, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
       setDeletingTicketId(null);
     },
   });
@@ -280,31 +352,19 @@ export default function HistoryPage() {
     setIsImageRetrying(true);
     try {
       await Promise.all([
-        queryClient.refetchQueries({ queryKey: ['tickets', companyId] }),
+        queryClient.refetchQueries({ queryKey: ticketCompanyQueryKey(companyId) }),
         queryClient.refetchQueries({ queryKey: ['dashboard-daily-report', companyId] }),
       ]);
 
-      const ticketsData = queryClient.getQueryData([
-        'tickets',
-        companyId,
-        {
-          page: 1,
-          limit: 100,
-          dateFrom: dateFromFilter,
-          dateTo: dateToFilter,
-        },
-      ]) as {
+      const ticketsData = queryClient.getQueryData(
+        ticketListQueryKey(companyId, ticketsListParams),
+      ) as {
         data?: Array<{ _id: string; companyId: string; imageUrl?: string | null }>;
       } | undefined;
       const dailyData = queryClient.getQueryData([
         'dashboard-daily-report',
         companyId,
-        {
-          page: 1,
-          limit: 100,
-          dateFrom: dateFromFilter,
-          dateTo: dateToFilter,
-        },
+        ticketsListParams,
       ]) as {
         tickets?: Array<{ _id: string; companyId: string; imageUrl?: string | null }>;
       } | undefined;
@@ -334,64 +394,63 @@ export default function HistoryPage() {
     }
   };
 
-  const handleStartTableEditing = (ticketIds: string[]) => {
-    if (!companyId) return;
-    const editableRows = ticketIds.flatMap((ticketId) => {
-      const ticket = backendTicketById.get(ticketId);
-      return ticket && ticket.companyId === companyId
-        ? [{ id: ticketId, companyId, ticket }]
-        : [];
-    });
-    if (editableRows.length === 0) {
-      toast.error('No fue posible preparar los tickets visibles para edición.');
-      return;
-    }
-    tableEditing.startEditing(editableRows, companyId);
-  };
+  type CommitActiveCellResult =
+    | 'idle'
+    | 'unchanged'
+    | 'committed'
+    | 'invalid'
+    | 'error'
+    | 'busy';
 
-  const handleCancelTableEditing = () => {
-    if (tableEditing.dirtyTicketIds.length > 0) {
-      setShowCancelConfirmation(true);
-      return;
-    }
-    tableEditing.cancelEditing();
-  };
+  const commitActiveCell = async (
+    draftOverride?: Partial<HistoryTicketEditDraft>,
+  ): Promise<CommitActiveCellResult> => {
+    if (savingClaimRef.current || isSavingTable) return 'busy';
+    if (!tableEditing.editingCell) return 'idle';
 
-  const handleSaveTableEditing = async () => {
-    if (savingClaimRef.current || isSavingTable) return;
     const originCompanyId = tableEditing.editingCompanyId;
-    if (!originCompanyId || originCompanyId !== companyId) {
+    const activeTicketId = tableEditing.editingCell.ticketId;
+    if (!originCompanyId || originCompanyId !== companyId || !activeTicketId) {
       tableEditing.cancelEditing();
       toast.error('La edición ya no pertenece a la compañía activa.');
-      return;
+      return 'error';
     }
-    if (Object.keys(tableEditing.validationErrors).length > 0) {
-      toast.error('Revisa los datos marcados antes de guardar.');
-      return;
+
+    const baseline = tableEditing.baselines[activeTicketId];
+    const currentDraft = tableEditing.drafts[activeTicketId];
+    if (!baseline || !currentDraft) {
+      tableEditing.cancelEditing();
+      return 'idle';
     }
-    if (tableEditing.dirtyTicketIds.length === 0) {
-      toast.info('No hay cambios para guardar.');
-      return;
+
+    const draft = draftOverride
+      ? { ...currentDraft, ...draftOverride }
+      : currentDraft;
+
+    if (draftOverride) {
+      tableEditing.updateDraftPatch(activeTicketId, draftOverride);
+    }
+
+    const built = buildHistoryTicketUpdatePayload(baseline, draft);
+    if (built.ok === false) {
+      if (built.reason === 'validation') {
+        toast.error(built.message);
+        return 'invalid';
+      }
+      tableEditing.cancelEditing();
+      return 'unchanged';
     }
 
     savingClaimRef.current = true;
     setIsSavingTable(true);
-    const dirtyIds = [...tableEditing.dirtyTicketIds];
-    const kpiRelevantIds = new Set(
-      dirtyIds.filter((ticketId) => {
-        const baseline = tableEditing.baselines[ticketId];
-        const draft = tableEditing.drafts[ticketId];
-        if (!baseline || !draft) return false;
-        const built = buildHistoryTicketUpdatePayload(baseline, draft);
-        return built.ok && 'payload' in built && ticketUpdateAffectsFinancialKpis(built.payload);
-      }),
-    );
+    const authMutationContext = captureAuthMutationContext();
+    const shouldRefreshKpis = ticketUpdateAffectsFinancialKpis(built.payload);
 
     try {
       const { savedIds, errors } = await saveHistoryTicketDrafts({
-        ticketIds: dirtyIds,
-        baselines: tableEditing.baselines,
-        drafts: tableEditing.drafts,
+        ticketIds: [activeTicketId],
+        baselines: { [activeTicketId]: baseline },
+        drafts: { [activeTicketId]: draft },
         save: async (ticketId, payload) => {
           await updateMutation.mutateAsync({
             companyId: originCompanyId,
@@ -401,43 +460,79 @@ export default function HistoryPage() {
         },
       });
 
-      if (isAuthSessionClosing()) return;
+      if (!isAuthMutationContextCurrent(authMutationContext)) return 'error';
 
-      const shouldRefreshKpis = savedIds.some((id) => kpiRelevantIds.has(id));
-      if (shouldRefreshKpis) {
+      if (shouldRefreshKpis && savedIds.includes(activeTicketId)) {
         await invalidateTicketDerivedQueries(queryClient, originCompanyId, {
           financialKpis: true,
         });
       }
 
-      if (companyIdRef.current !== originCompanyId) return;
+      if (companyIdRef.current !== originCompanyId) return 'error';
 
       tableEditing.applySaveResults(savedIds, errors);
       if (Object.keys(errors).length > 0) {
-        toast.error('Algunos tickets no pudieron guardarse. Revisa las filas marcadas.');
-      } else {
-        toast.success('Cambios guardados.');
+        toast.error('No fue posible guardar este ticket. Revisa los datos e inténtalo nuevamente.');
+        return 'error';
       }
+      toast.success('Cambio guardado.');
+      return 'committed';
     } finally {
       savingClaimRef.current = false;
-      setIsSavingTable(false);
+      if (isAuthMutationContextCurrent(authMutationContext)) {
+        setIsSavingTable(false);
+      }
     }
   };
 
+  const handleEditCell = async (ticket: UiTicket, field: HistoryEditableField) => {
+    if (!companyId || isSavingTable || savingClaimRef.current) return;
+    const backendTicket = backendTicketById.get(ticket.id);
+    if (!backendTicket || backendTicket.companyId !== companyId) {
+      toast.error('No fue posible preparar este ticket para edición.');
+      return;
+    }
+
+    const row = { id: ticket.id, companyId, ticket: backendTicket };
+    let result = tableEditing.requestCellEdit(row, field, companyId, companyTimeZone);
+
+    if (result === 'needs-commit') {
+      const commitResult = await commitActiveCell();
+      if (
+        commitResult === 'invalid' ||
+        commitResult === 'error' ||
+        commitResult === 'busy'
+      ) {
+        return;
+      }
+      result = tableEditing.requestCellEdit(row, field, companyId, companyTimeZone);
+    }
+
+    if (result === 'ignored') {
+      toast.error('No fue posible preparar este ticket para edición.');
+    }
+  };
+
+  const handleCancelTableEditing = () => {
+    if (isSavingTable || savingClaimRef.current) return;
+    tableEditing.cancelEditing();
+  };
+
   const handleDelete = (ticketId: string) => {
-    if (!companyId || deleteMutation.isPending || tableEditing.isTableEditing) return;
+    if (!companyId || deleteMutation.isPending || tableEditing.isEditing) return;
     deleteMutation.mutate({ ticketId, originCompanyId: companyId });
   };
 
   const handleToggleAccreditable = async (ticket: UiTicket, nextValue: boolean) => {
     const originCompanyId = companyId;
     const ticketId = ticket.id;
-    if (!originCompanyId || tableEditing.isTableEditing) return;
+    if (!originCompanyId || tableEditing.isEditing) return;
     if (savingAccreditableRef.current.has(ticketId)) return;
     if (ticket.isAccreditable === nextValue) return;
 
     savingAccreditableRef.current.add(ticketId);
     setSavingAccreditableIds(new Set(savingAccreditableRef.current));
+    const authMutationContext = captureAuthMutationContext();
 
     try {
       const updated = await updateMutation.mutateAsync({
@@ -445,7 +540,10 @@ export default function HistoryPage() {
         ticketId,
         payload: { isAccreditable: nextValue },
       });
-      if (isAuthSessionClosing() || companyIdRef.current !== originCompanyId) return;
+      if (
+        !isAuthMutationContextCurrent(authMutationContext) ||
+        companyIdRef.current !== originCompanyId
+      ) return;
 
       const confirmed =
         typeof updated?.isAccreditable === 'boolean' ? updated.isAccreditable : nextValue;
@@ -453,7 +551,7 @@ export default function HistoryPage() {
       // Patch both History sources immediately so a slower daily-report refetch
       // cannot flash the previous value (tickets list is the merge priority).
       queryClient.setQueriesData(
-        { queryKey: ['tickets', originCompanyId] },
+        { queryKey: ticketCompanyQueryKey(originCompanyId) },
         (current: unknown) => {
           if (!current || typeof current !== 'object') return current;
           const page = current as { data?: Array<{ _id: string; isAccreditable?: boolean }> };
@@ -483,11 +581,14 @@ export default function HistoryPage() {
         },
       );
     } catch {
-      if (isAuthSessionClosing() || companyIdRef.current !== originCompanyId) return;
+      if (
+        !isAuthMutationContextCurrent(authMutationContext) ||
+        companyIdRef.current !== originCompanyId
+      ) return;
       toast.error('No se pudo actualizar si el ticket es acreditable.');
     } finally {
       savingAccreditableRef.current.delete(ticketId);
-      if (!isAuthSessionClosing()) {
+      if (isAuthMutationContextCurrent(authMutationContext)) {
         setSavingAccreditableIds(new Set(savingAccreditableRef.current));
       }
     }
@@ -515,9 +616,7 @@ export default function HistoryPage() {
       case 'error':
         return 'No fue posible cargar esta métrica.';
       case 'empty':
-        return financialKpis.periodLabel === 'Selecciona un período'
-          ? 'Usa un preset o selecciona un rango de fechas.'
-          : 'Período sin movimientos.';
+        return 'Período sin movimientos.';
       default:
         return 'No fue posible cargar esta métrica.';
     }
@@ -616,13 +715,13 @@ export default function HistoryPage() {
                   placeholder="Buscar por comercio, categoría..."
                   value={globalFilter}
                   onChange={(e) => setGlobalFilter(e.target.value)}
-                  disabled={tableEditing.isTableEditing}
+                  disabled={tableEditing.isEditing}
                   className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground"
                 />
                 {globalFilter && (
                   <button
                     type="button"
-                    disabled={tableEditing.isTableEditing}
+                    disabled={tableEditing.isEditing}
                     onClick={() => setGlobalFilter('')}
                   >
                     <X size={14} className="text-muted-foreground" />
@@ -632,7 +731,7 @@ export default function HistoryPage() {
               <Select
                 value={categoryFilter}
                 onValueChange={setCategoryFilter}
-                disabled={tableEditing.isTableEditing}
+                    disabled={tableEditing.isEditing}
               >
                 <SelectTrigger className="w-full sm:w-44 h-10 rounded-xl border-border">
                   <SelectValue placeholder="Categoría" />
@@ -647,7 +746,7 @@ export default function HistoryPage() {
               <Select
                 value={statusFilter}
                 onValueChange={setStatusFilter}
-                disabled={tableEditing.isTableEditing}
+                    disabled={tableEditing.isEditing}
               >
                 <SelectTrigger className="w-full sm:w-36 h-10 rounded-xl border-border">
                   <SelectValue placeholder="Estatus" />
@@ -669,7 +768,7 @@ export default function HistoryPage() {
                     variant={activePreset === preset.id ? 'default' : 'outline'}
                     className="rounded-xl min-h-9"
                     onClick={() => applyDatePreset(preset.id)}
-                    disabled={tableEditing.isTableEditing}
+                    disabled={tableEditing.isEditing}
                     aria-pressed={activePreset === preset.id}
                   >
                     {preset.label}
@@ -683,10 +782,19 @@ export default function HistoryPage() {
                   </Label>
                   <Input
                     id="history-date-from"
-                    type="date"
-                    value={dateFromFilter}
-                    onChange={(e) => setDateFromFilter(e.target.value)}
-                    disabled={tableEditing.isTableEditing}
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="DD/MM/AAAA"
+                    value={dateFromDisplay}
+                    onChange={(e) => setDateFromDisplay(e.target.value)}
+                    onBlur={commitDateFromDisplay}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        commitDateFromDisplay();
+                      }
+                    }}
+                    disabled={tableEditing.isEditing}
                     className={cn(
                       'h-10 rounded-xl border-border',
                       dateRangeInvalid && 'border-destructive',
@@ -699,40 +807,34 @@ export default function HistoryPage() {
                   </Label>
                   <Input
                     id="history-date-to"
-                    type="date"
-                    value={dateToFilter}
-                    onChange={(e) => setDateToFilter(e.target.value)}
-                    disabled={tableEditing.isTableEditing}
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="DD/MM/AAAA"
+                    value={dateToDisplay}
+                    onChange={(e) => setDateToDisplay(e.target.value)}
+                    onBlur={commitDateToDisplay}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        commitDateToDisplay();
+                      }
+                    }}
+                    disabled={tableEditing.isEditing}
                     className={cn(
                       'h-10 rounded-xl border-border',
                       dateRangeInvalid && 'border-destructive',
                     )}
                   />
                 </div>
-                {(globalFilter ||
-                  categoryFilter !== 'all' ||
-                  statusFilter !== 'all' ||
-                  dateFromFilter ||
-                  dateToFilter) && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-xl h-10"
-                    onClick={handleClearFilters}
-                    disabled={tableEditing.isTableEditing}
-                  >
-                    Limpiar filtros
-                  </Button>
-                )}
               </div>
               {dateRangeInvalid && (
                 <p className="text-xs text-destructive">
                   La fecha inicial no puede ser posterior a la fecha final.
                 </p>
               )}
-              {tableEditing.isTableEditing && (
+              {tableEditing.isEditing && (
                 <p className="text-xs text-muted-foreground">
-                  Guarda o cancela los cambios para modificar los filtros.
+                  Termina la celda activa (Enter o clic fuera) o cancela con Escape para modificar los filtros.
                 </p>
               )}
             </div>
@@ -749,17 +851,20 @@ export default function HistoryPage() {
           onRetry={() => {
             void ticketsQuery.refetch();
           }}
-          isEditing={tableEditing.isTableEditing}
           isSaving={isSavingTable}
           drafts={tableEditing.drafts}
           dirtyTicketIds={tableEditing.dirtyTicketIds}
           validationErrors={tableEditing.validationErrors}
           rowErrors={tableEditing.rowErrors}
           deletingTicketId={deletingTicketId}
-          onStartEditing={handleStartTableEditing}
+          editingTicketId={tableEditing.editingCell?.ticketId ?? null}
+          editingField={tableEditing.editingCell?.field ?? null}
+          onEditCell={(ticket, field) => {
+            void handleEditCell(ticket, field);
+          }}
           onUpdateDraft={tableEditing.updateDraftPatch}
-          onSave={() => {
-            void handleSaveTableEditing();
+          onSave={(patch) => {
+            void commitActiveCell(patch);
           }}
           onCancel={handleCancelTableEditing}
           onPreviewImage={handlePreviewImage}
@@ -769,6 +874,21 @@ export default function HistoryPage() {
             void handleToggleAccreditable(ticket, nextValue);
           }}
           savingAccreditableIds={savingAccreditableIds}
+          emptyTitle={
+            !hasDateFilter &&
+            categoryFilter === 'all' &&
+            statusFilter === 'all' &&
+            !globalFilter.trim()
+              ? 'No hay tickets registrados'
+              : 'No hay tickets para estos filtros.'
+          }
+          emptyDescription={
+            !hasDateFilter
+              ? categoryFilter !== 'all' || statusFilter !== 'all' || globalFilter.trim()
+                ? 'Prueba otra categoría, estatus o búsqueda.'
+                : 'Aún no hay tickets cargados para esta compañía.'
+              : 'Prueba otro rango de fechas, categoría o búsqueda.'
+          }
         />
       </div>
 
@@ -795,28 +915,6 @@ export default function HistoryPage() {
         }}
         isRetrying={isImageRetrying}
       />
-
-      <AlertDialog open={showCancelConfirmation} onOpenChange={setShowCancelConfirmation}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Descartar cambios sin guardar?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Los valores editados volverán a su estado original. No se enviará ninguna solicitud.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Continuar editando</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                tableEditing.cancelEditing();
-                setShowCancelConfirmation(false);
-              }}
-            >
-              Descartar cambios
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </AppLayout>
   );
 }
