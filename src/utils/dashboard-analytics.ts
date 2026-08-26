@@ -157,28 +157,37 @@ export function ticketsLabel(count: number): string {
   return `${formatInt(count)} ticket${count === 1 ? '' : 's'}`;
 }
 
-/** Colores semánticos alineados a los tokens del tema (rosa corporativo). */
+/**
+ * Colores semánticos alineados a los tokens del tema (coral corporativo).
+ * Comparten un registro tonal común (saturación ~50-72%, luminosidad ~46-64%)
+ * para que las gráficas se sientan parte de la misma plataforma. El "expense"
+ * ancla en el mismo matiz (354) que --primary.
+ */
 export const ANALYTICS_COLORS = {
-  income: 'hsl(152 58% 44%)',
-  expense: 'hsl(354 78% 63%)',
-  invoiced: 'hsl(205 78% 52%)',
-  uninvoiced: 'hsl(38 90% 55%)',
-  deductible: 'hsl(262 62% 63%)',
-  net: 'hsl(330 8% 38%)',
-  neutral: 'hsl(330 16% 82%)',
-  grid: 'hsl(330 30% 90%)',
+  income: 'hsl(152 48% 46%)',
+  expense: 'hsl(354 72% 64%)',
+  invoiced: 'hsl(210 64% 57%)',
+  uninvoiced: 'hsl(38 80% 59%)',
+  deductible: 'hsl(268 48% 65%)',
+  net: 'hsl(330 10% 40%)',
+  neutral: 'hsl(330 22% 85%)',
+  grid: 'hsl(330 28% 91%)',
 } as const;
 
-/** Paleta categórica armónica para series con muchas llaves. */
+/**
+ * Paleta categórica armónica para series con muchas llaves.
+ * Sesgada hacia matices cálidos/rosados de la marca y con saturación/luminosidad
+ * uniformes, de modo que ninguna serie "grite" frente a las demás.
+ */
 export const CATEGORICAL_PALETTE = [
-  'hsl(354 78% 66%)',
-  'hsl(205 74% 56%)',
-  'hsl(262 60% 66%)',
-  'hsl(152 52% 47%)',
-  'hsl(38 86% 58%)',
-  'hsl(291 52% 64%)',
-  'hsl(178 44% 44%)',
-  'hsl(18 80% 63%)',
+  'hsl(354 70% 66%)', // coral marca
+  'hsl(336 54% 63%)', // rosa
+  'hsl(18 70% 64%)',  // coral cálido
+  'hsl(268 46% 66%)', // violeta suave
+  'hsl(210 60% 60%)', // azul apagado
+  'hsl(152 44% 50%)', // verde salvia
+  'hsl(38 74% 61%)',  // ámbar cálido
+  'hsl(310 42% 65%)', // orquídea
 ];
 
 export function categoricalColor(index: number): string {
