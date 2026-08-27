@@ -61,6 +61,7 @@ import type {
   InvoicesListParams,
 } from '@/types/invoice';
 import {
+  INVOICE_MATCH_STATUS_LABELS,
   INVOICE_TYPE_LABELS,
   formatInvoiceDate,
   formatInvoicePaymentForm,
@@ -68,6 +69,8 @@ import {
   invoiceTicketRefObject,
   resolveInvoiceFileUrl,
 } from '@/utils/invoice-display';
+import { TableExportButton } from '@/components/recify/TableExportButton';
+import { exportDateStamp, type ExportColumn } from '@/utils/table-export';
 import {
   DATE_PRESETS,
   HISTORY_TIMEZONE,
@@ -207,6 +210,28 @@ export default function InvoicesPage() {
   const invoices = useMemo(() => invoicesQuery.data?.data ?? [], [invoicesQuery.data]);
   const total = invoicesQuery.data?.total ?? 0;
   const pages = Math.max(1, invoicesQuery.data?.pages ?? 1);
+
+  const invoiceExportColumns = useMemo<ExportColumn<BackendInvoice>[]>(
+    () => [
+      { header: 'Fecha', value: (inv) => formatInvoiceDate(inv.date, timeZone) },
+      { header: 'Emisor', value: (inv) => inv.issuerName ?? '' },
+      { header: 'RFC emisor', value: (inv) => inv.issuerRfc ?? '' },
+      { header: 'Receptor', value: (inv) => inv.receiverName ?? '' },
+      { header: 'RFC receptor', value: (inv) => inv.receiverRfc ?? '' },
+      { header: 'Tipo', value: (inv) => INVOICE_TYPE_LABELS[inv.type] ?? inv.type },
+      { header: 'Subtotal', value: (inv) => inv.subtotal },
+      { header: 'IVA', value: (inv) => inv.tax },
+      { header: 'Total', value: (inv) => inv.total },
+      { header: 'Forma de pago', value: (inv) => formatInvoicePaymentForm(inv.paymentForm) },
+      { header: 'Método de pago', value: (inv) => inv.paymentMethod ?? '' },
+      {
+        header: 'Conciliación',
+        value: (inv) => INVOICE_MATCH_STATUS_LABELS[inv.matchStatus] ?? inv.matchStatus,
+      },
+      { header: 'Folio fiscal (UUID)', value: (inv) => formatInvoiceUuid(inv.uuid) },
+    ],
+    [timeZone],
+  );
 
   const hasActiveFilters =
     typeFilter !== 'all' ||
@@ -595,6 +620,17 @@ export default function InvoicesPage() {
             />
           ) : (
             <>
+              <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-3">
+                <p className="text-sm font-medium text-foreground">
+                  Facturas de esta página
+                </p>
+                <TableExportButton
+                  rows={invoices}
+                  columns={invoiceExportColumns}
+                  filename={`facturas_${exportDateStamp()}`}
+                  sheetName="Facturas"
+                />
+              </div>
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>

@@ -38,9 +38,11 @@ import {
 import { CategoryBadge } from './CategoryBadge';
 import { EmptyState } from './EmptyState';
 import { StatusBadge } from './StatusBadge';
+import { TableExportButton } from './TableExportButton';
 import { cn } from '@/lib/utils';
 import { formatMxn } from '@/utils/financial-kpis';
 import { formatTicketDateTime } from '@/utils/ticket-display';
+import { exportDateStamp, type ExportColumn } from '@/utils/table-export';
 import { resolveTicketImageUrl } from '@/utils/ticket-image';
 import type { HistoryTicketEditDraft } from '@/utils/ticket-edit';
 import type { HistoryEditableField } from '@/hooks/use-history-table-editing';
@@ -68,6 +70,20 @@ const STATUS_OPTIONS: { value: BackendTicketStatus; label: string }[] = [
 const TYPE_OPTIONS: { value: BackendTicketType; label: string }[] = [
   { value: 'ingreso', label: 'Ingreso' },
   { value: 'egreso', label: 'Gasto' },
+];
+
+const TICKET_EXPORT_COLUMNS: ExportColumn<UiTicket>[] = [
+  { header: 'Comercio', value: (t) => t.comercio },
+  { header: 'Fecha', value: (t) => formatTicketDateTime(t.fecha) },
+  { header: 'Subtotal', value: (t) => t.subtotal },
+  { header: 'IVA', value: (t) => t.iva },
+  { header: 'Total', value: (t) => t.total },
+  { header: 'Moneda', value: (t) => t.moneda },
+  { header: 'Método de pago', value: (t) => t.metodoPago },
+  { header: 'Tipo', value: (t) => t.tipo },
+  { header: 'Estatus', value: (t) => t.estatus },
+  { header: 'Categoría', value: (t) => t.categoria },
+  { header: 'Acreditable', value: (t) => (t.isAccreditable ? 'Sí' : 'No') },
 ];
 
 interface HistoryTicketTableProps {
@@ -929,6 +945,13 @@ export function HistoryTicketTable({
             </p>
           )}
         </div>
+        <TableExportButton
+          rows={table.getFilteredRowModel().rows.map((row) => row.original)}
+          columns={TICKET_EXPORT_COLUMNS}
+          filename={`tickets_${exportDateStamp()}`}
+          sheetName="Tickets"
+          disabled={Boolean(editingTicketId)}
+        />
       </div>
 
       {isLoading ? (
