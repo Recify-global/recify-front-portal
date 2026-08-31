@@ -2,7 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import HistoryPage from '@/pages/HistoryPage';
-import { last12MonthsRange } from '@/utils/financial-kpis';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { formatMxn, last12MonthsRange } from '@/utils/financial-kpis';
 import { ticketListQueryKey } from '@/utils/ticket-queries';
 
 const mocks = vi.hoisted(() => ({
@@ -79,7 +80,9 @@ function renderHistory() {
   });
   const view = render(
     <QueryClientProvider client={client}>
-      <HistoryPage />
+      <TooltipProvider delayDuration={0}>
+        <HistoryPage />
+      </TooltipProvider>
     </QueryClientProvider>,
   );
   return { view, client };
@@ -248,5 +251,78 @@ describe('HistoryPage Todo el historial preset', () => {
     expect(await screen.findByText('No hay tickets registrados')).toBeInTheDocument();
     expect(screen.getByText('Aún no hay tickets cargados para esta compañía.')).toBeInTheDocument();
     expect(screen.queryByText(/rango de fechas/i)).not.toBeInTheDocument();
+  });
+});
+
+const HISTORY_METRIC_INFO = {
+  income: {
+    title: 'Ingresos totales',
+    text: 'Suma de ingresos de todos los tickets de la compañía en el período de fechas seleccionado. Si no hay fechas, usa todo el historial.',
+    label: 'Información sobre Ingresos totales',
+  },
+  expense: {
+    title: 'Egresos totales',
+    text: 'Suma de egresos de todos los tickets de la compañía en el período de fechas seleccionado. Si no hay fechas, usa todo el historial.',
+    label: 'Información sobre Egresos totales',
+  },
+  balance: {
+    title: 'Saldo neto',
+    text: 'Ingresos menos egresos de todos los tickets de la compañía en el período de fechas seleccionado.',
+    label: 'Información sobre Saldo neto',
+  },
+  paymentMethod: {
+    title: 'Método más usado',
+    text: 'Método de pago con más movimientos entre todos los tickets de la compañía en el período de fechas seleccionado.',
+    label: 'Información sobre Método más usado',
+  },
+} as const;
+
+describe('HistoryPage metrics UI', () => {
+  it('renders tickets, date controls, KPI values and four info triggers', async () => {
+    renderHistory();
+
+    expect(await screen.findByRole('heading', { name: 'Histórico de tickets' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Desde')).toBeInTheDocument();
+    expect(screen.getByLabelText('Hasta')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText(formatMxn(10))).toBeInTheDocument();
+    });
+    expect(screen.getAllByText(formatMxn(5)).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('Tarjeta')).toBeInTheDocument();
+
+    const metricEntries = Object.values(HISTORY_METRIC_INFO);
+    expect(metricEntries).toHaveLength(4);
+    for (const metric of metricEntries) {
+      expect(screen.getByText(metric.title)).toBeInTheDocument();
+      const trigger = screen.getByRole('button', { name: metric.label });
+      expect(trigger).toBeEnabled();
+    }
+
+    const expected = last12MonthsRange();
+    expect(mocks.listTickets).toHaveBeenCalledWith(
+      'company-a',
+      expect.objectContaining({
+        page: 1,
+        limit: 100,
+        dateFrom: expected.dateFrom,
+        dateTo: expected.dateTo,
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it('shows the matching tooltip for each metric card', async () => {
+    renderHistory();
+
+    for (const metric of Object.values(HISTORY_METRIC_INFO)) {
+      const trigger = await screen.findByRole('button', { name: metric.label });
+      fireEvent.focus(trigger);
+      expect(await screen.findByRole('tooltip')).toHaveTextContent(metric.text);
+      fireEvent.blur(trigger);
+      await waitFor(() => {
+        expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+      });
+    }
   });
 });

@@ -76,6 +76,30 @@ const formatMXN = (n: number) => formatMxn(n);
 
 const statusOptions = ['analizado', 'pendiente', 'error'] as const;
 
+/** Textos de ayuda derivados de GET /dashboard/kpis vía useFinancialKpis. */
+const HISTORY_METRIC_INFO = {
+  income: {
+    title: 'Ingresos totales',
+    text: 'Suma de ingresos de todos los tickets de la compañía en el período de fechas seleccionado. Si no hay fechas, usa todo el historial.',
+    label: 'Información sobre Ingresos totales',
+  },
+  expense: {
+    title: 'Egresos totales',
+    text: 'Suma de egresos de todos los tickets de la compañía en el período de fechas seleccionado. Si no hay fechas, usa todo el historial.',
+    label: 'Información sobre Egresos totales',
+  },
+  balance: {
+    title: 'Saldo neto',
+    text: 'Ingresos menos egresos de todos los tickets de la compañía en el período de fechas seleccionado.',
+    label: 'Información sobre Saldo neto',
+  },
+  paymentMethod: {
+    title: 'Método más usado',
+    text: 'Método de pago con más movimientos entre todos los tickets de la compañía en el período de fechas seleccionado.',
+    label: 'Información sobre Método más usado',
+  },
+} as const;
+
 function clearHistoryFilters(
   setGlobalFilter: (v: string) => void,
   setCategoryFilter: (v: string) => void,
@@ -624,12 +648,13 @@ export default function HistoryPage() {
 
   return (
     <AppLayout>
-      <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Histórico de tickets</h1>
-          <p className="text-muted-foreground mt-1">Todos tus comprobantes organizados y clasificados</p>
+      <div className="max-w-7xl mx-auto animate-fade-in">
+        <div className="mb-3">
+          <h1 className="text-2xl font-bold leading-tight text-foreground">Histórico de tickets</h1>
+          <p className="text-sm text-muted-foreground">Todos tus comprobantes organizados y clasificados</p>
         </div>
 
+        <div className="space-y-6">
         {/* Metrics */}
         <div className="space-y-3">
           <div className="flex items-center gap-2">
@@ -661,42 +686,52 @@ export default function HistoryPage() {
           ) : financialKpis.income && financialKpis.expense && financialKpis.balance && financialKpis.paymentMethod ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <MetricCard
-                title="Ingresos totales"
+                title={HISTORY_METRIC_INFO.income.title}
                 value={financialKpis.income.value}
                 icon={<ArrowUpCircle size={20} />}
+                info={HISTORY_METRIC_INFO.income.text}
+                infoLabel={HISTORY_METRIC_INFO.income.label}
               />
               <MetricCard
-                title="Egresos totales"
+                title={HISTORY_METRIC_INFO.expense.title}
                 value={financialKpis.expense.value}
                 icon={<ArrowDownCircle size={20} />}
+                info={HISTORY_METRIC_INFO.expense.text}
+                infoLabel={HISTORY_METRIC_INFO.expense.label}
               />
               <MetricCard
-                title="Saldo neto"
+                title={HISTORY_METRIC_INFO.balance.title}
                 value={financialKpis.balance.value}
                 icon={<Scale size={20} />}
+                info={HISTORY_METRIC_INFO.balance.text}
+                infoLabel={HISTORY_METRIC_INFO.balance.label}
               />
               <MetricCard
-                title="Método más usado"
+                title={HISTORY_METRIC_INFO.paymentMethod.title}
                 value={financialKpis.paymentMethod.title}
                 icon={<CreditCard size={20} />}
+                info={HISTORY_METRIC_INFO.paymentMethod.text}
+                infoLabel={HISTORY_METRIC_INFO.paymentMethod.label}
               />
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {(
                 [
-                  { title: 'Ingresos totales', icon: <ArrowUpCircle size={20} /> },
-                  { title: 'Egresos totales', icon: <ArrowDownCircle size={20} /> },
-                  { title: 'Saldo neto', icon: <Scale size={20} /> },
-                  { title: 'Método más usado', icon: <CreditCard size={20} /> },
+                  { metric: HISTORY_METRIC_INFO.income, icon: <ArrowUpCircle size={20} /> },
+                  { metric: HISTORY_METRIC_INFO.expense, icon: <ArrowDownCircle size={20} /> },
+                  { metric: HISTORY_METRIC_INFO.balance, icon: <Scale size={20} /> },
+                  { metric: HISTORY_METRIC_INFO.paymentMethod, icon: <CreditCard size={20} /> },
                 ] as const
               ).map((card) => (
                 <MetricCard
-                  key={card.title}
-                  title={card.title}
+                  key={card.metric.title}
+                  title={card.metric.title}
                   value={kpiUnavailableLabel}
                   subtitle={kpiUnavailableHint}
                   icon={card.icon}
+                  info={card.metric.text}
+                  infoLabel={card.metric.label}
                 />
               ))}
             </div>
@@ -760,71 +795,73 @@ export default function HistoryPage() {
               </Select>
             </div>
             <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap gap-2" aria-label="Rangos rápidos de fecha">
-                {DATE_PRESETS.map((preset) => (
-                  <Button
-                    key={preset.id}
-                    type="button"
-                    variant={activePreset === preset.id ? 'default' : 'outline'}
-                    className="rounded-xl min-h-9"
-                    onClick={() => applyDatePreset(preset.id)}
-                    disabled={tableEditing.isEditing}
-                    aria-pressed={activePreset === preset.id}
-                  >
-                    {preset.label}
-                  </Button>
-                ))}
-              </div>
-              <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
-                <div className="space-y-1.5 w-full sm:w-40">
-                  <Label htmlFor="history-date-from" className="text-xs text-muted-foreground">
-                    Desde
-                  </Label>
-                  <Input
-                    id="history-date-from"
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="DD/MM/AAAA"
-                    value={dateFromDisplay}
-                    onChange={(e) => setDateFromDisplay(e.target.value)}
-                    onBlur={commitDateFromDisplay}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        commitDateFromDisplay();
-                      }
-                    }}
-                    disabled={tableEditing.isEditing}
-                    className={cn(
-                      'h-10 rounded-xl border-border',
-                      dateRangeInvalid && 'border-destructive',
-                    )}
-                  />
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 xl:flex-nowrap">
+                <div className="flex min-w-0 flex-wrap gap-2 xl:flex-nowrap" aria-label="Rangos rápidos de fecha">
+                  {DATE_PRESETS.map((preset) => (
+                    <Button
+                      key={preset.id}
+                      type="button"
+                      variant={activePreset === preset.id ? 'default' : 'outline'}
+                      className="rounded-xl min-h-9"
+                      onClick={() => applyDatePreset(preset.id)}
+                      disabled={tableEditing.isEditing}
+                      aria-pressed={activePreset === preset.id}
+                    >
+                      {preset.label}
+                    </Button>
+                  ))}
                 </div>
-                <div className="space-y-1.5 w-full sm:w-40">
-                  <Label htmlFor="history-date-to" className="text-xs text-muted-foreground">
-                    Hasta
-                  </Label>
-                  <Input
-                    id="history-date-to"
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="DD/MM/AAAA"
-                    value={dateToDisplay}
-                    onChange={(e) => setDateToDisplay(e.target.value)}
-                    onBlur={commitDateToDisplay}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        commitDateToDisplay();
-                      }
-                    }}
-                    disabled={tableEditing.isEditing}
-                    className={cn(
-                      'h-10 rounded-xl border-border',
-                      dateRangeInvalid && 'border-destructive',
-                    )}
-                  />
+                <div className="flex min-w-0 flex-wrap items-center gap-3 xl:flex-nowrap xl:shrink-0">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Label htmlFor="history-date-from" className="shrink-0 text-xs text-muted-foreground">
+                      Desde
+                    </Label>
+                    <Input
+                      id="history-date-from"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="DD/MM/AAAA"
+                      value={dateFromDisplay}
+                      onChange={(e) => setDateFromDisplay(e.target.value)}
+                      onBlur={commitDateFromDisplay}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          commitDateFromDisplay();
+                        }
+                      }}
+                      disabled={tableEditing.isEditing}
+                      className={cn(
+                        'h-10 min-w-0 w-[9.5rem] rounded-xl border-border',
+                        dateRangeInvalid && 'border-destructive',
+                      )}
+                    />
+                  </div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Label htmlFor="history-date-to" className="shrink-0 text-xs text-muted-foreground">
+                      Hasta
+                    </Label>
+                    <Input
+                      id="history-date-to"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="DD/MM/AAAA"
+                      value={dateToDisplay}
+                      onChange={(e) => setDateToDisplay(e.target.value)}
+                      onBlur={commitDateToDisplay}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          commitDateToDisplay();
+                        }
+                      }}
+                      disabled={tableEditing.isEditing}
+                      className={cn(
+                        'h-10 min-w-0 w-[9.5rem] rounded-xl border-border',
+                        dateRangeInvalid && 'border-destructive',
+                      )}
+                    />
+                  </div>
                 </div>
               </div>
               {dateRangeInvalid && (
@@ -890,6 +927,7 @@ export default function HistoryPage() {
               : 'Prueba otro rango de fechas, categoría o búsqueda.'
           }
         />
+        </div>
       </div>
 
       <TicketImageDialog
