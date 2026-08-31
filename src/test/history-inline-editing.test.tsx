@@ -158,6 +158,76 @@ describe('History presentation', () => {
     expect(screen.queryByRole('button', { name: /Cancelar edición/i })).not.toBeInTheDocument();
   });
 
+  it('shows a hover/focus edit hint only on the eight editable cells', () => {
+    const onEditCell = vi.fn();
+    const withImage = { ...uiTicket, imagenUrl: 'https://cdn.example.com/ticket.jpg' };
+    const { container } = render(
+      <HistoryTicketTable {...tableProps({ tickets: [withImage], onEditCell })} />,
+    );
+
+    const editableCells = container.querySelectorAll('[data-history-editable-cell]');
+    const hints = container.querySelectorAll('[data-history-edit-hint]');
+    expect(editableCells).toHaveLength(8);
+    expect(hints).toHaveLength(8);
+
+    const editableLabels = [
+      'Editar comercio de Café Central',
+      'Editar fecha de Café Central',
+      'Editar total de Café Central',
+      'Editar IVA de Café Central',
+      'Editar método de pago de Café Central',
+      'Editar tipo de Café Central',
+      'Editar estatus de Café Central',
+      'Editar categoría de Café Central',
+    ];
+    for (const label of editableLabels) {
+      const cell = screen.getByRole('button', { name: label });
+      expect(cell.querySelector('[data-history-edit-hint]')).not.toBeNull();
+    }
+
+    expect(screen.getByText('Café Central')).toBeInTheDocument();
+    expect(screen.getByText('$497.00')).toBeInTheDocument();
+    expect(screen.getByText('$68.55')).toBeInTheDocument();
+    expect(screen.getByText('Tarjeta')).toBeInTheDocument();
+
+    expect(screen.getByTitle('Ver imagen').querySelector('[data-history-edit-hint]')).toBeNull();
+    expect(
+      screen.getByRole('switch', { name: 'Marcar ticket de Café Central como acreditable' })
+        .closest('div')
+        ?.querySelector('[data-history-edit-hint]'),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Editar comercio de Café Central' }));
+    expect(onEditCell).toHaveBeenCalledWith(withImage, 'vendor');
+  });
+
+  it('reveals only the hovered or focused editable cell hint', () => {
+    render(<HistoryTicketTable {...tableProps()} />);
+    const comercio = screen.getByRole('button', { name: 'Editar comercio de Café Central' });
+    const categoria = screen.getByRole('button', { name: 'Editar categoría de Café Central' });
+    const comercioHint = comercio.querySelector('[data-history-edit-hint]');
+    const categoriaHint = categoria.querySelector('[data-history-edit-hint]');
+
+    fireEvent.mouseMove(comercio, { clientX: 24, clientY: 10 });
+    expect(comercioHint).toHaveAttribute('data-visible', 'true');
+    expect(comercioHint).toHaveAttribute('data-mode', 'pointer');
+    expect(categoriaHint).not.toHaveAttribute('data-visible', 'true');
+
+    fireEvent.mouseLeave(comercio);
+    fireEvent.mouseMove(categoria, { clientX: 40, clientY: 12 });
+    expect(comercioHint).not.toHaveAttribute('data-visible', 'true');
+    expect(categoriaHint).toHaveAttribute('data-visible', 'true');
+    expect(categoriaHint).toHaveAttribute('data-mode', 'pointer');
+
+    fireEvent.mouseLeave(categoria);
+    expect(categoriaHint).not.toHaveAttribute('data-visible', 'true');
+
+    fireEvent.focus(comercio);
+    expect(comercioHint).toHaveAttribute('data-visible', 'true');
+    expect(comercioHint).toHaveAttribute('data-mode', 'focus');
+    expect(categoriaHint).not.toHaveAttribute('data-visible', 'true');
+  });
+
   it('opens only the image action and disables it without a safe image', () => {
     const onPreviewImage = vi.fn();
     const withImage = { ...uiTicket, imagenUrl: 'https://cdn.example.com/ticket.jpg' };
