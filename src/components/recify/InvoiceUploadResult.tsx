@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { InvoiceMatchStatusBadge } from '@/components/recify/InvoiceMatchStatusBadge';
 import { InvoiceMatchPanel } from '@/components/recify/InvoiceMatchPanel';
+import { InvoicePdfDialog } from '@/components/recify/InvoicePdfDialog';
 import { useAuth } from '@/hooks/use-auth';
 import { useCompanies } from '@/hooks/use-companies';
 import { getInvoice } from '@/services/invoices.service';
@@ -31,9 +32,13 @@ interface InvoiceUploadResultProps {
 export function InvoiceUploadResult({ response, companyId }: InvoiceUploadResultProps) {
   const [invoice, setInvoice] = useState<BackendInvoice>(response.invoice);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
+  const [pdfViewerUrl, setPdfViewerUrl] = useState<string | null>(null);
+  const [pdfViewerError, setPdfViewerError] = useState<string | null>(null);
   const { companyId: activeCompanyId } = useAuth();
   const { activeCompany } = useCompanies();
   const timeZone = activeCompany?.timezone?.trim() || HISTORY_TIMEZONE;
+  const canViewPdf = Boolean(invoice.fileUrl?.trim());
 
   const fields = [
     { label: 'Emisor', value: invoice.issuerName ?? '—', key: 'issuerName' },
@@ -57,25 +62,23 @@ export function InvoiceUploadResult({ response, companyId }: InvoiceUploadResult
   ];
 
   const openPdf = async () => {
-    if (pdfBusy) return;
+    if (pdfBusy || !canViewPdf) return;
     setPdfBusy(true);
+    setPdfViewerOpen(true);
+    setPdfViewerUrl(null);
+    setPdfViewerError(null);
     try {
       const fresh = await getInvoice(companyId, invoice._id);
       if (activeCompanyId !== companyId) return;
-      setInvoice((prev) => ({ ...prev, ...fresh }));
       const pdfUrl = resolveInvoiceFileUrl(fresh.fileUrl);
       if (!pdfUrl) {
-        toast.error('No hay un PDF disponible para esta factura.');
+        setPdfViewerError('No se pudo cargar la factura.');
         return;
       }
-      const popup = window.open(pdfUrl, '_blank', 'noopener,noreferrer');
-      if (!popup) {
-        toast.error(
-          'El navegador bloqueó la ventana del PDF. Permite ventanas emergentes e intenta de nuevo.',
-        );
-      }
+      setPdfViewerUrl(pdfUrl);
     } catch (err) {
       if (isInvoiceAbortError(err) || activeCompanyId !== companyId) return;
+      setPdfViewerError('No se pudo cargar la factura.');
       const message = getInvoiceUserErrorMessage(
         err,
         'No se pudo obtener el PDF. Intenta de nuevo.',
@@ -83,6 +86,14 @@ export function InvoiceUploadResult({ response, companyId }: InvoiceUploadResult
       if (message) toast.error(message);
     } finally {
       setPdfBusy(false);
+    }
+  };
+
+  const handlePdfViewerOpenChange = (open: boolean) => {
+    setPdfViewerOpen(open);
+    if (!open) {
+      setPdfViewerUrl(null);
+      setPdfViewerError(null);
     }
   };
 
@@ -125,20 +136,31 @@ export function InvoiceUploadResult({ response, companyId }: InvoiceUploadResult
         timeZone={timeZone}
       />
 
-      <Button
-        variant="outline"
-        className="w-full h-11 rounded-xl"
-        onClick={() => void openPdf()}
-        disabled={pdfBusy}
-        aria-label="Abrir PDF de la factura"
-      >
-        {pdfBusy ? (
-          <Loader2 size={16} className="mr-2 animate-spin" />
-        ) : (
-          <FileText size={16} className="mr-2" />
-        )}
-        Abrir PDF
-      </Button>
+      {canViewPdf ? (
+        <Button
+          variant="outline"
+          className="w-full h-11 rounded-xl"
+          onClick={() => void openPdf()}
+          disabled={pdfBusy}
+          aria-label="Ver factura"
+        >
+          {pdfBusy ? (
+            <Loader2 size={16} className="mr-2 animate-spin" />
+          ) : (
+            <FileText size={16} className="mr-2" />
+          )}
+          Ver factura
+        </Button>
+      ) : null}
+
+      <InvoicePdfDialog
+        open={pdfViewerOpen}
+        onOpenChange={handlePdfViewerOpenChange}
+        pdfUrl={pdfViewerUrl}
+        isLoading={pdfBusy && !pdfViewerUrl && !pdfViewerError}
+        error={pdfViewerError}
+        onRetry={() => void openPdf()}
+      />
     </div>
   );
 }
