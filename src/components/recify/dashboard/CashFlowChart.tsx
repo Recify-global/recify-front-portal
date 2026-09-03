@@ -1,9 +1,9 @@
 import { Waves } from 'lucide-react';
 import {
-  Area,
+  Bar,
+  BarChart,
   CartesianGrid,
-  ComposedChart,
-  Line,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -91,23 +91,20 @@ export function CashFlowChart({ query, enabled, groupBy, onGroupByChange }: Cash
       bodyClassName="min-h-[280px]"
     >
       <ResponsiveContainer width="100%" height={300}>
-        <ComposedChart data={buckets} margin={{ top: 12, right: 12, bottom: 0, left: 0 }}>
-          <defs>
-            <linearGradient id="cashflow-income" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={ANALYTICS_COLORS.income} stopOpacity={0.35} />
-              <stop offset="100%" stopColor={ANALYTICS_COLORS.income} stopOpacity={0.02} />
-            </linearGradient>
-            <linearGradient id="cashflow-expense" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={ANALYTICS_COLORS.expense} stopOpacity={0.32} />
-              <stop offset="100%" stopColor={ANALYTICS_COLORS.expense} stopOpacity={0.02} />
-            </linearGradient>
-          </defs>
+        <BarChart
+          data={buckets}
+          margin={{ top: 12, right: 12, bottom: 0, left: 0 }}
+          barCategoryGap="18%"
+          barGap={4}
+        >
           <CartesianGrid vertical={false} stroke={ANALYTICS_COLORS.grid} strokeDasharray="3 3" />
           <XAxis
             dataKey="label"
             tickLine={false}
             axisLine={false}
             fontSize={11}
+            interval="preserveStartEnd"
+            minTickGap={12}
             tick={{ fill: 'hsl(330 6% 35%)' }}
           />
           <YAxis
@@ -117,7 +114,9 @@ export function CashFlowChart({ query, enabled, groupBy, onGroupByChange }: Cash
             fontSize={11}
             width={52}
           />
+          <ReferenceLine y={0} stroke={ANALYTICS_COLORS.net} strokeOpacity={0.4} />
           <Tooltip
+            cursor={{ fill: 'hsl(330 30% 95%)' }}
             content={({ active, payload, label }) => {
               if (!active || !payload?.length) return null;
               const bucket = payload[0].payload as (typeof buckets)[number];
@@ -127,35 +126,34 @@ export function CashFlowChart({ query, enabled, groupBy, onGroupByChange }: Cash
                   rows={[
                     { label: 'Ingresos', value: formatMxn(bucket.income), color: ANALYTICS_COLORS.income },
                     { label: 'Egresos', value: formatMxn(bucket.expense), color: ANALYTICS_COLORS.expense },
-                    { label: 'Neto', value: formatMxn(bucket.net), color: ANALYTICS_COLORS.net },
+                    { label: 'Balance neto', value: formatMxn(bucket.net), color: ANALYTICS_COLORS.net },
                   ]}
                 />
               );
             }}
           />
-          <Area
-            type="monotone"
+          <Bar
             dataKey="income"
-            stroke={ANALYTICS_COLORS.income}
-            strokeWidth={2}
-            fill="url(#cashflow-income)"
+            name="Ingresos"
+            fill={ANALYTICS_COLORS.income}
+            radius={[4, 4, 0, 0]}
+            maxBarSize={28}
           />
-          <Area
-            type="monotone"
+          <Bar
             dataKey="expense"
-            stroke={ANALYTICS_COLORS.expense}
-            strokeWidth={2}
-            fill="url(#cashflow-expense)"
+            name="Egresos"
+            fill={ANALYTICS_COLORS.expense}
+            radius={[4, 4, 0, 0]}
+            maxBarSize={28}
           />
-          <Line
-            type="monotone"
+          <Bar
             dataKey="net"
-            stroke={ANALYTICS_COLORS.net}
-            strokeWidth={2}
-            strokeDasharray="5 4"
-            dot={false}
+            name="Balance neto"
+            fill={ANALYTICS_COLORS.net}
+            radius={[4, 4, 0, 0]}
+            maxBarSize={28}
           />
-        </ComposedChart>
+        </BarChart>
       </ResponsiveContainer>
     </ChartCard>
   );
