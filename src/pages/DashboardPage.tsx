@@ -53,23 +53,17 @@ export default function DashboardPage() {
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="lg:col-span-2">
-            <CashFlowChart
-              query={query}
-              enabled={enabled}
-              groupBy={groupBy}
-              onGroupByChange={setGroupBy}
-            />
-          </div>
-
+          <CashFlowChart
+            query={query}
+            enabled={enabled}
+            groupBy={groupBy}
+            onGroupByChange={setGroupBy}
+          />
           <ExpensesByVendorChart query={query} enabled={enabled} />
           <InvoicedVsUninvoicedChart query={query} enabled={enabled} />
+          <ExpensesIncomeHeatmap query={query} enabled={enabled} />
           <DeductibleTaxByCategoryChart query={query} enabled={enabled} />
           <InvoicedCategoryCorrelationChart query={query} enabled={enabled} />
-
-          <div className="lg:col-span-2">
-            <ExpensesIncomeHeatmap query={query} enabled={enabled} />
-          </div>
         </div>
       </div>
     </AppLayout>

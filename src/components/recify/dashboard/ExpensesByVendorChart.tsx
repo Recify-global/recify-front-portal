@@ -55,7 +55,7 @@ export function ExpensesByVendorChart({ query, enabled }: ExpensesByVendorChartP
       }
       bodyClassName="min-h-[260px]"
     >
-      <ResponsiveContainer width="100%" height={Math.max(260, rows.length * 40)}>
+      <ResponsiveContainer width="100%" height={260}>
         <BarChart
           data={rows}
           layout="vertical"

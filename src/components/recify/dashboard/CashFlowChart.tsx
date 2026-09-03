@@ -88,9 +88,9 @@ export function CashFlowChart({ query, enabled, groupBy, onGroupByChange }: Cash
           </div>
         ) : undefined
       }
-      bodyClassName="min-h-[280px]"
+      bodyClassName="min-h-[260px]"
     >
-      <ResponsiveContainer width="100%" height={300}>
+      <ResponsiveContainer width="100%" height={260}>
         <BarChart
           data={buckets}
           margin={{ top: 12, right: 12, bottom: 0, left: 0 }}

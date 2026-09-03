@@ -157,7 +157,7 @@ export function ExpensesIncomeHeatmap({ query, enabled }: ExpensesIncomeHeatmapP
               {WEEKDAY_LABELS.map((label, index) => (
                 <div
                   key={index}
-                  className="h-[18px] pr-1 text-right text-[10px] leading-[18px] text-muted-foreground sm:h-5 sm:leading-5 lg:h-[22px] lg:leading-[22px]"
+                  className="h-[18px] pr-1 text-right text-[10px] leading-[18px] text-muted-foreground sm:h-5 sm:leading-5"
                 >
                   {label}
                 </div>
@@ -177,7 +177,7 @@ export function ExpensesIncomeHeatmap({ query, enabled }: ExpensesIncomeHeatmapP
                   return (
                     <div
                       key={cell.date}
-                      className="h-[18px] w-[18px] rounded-[4px] transition-transform hover:scale-110 hover:ring-2 hover:ring-ring/40 sm:h-5 sm:w-5 lg:h-[22px] lg:w-[22px]"
+                      className="h-[18px] w-[18px] rounded-[4px] transition-transform hover:scale-110 hover:ring-2 hover:ring-ring/40 sm:h-5 sm:w-5"
                       style={{ backgroundColor: cellColor(cell) }}
                       role="img"
                       aria-label={description}
