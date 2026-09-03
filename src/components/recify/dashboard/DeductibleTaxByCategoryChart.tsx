@@ -62,26 +62,29 @@ export function DeductibleTaxByCategoryChart({
       bodyClassName="min-h-[260px]"
     >
       <ResponsiveContainer width="100%" height={260}>
-        <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-          <CartesianGrid vertical={false} stroke={ANALYTICS_COLORS.grid} strokeDasharray="3 3" />
+        <BarChart
+          data={rows}
+          layout="vertical"
+          margin={{ top: 0, right: 16, bottom: 0, left: 8 }}
+          barCategoryGap={10}
+        >
+          <CartesianGrid horizontal={false} stroke={ANALYTICS_COLORS.grid} strokeDasharray="3 3" />
           <XAxis
+            type="number"
+            tickFormatter={formatCompactMxn}
+            tickLine={false}
+            axisLine={false}
+            fontSize={11}
+          />
+          <YAxis
+            type="category"
             dataKey="category"
             tickFormatter={(value: string) => truncate(value)}
             tickLine={false}
             axisLine={false}
             fontSize={11}
-            interval={0}
-            angle={-20}
-            textAnchor="end"
-            height={54}
+            width={110}
             tick={{ fill: 'hsl(330 6% 35%)' }}
-          />
-          <YAxis
-            tickFormatter={formatCompactMxn}
-            tickLine={false}
-            axisLine={false}
-            fontSize={11}
-            width={52}
           />
           <Tooltip
             cursor={{ fill: 'hsl(330 30% 95%)' }}
@@ -101,7 +104,7 @@ export function DeductibleTaxByCategoryChart({
               );
             }}
           />
-          <Bar dataKey="deductibleTax" radius={[6, 6, 0, 0]} maxBarSize={44}>
+          <Bar dataKey="deductibleTax" radius={[0, 6, 6, 0]} maxBarSize={26}>
             {rows.map((row) => (
               <Cell key={row.category} fill={ANALYTICS_COLORS.deductible} />
             ))}
