@@ -1,15 +1,31 @@
 import { apiRequest } from '@/api/http';
 import { endpoints } from '@/api/endpoints';
 import type { BackendTicket } from '@/types/ticket';
+import type { BackendBalance } from '@/types/balance';
 import type { BackendInvoice, UploadInvoiceResponse } from '@/types/invoice';
 
-export interface UploadTicketResponse {
+/**
+ * El upload de tickets clasifica la imagen: una transacción (ticket fiscal o
+ * transferencia) devuelve `kind:'ticket'`; una captura de saldo bancario/tarjeta
+ * devuelve `kind:'balance'`. Respuestas viejas sin `kind` se tratan como ticket.
+ */
+export interface UploadTicketResult {
+  kind?: 'ticket';
   imageUrl: string;
   ocrText: string;
   ticket: BackendTicket;
-  /** Factura CFDI auto-vinculada al guardar el ticket, o null. */
+  /** Siempre null: el enlace a facturas lo confirma el usuario, nunca es automático. */
   matchedInvoice?: BackendInvoice | null;
 }
+
+export interface UploadBalanceResult {
+  kind: 'balance';
+  imageUrl: string;
+  ocrText: string;
+  balance: BackendBalance;
+}
+
+export type UploadTicketResponse = UploadTicketResult | UploadBalanceResult;
 
 export interface PreprocessResponse {
   ocrText: string;

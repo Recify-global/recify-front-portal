@@ -8,6 +8,7 @@ import { CameraCaptureDialog } from '@/components/recify/CameraCaptureDialog';
 import { BatchUploadDialog } from '@/components/recify/BatchUploadDialog';
 import { TicketScanAnimation } from '@/components/recify/TicketScanAnimation';
 import { InvoiceUploadResult } from '@/components/recify/InvoiceUploadResult';
+import { BalanceUploadResult, type BalanceLike } from '@/components/recify/BalanceUploadResult';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -36,6 +37,7 @@ import type {
   UiTicket,
 } from '@/types/ticket';
 import type { UploadInvoiceResponse } from '@/types/invoice';
+import type { BackendBalance } from '@/types/balance';
 import { Upload, Camera, FileImage, FileText, Loader2, CheckCircle2, Edit3, Save, Plus, Receipt, XCircle, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import { ApiRequestError } from '@/api/http';
@@ -47,7 +49,37 @@ import { getInvoiceUploadErrorMessage, isInvoiceAbortError } from '@/utils/invoi
 import { validateInvoicePdfFile } from '@/utils/invoice-file';
 
 type UploadState = 'idle' | 'uploaded' | 'analyzing' | 'done';
-type UploadMode = 'ticket' | 'invoice';
+type UploadMode = 'ticket' | 'invoice' | 'balance';
+
+/** Lee de forma segura un campo numérico del JSON estructurado del preprocess. */
+function toNumberOrNull(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value.replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/** Convierte el JSON estructurado (documentKind:'balance') en la forma de la UI. */
+function toBalanceLike(raw: Record<string, unknown>): BalanceLike {
+  const accountType = raw.accountType;
+  return {
+    bank: typeof raw.bank === 'string' ? raw.bank : null,
+    accountType:
+      accountType === 'credit_card' ||
+      accountType === 'debit' ||
+      accountType === 'bank_account' ||
+      accountType === 'other'
+        ? accountType
+        : 'other',
+    accountRef: typeof raw.accountRef === 'string' ? raw.accountRef : null,
+    currentBalance: toNumberOrNull(raw.currentBalance),
+    availableCredit: toNumberOrNull(raw.availableCredit),
+    creditLimit: toNumberOrNull(raw.creditLimit),
+    currency: typeof raw.currency === 'string' ? raw.currency : 'MXN',
+  };
+}
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const PDF_MIME_TYPE = 'application/pdf';
 const MAX_SIZE_BYTES = 10 * 1024 * 1024;
@@ -87,6 +119,9 @@ export default function UploadPage() {
   const [uploadMode, setUploadMode] = useState<UploadMode>('ticket');
   const [invoiceResult, setInvoiceResult] = useState<UploadInvoiceResponse | null>(null);
   const [invoiceOriginCompanyId, setInvoiceOriginCompanyId] = useState<string | null>(null);
+  // saldo analizado (preview, aún sin registrar) y saldo ya persistido
+  const [analyzedBalance, setAnalyzedBalance] = useState<BalanceLike | null>(null);
+  const [balanceResult, setBalanceResult] = useState<BackendBalance | null>(null);
   const [ticket, setTicket] = useState<UiTicket | null>(null);
   const [editBaseline, setEditBaseline] = useState<TicketEditDraft | null>(null);
   const [draft, setDraft] = useState<TicketEditDraft | null>(null);
@@ -141,6 +176,8 @@ export default function UploadPage() {
     setUploadMode('ticket');
     setInvoiceResult(null);
     setInvoiceOriginCompanyId(null);
+    setAnalyzedBalance(null);
+    setBalanceResult(null);
     setTicket(null);
     setEditBaseline(null);
     setDraft(null);
@@ -250,6 +287,8 @@ export default function UploadPage() {
     setUploadMode('invoice');
     setInvoiceResult(null);
     setInvoiceOriginCompanyId(null);
+    setAnalyzedBalance(null);
+    setBalanceResult(null);
     setTicket(null);
     setEditBaseline(null);
     setDraft(null);
@@ -307,6 +346,21 @@ export default function UploadPage() {
       });
       if (!isCurrentFlow(context, controller.signal)) return;
 
+      // El clasificador puede detectar que la imagen es una captura de saldo, no
+      // un ticket: en ese caso mostramos un resumen de saldo (sin formulario de
+      // edición) listo para registrar.
+      if (response.ticket?.documentKind === 'balance') {
+        setAnalyzedBalance(toBalanceLike(response.ticket));
+        setBalanceResult(null);
+        setUploadMode('balance');
+        setTicket(null);
+        setEditBaseline(null);
+        setDraft(null);
+        setState('done');
+        toast.success('Detectamos una captura de saldo.');
+        return;
+      }
+
       const mapped = mapPreprocessTicket(response.ticket, {
         imageUrl: imageUrlOverride ?? previewUrlRef.current,
         fallbackId: `preview-${Date.now()}`,
@@ -348,6 +402,8 @@ export default function UploadPage() {
     setSelectedFile(nextFile);
     setUploadMode('ticket');
     setInvoiceResult(null);
+    setAnalyzedBalance(null);
+    setBalanceResult(null);
     setTicket(null);
     setEditBaseline(null);
     setDraft(null);
@@ -434,6 +490,19 @@ export default function UploadPage() {
       });
       if (!isCurrentFlow(context, controller.signal)) return;
 
+      // La imagen resultó ser una captura de saldo: se guardó un Balance, no un
+      // ticket. Mostramos la confirmación de saldo y terminamos.
+      if (response.kind === 'balance') {
+        setBalanceResult(response.balance);
+        setAnalyzedBalance(null);
+        setUploadMode('balance');
+        setState('done');
+        setHasPersistedTicket(true);
+        uploadFlowRef.current.complete(context);
+        toast.success('Saldo registrado correctamente.');
+        return;
+      }
+
       let persistedTicket = response.ticket;
       let mapped = mapBackendTicket(persistedTicket);
       let patchFailed = false;
@@ -483,9 +552,6 @@ export default function UploadPage() {
         toast.warning('El ticket se guardó, pero algunos cambios no pudieron aplicarse.');
       } else {
         toast.success('Ticket guardado correctamente.');
-      }
-      if (response.matchedInvoice) {
-        toast.info('Este ticket quedó vinculado automáticamente a una factura.');
       }
     } catch (err) {
       if (!isCurrentFlow(context, controller.signal) || isAbortLike(err)) return;
@@ -665,7 +731,11 @@ export default function UploadPage() {
                   <p className="font-medium text-foreground">
                     {uploadMode === 'invoice'
                       ? 'Factura procesada correctamente'
-                      : 'Ticket analizado correctamente'}
+                      : uploadMode === 'balance'
+                        ? balanceResult
+                          ? 'Saldo registrado correctamente'
+                          : 'Captura de saldo detectada'
+                        : 'Ticket analizado correctamente'}
                   </p>
                   <p className="text-sm text-muted-foreground">Información extraída con éxito</p>
                 </div>
@@ -967,6 +1037,34 @@ export default function UploadPage() {
               </>
             )}
 
+            {state === 'done' && uploadMode === 'balance' && (analyzedBalance || balanceResult) && (
+              <>
+                {previewUrl ? (
+                  <TicketImagePreview
+                    imageUrl={previewUrl}
+                    fallbackImageUrl={previewUrl}
+                    alt="Captura de saldo"
+                    onView={setImageDialogUrl}
+                  />
+                ) : null}
+                <BalanceUploadResult
+                  balance={balanceResult ?? (analyzedBalance as BalanceLike)}
+                  saved={Boolean(balanceResult)}
+                  onConfirm={balanceResult ? undefined : handleSave}
+                  confirming={uploadMutation.isPending}
+                  disabled={isBusy}
+                />
+                <Button
+                  variant="outline"
+                  className="w-full h-11 rounded-xl"
+                  onClick={reset}
+                  disabled={isBusy}
+                >
+                  <Plus size={16} className="mr-2" /> Subir otro archivo
+                </Button>
+              </>
+            )}
+
             {state === 'done' &&
               uploadMode === 'invoice' &&
               invoiceResult &&
@@ -1004,13 +1102,13 @@ export default function UploadPage() {
         </div>
       </div>
       <TicketImageDialog
-        open={Boolean(imageDialogUrl && ticket)}
+        open={Boolean(imageDialogUrl && (ticket || uploadMode === 'balance'))}
         onOpenChange={(open) => {
           if (!open) setImageDialogUrl(null);
         }}
         imageUrl={imageDialogUrl}
-        alt={ticket ? `Ticket de ${ticket.comercio}` : 'Imagen del ticket'}
-        title={ticket ? `Ticket de ${ticket.comercio}` : 'Imagen del ticket'}
+        alt={ticket ? `Ticket de ${ticket.comercio}` : 'Captura de saldo'}
+        title={ticket ? `Ticket de ${ticket.comercio}` : 'Captura de saldo'}
       />
     </AppLayout>
   );

@@ -23,6 +23,10 @@ export const endpoints = {
       `/companies/${companyId}/invoices/${id}/match-candidates`,
     match: (companyId: string, id: string) => `/companies/${companyId}/invoices/${id}/match`,
   },
+  balances: {
+    list: (companyId: string) => `/companies/${companyId}/balances`,
+    byId: (companyId: string, id: string) => `/companies/${companyId}/balances/${id}`,
+  },
   dashboard: {
     kpis: (companyId: string) => `/companies/${companyId}/dashboard/kpis`,
     summary: (companyId: string) => `/companies/${companyId}/dashboard/summary`,

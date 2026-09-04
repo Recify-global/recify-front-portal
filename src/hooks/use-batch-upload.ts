@@ -73,8 +73,10 @@ export type BatchSaveResult = {
   uiUpdated: boolean;
   /** Permite invalidaciones/toasts solo para la misma sesión que inició el save. */
   effectsAllowed: boolean;
-  /** El upload auto-vinculó una factura existente. */
+  /** Reservado: el backend ya no auto-vincula facturas (siempre false). */
   matchedInvoice: boolean;
+  /** La imagen resultó ser una captura de saldo (se guardó un Balance, no un ticket). */
+  balance: boolean;
 };
 
 function emptyCounts(): Record<BatchItemStatus, number> {
@@ -343,6 +345,8 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
         const effectsAllowed = isAuthMutationContextCurrent(authContext);
 
         // Persistió en la compañía de origen aunque la UI ya haya cambiado de tenant.
+        const isBalance = response.kind === 'balance';
+
         if (
           !effectsAllowed ||
           isStale(generation, originCompanyId) ||
@@ -353,7 +357,22 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
             companyId: originCompanyId,
             uiUpdated: false,
             effectsAllowed,
-            matchedInvoice: Boolean(response.matchedInvoice),
+            matchedInvoice: false,
+            balance: isBalance,
+          };
+        }
+
+        // Una captura de saldo se guardó como Balance, no como ticket: no hay
+        // savedTicket que mostrar en el lote.
+        if (isBalance) {
+          patchItem(item.id, { status: 'saved', savedTicket: null, error: null });
+          return {
+            persisted: true,
+            companyId: originCompanyId,
+            uiUpdated: true,
+            effectsAllowed: true,
+            matchedInvoice: false,
+            balance: true,
           };
         }
 
@@ -371,7 +390,8 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
           companyId: originCompanyId,
           uiUpdated: true,
           effectsAllowed: true,
-          matchedInvoice: Boolean(response.matchedInvoice),
+          matchedInvoice: false,
+          balance: false,
         };
       } catch (err) {
         if (controller.signal.aborted || isAbortLike(err)) {
@@ -381,6 +401,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
             uiUpdated: false,
             effectsAllowed: isAuthMutationContextCurrent(authContext),
             matchedInvoice: false,
+            balance: false,
           };
         }
         if (
@@ -393,6 +414,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
             uiUpdated: false,
             effectsAllowed: false,
             matchedInvoice: false,
+            balance: false,
           };
         }
         patchItem(item.id, {
@@ -405,6 +427,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
           uiUpdated: true,
           effectsAllowed: true,
           matchedInvoice: false,
+          balance: false,
         };
       } finally {
         abortByIdRef.current.delete(item.id);
@@ -437,6 +460,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
           uiUpdated: false,
           effectsAllowed: true,
           matchedInvoice: false,
+          balance: false,
         };
       }
 
@@ -456,6 +480,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
     failed: number;
     persistedCompanyIds: string[];
     matchedInvoiceCompanyIds: string[];
+    balanceCompanyIds: string[];
   }> => {
     const generation = generationRef.current;
     const activeCompany = companyIdRef.current;
@@ -465,6 +490,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
         failed: 0,
         persistedCompanyIds: [],
         matchedInvoiceCompanyIds: [],
+        balanceCompanyIds: [],
       };
     }
 
@@ -476,6 +502,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
     let index = 0;
     const persistedCompanyIds = new Set<string>();
     const matchedInvoiceCompanyIds = new Set<string>();
+    const balanceCompanyIds = new Set<string>();
 
     const workers = Array.from({ length: Math.min(saveConcurrency, queue.length) }, async () => {
       while (index < queue.length) {
@@ -503,6 +530,9 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
               if (result.matchedInvoice) {
                 matchedInvoiceCompanyIds.add(result.companyId);
               }
+              if (result.balance) {
+                balanceCompanyIds.add(result.companyId);
+              }
             }
             ok += 1;
           } else if (!result.persisted) {
@@ -520,6 +550,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
       failed,
       persistedCompanyIds: Array.from(persistedCompanyIds),
       matchedInvoiceCompanyIds: Array.from(matchedInvoiceCompanyIds),
+      balanceCompanyIds: Array.from(balanceCompanyIds),
     };
   }, [runSave, saveConcurrency, syncItems]);
 

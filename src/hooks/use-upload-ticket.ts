@@ -6,6 +6,7 @@ import {
 } from '@/auth/session-cleanup';
 import { invalidateInvoiceQueries } from '@/utils/invoice-queries';
 import { invalidateTicketDerivedQueries } from '@/utils/ticket-derived-queries';
+import { invalidateBalanceQueries } from '@/hooks/use-balances';
 
 interface UploadMutationInput {
   companyId: string;
@@ -26,6 +27,13 @@ export function useUploadTicket() {
     },
     onSuccess: async (data, { companyId }, context) => {
       if (!isAuthMutationContextCurrent(context)) return;
+
+      // Una captura de saldo no crea ticket: solo refresca los listados de saldos.
+      if (data.kind === 'balance') {
+        await invalidateBalanceQueries(queryClient, companyId);
+        return;
+      }
+
       await invalidateTicketDerivedQueries(queryClient, companyId, {
         tickets: true,
         dailyReport: true,
@@ -33,12 +41,8 @@ export function useUploadTicket() {
         dashboardAnalytics: true,
       });
 
-      // El upload de ticket puede auto-vincular una factura existente.
-      if (data.matchedInvoice && isAuthMutationContextCurrent(context)) {
-        await invalidateInvoiceQueries(queryClient, companyId, {
-          invoiceId: data.matchedInvoice._id,
-        });
-      }
+      // El ticket subido aparece como candidato en facturas pendientes que empate.
+      await invalidateInvoiceQueries(queryClient, companyId);
     },
   });
 }
