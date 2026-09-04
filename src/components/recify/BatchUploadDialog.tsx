@@ -34,6 +34,7 @@ import {
 } from '@/auth/session-cleanup';
 import { invalidateInvoiceQueries } from '@/utils/invoice-queries';
 import { invalidateTicketDerivedQueries } from '@/utils/ticket-derived-queries';
+import { invalidateBalanceQueries } from '@/hooks/use-balances';
 
 interface BatchUploadDialogProps {
   open: boolean;
@@ -85,9 +86,12 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
     async (
       targetCompanyId: string | null | undefined,
       authContext: AuthMutationContext,
-      options: { invoices?: boolean } = {},
+      options: { invoices?: boolean; balances?: boolean } = {},
     ) => {
       if (!targetCompanyId) return;
+      if (options.balances && isAuthMutationContextCurrent(authContext)) {
+        await invalidateBalanceQueries(queryClient, targetCompanyId);
+      }
       await invalidateTicketDerivedQueries(queryClient, targetCompanyId, {
         tickets: true,
         dailyReport: true,
@@ -141,10 +145,12 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
       const result = await saveAll();
       if (!isAuthMutationContextCurrent(authContext)) return;
       const matchedCompanies = new Set(result.matchedInvoiceCompanyIds);
+      const balanceCompanies = new Set(result.balanceCompanyIds);
       await Promise.all(
         Array.from(new Set(result.persistedCompanyIds)).map((id) =>
           invalidateCompanyData(id, authContext, {
             invoices: matchedCompanies.has(id),
+            balances: balanceCompanies.has(id),
           }),
         ),
       );
@@ -170,12 +176,15 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
       if (result.persisted && result.effectsAllowed) {
         await invalidateCompanyData(result.companyId, authContext, {
           invoices: result.matchedInvoice,
+          balances: result.balance,
         });
         if (!isAuthMutationContextCurrent(authContext)) return;
         toast.success(
-          result.uiUpdated
-            ? 'Ticket guardado.'
-            : 'Ticket guardado en la compañía de origen.',
+          result.balance
+            ? 'Saldo registrado.'
+            : result.uiUpdated
+              ? 'Ticket guardado.'
+              : 'Ticket guardado en la compañía de origen.',
         );
       } else if (result.uiUpdated) {
         toast.error('No se pudo guardar el ticket.');

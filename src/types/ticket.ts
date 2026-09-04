@@ -54,6 +54,10 @@ export interface TicketsListParams {
   paymentMethod?: BackendPaymentMethod;
   sourceId?: string;
   category?: string;
+  /** Solo tickets sin factura vinculada (para emparejamiento manual). */
+  unmatched?: boolean;
+  /** Búsqueda por nombre del comercio. */
+  search?: string;
   dateFrom?: string;
   dateTo?: string;
   page?: number;

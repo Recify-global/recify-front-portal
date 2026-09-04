@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, HelpCircle, Link2Off, Loader2, RefreshCw, SearchX, Undo2 } from 'lucide-react';
+import { CheckCircle2, HelpCircle, Link2Off, Loader2, RefreshCw, Search, SearchX, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { InvoiceCandidateList } from '@/components/recify/InvoiceCandidateList';
+import { ManualMatchPicker } from '@/components/recify/ManualMatchPicker';
 import {
   useConfirmInvoiceMatch,
   useRecalculateMatchCandidates,
@@ -53,6 +54,7 @@ export function InvoiceMatchPanel({
   );
   const [confirmingTicketId, setConfirmingTicketId] = useState<string | null>(null);
   const [sessionTicket, setSessionTicket] = useState<BackendTicket | null>(null);
+  const [showManualPicker, setShowManualPicker] = useState(false);
   const activeCompanyIdRef = useRef(activeCompanyId);
   activeCompanyIdRef.current = activeCompanyId;
 
@@ -179,6 +181,47 @@ export function InvoiceMatchPanel({
     }
   };
 
+  // Emparejamiento manual: buscar entre todos los tickets sin vincular y elegir
+  // uno, aunque el matcher automático no haya sugerido nada.
+  const manualMatchSection = (
+    <div className="rounded-lg border border-dashed border-border/60 p-3">
+      {showManualPicker ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-foreground">Elige un ticket para vincular</p>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 rounded-lg text-muted-foreground"
+              onClick={() => setShowManualPicker(false)}
+              disabled={busy}
+            >
+              Ocultar
+            </Button>
+          </div>
+          <ManualMatchPicker
+            companyId={companyId}
+            invoiceType={invoice.type}
+            onConfirm={(ticketId) => void handleConfirm(ticketId)}
+            confirmingTicketId={confirmingTicketId}
+            disabled={busy}
+            timeZone={timeZone}
+          />
+        </div>
+      ) : (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-full rounded-lg text-muted-foreground"
+          onClick={() => setShowManualPicker(true)}
+          disabled={busy}
+        >
+          <Search size={14} className="mr-1.5" /> Emparejar con otro ticket manualmente
+        </Button>
+      )}
+    </div>
+  );
+
   if (isInvoiceLinked(invoice)) {
     return (
       <div className="rounded-xl border border-border/50 bg-secondary/30 p-4 space-y-3">
@@ -237,6 +280,7 @@ export function InvoiceMatchPanel({
           confirmingTicketId={confirmingTicketId}
           disabled={busy}
         />
+        {manualMatchSection}
         <Button
           size="sm"
           variant="ghost"
@@ -293,6 +337,7 @@ export function InvoiceMatchPanel({
           disabled={busy}
         />
       )}
+      {manualMatchSection}
       <div className="flex flex-wrap gap-2">
         <Button
           size="sm"

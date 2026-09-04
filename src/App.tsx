@@ -8,6 +8,7 @@ import DashboardPage from "./pages/DashboardPage";
 import UploadPage from "./pages/UploadPage";
 import HistoryPage from "./pages/HistoryPage";
 import InvoicesPage from "./pages/InvoicesPage";
+import BalancesPage from "./pages/BalancesPage";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./guards/ProtectedRoute";
 import { SessionCacheBoundary } from "./auth/SessionCacheBoundary";
@@ -29,6 +30,7 @@ const App = () => (
             <Route path="/app/upload" element={<UploadPage />} />
             <Route path="/app/history" element={<HistoryPage />} />
             <Route path="/app/invoices" element={<InvoicesPage />} />
+            <Route path="/app/balances" element={<BalancesPage />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
