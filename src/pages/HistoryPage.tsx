@@ -650,7 +650,7 @@ export default function HistoryPage() {
     <AppLayout>
       <div className="max-w-7xl mx-auto animate-fade-in">
         <div className="mb-3">
-          <h1 className="text-2xl font-bold leading-tight text-foreground">Histórico de tickets</h1>
+          <h1 className="text-xl font-bold leading-tight text-foreground sm:text-2xl">Histórico de tickets</h1>
           <p className="text-sm text-muted-foreground">Todos tus comprobantes organizados y clasificados</p>
         </div>
 

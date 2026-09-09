@@ -41,6 +41,7 @@ import { EmptyState } from './EmptyState';
 import { StatusBadge } from './StatusBadge';
 import { TableExportButton } from './TableExportButton';
 import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { formatMxn } from '@/utils/financial-kpis';
 import { formatTicketDateTime } from '@/utils/ticket-display';
 import { exportDateStamp, type ExportColumn } from '@/utils/table-export';
@@ -71,6 +72,20 @@ const STATUS_OPTIONS: { value: BackendTicketStatus; label: string }[] = [
 const TYPE_OPTIONS: { value: BackendTicketType; label: string }[] = [
   { value: 'ingreso', label: 'Ingreso' },
   { value: 'egreso', label: 'Gasto' },
+];
+
+type TicketCardField = HistoryEditableField | 'isAccreditable' | 'actions';
+
+// Secondary fields shown as label/value rows inside the mobile card. Comercio
+// and Total get special treatment as the card header, so they're excluded here.
+const MOBILE_CARD_FIELDS: { field: TicketCardField; label: string }[] = [
+  { field: 'date', label: 'Fecha' },
+  { field: 'tax', label: 'IVA' },
+  { field: 'paymentMethod', label: 'Método de pago' },
+  { field: 'type', label: 'Tipo' },
+  { field: 'status', label: 'Estatus' },
+  { field: 'category', label: 'Categoría' },
+  { field: 'isAccreditable', label: 'Acreditable' },
 ];
 
 const TICKET_EXPORT_COLUMNS: ExportColumn<UiTicket>[] = [
@@ -297,6 +312,7 @@ export function HistoryTicketTable({
   emptyDescription = 'Prueba otro rango de fechas, categoría o búsqueda.',
 }: HistoryTicketTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
+  const isMobile = useIsMobile();
   const dirtyIds = useMemo(() => new Set(dirtyTicketIds), [dirtyTicketIds]);
   const activeInputRef = useRef<HTMLInputElement | null>(null);
   const suppressBlurCommitRef = useRef(false);
@@ -441,6 +457,393 @@ export function HistoryTicketTable({
     liveRefs.current.onUpdateDraft(ticketId, { tax: raw });
   }, []);
 
+  // Render read/edit UI for a single ticket field. Shared by the desktop
+  // table columns and the mobile card layout so inline editing behaves
+  // identically regardless of viewport.
+  const renderFieldCell = useCallback(
+    (field: TicketCardField, ticket: UiTicket) => {
+      const {
+        drafts: liveDrafts,
+        editingTicketId: liveEditingTicketId,
+        editingField: liveEditingField,
+        isSaving: liveSaving,
+        deletingTicketId: liveDeletingTicketId,
+        savingAccreditableIds: liveSavingAccreditableIds,
+        onUpdateDraft: liveUpdateDraft,
+        onEditCell: liveEditCell,
+        onCancel: liveCancel,
+        onPreviewImage: livePreviewImage,
+        onDelete: liveDelete,
+        onToggleAccreditable: liveToggleAccreditable,
+      } = liveRefs.current;
+      const draft = liveDrafts[ticket.id];
+      const active = liveEditingTicketId === ticket.id && liveEditingField === field;
+
+      switch (field) {
+        case 'vendor':
+          if (active && draft) {
+            return (
+              <CellEditorShell>
+                <Input
+                  ref={activeInputRef}
+                  value={draft.vendor}
+                  maxLength={200}
+                  placeholder="Nombre del comercio"
+                  aria-label={`Editar comercio de ${ticket.comercio}`}
+                  disabled={liveSaving}
+                  className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) => liveUpdateDraft(ticket.id, { vendor: event.target.value })}
+                  onKeyDown={commitInputKeys}
+                  onBlur={commitOnBlur}
+                />
+              </CellEditorShell>
+            );
+          }
+          return (
+            <EditableReadCell
+              label={`Editar comercio de ${ticket.comercio}`}
+              disabled={liveSaving}
+              onActivate={() => liveEditCell(ticket, 'vendor')}
+            >
+              <span className="block truncate text-sm font-medium text-foreground" title={ticket.comercio}>
+                {ticket.comercio}
+              </span>
+            </EditableReadCell>
+          );
+        case 'date':
+          if (active && draft) {
+            return (
+              <CellEditorShell>
+                <Input
+                  ref={activeInputRef}
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="DD/MM/AAAA"
+                  value={draft.date}
+                  aria-label={`Editar fecha de ${ticket.comercio}`}
+                  disabled={liveSaving}
+                  className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) => liveUpdateDraft(ticket.id, { date: event.target.value })}
+                  onKeyDown={commitInputKeys}
+                  onBlur={commitOnBlur}
+                />
+              </CellEditorShell>
+            );
+          }
+          return (
+            <EditableReadCell
+              label={`Editar fecha de ${ticket.comercio}`}
+              disabled={liveSaving}
+              onActivate={() => liveEditCell(ticket, 'date')}
+            >
+              <span className="text-sm text-muted-foreground">
+                {formatTicketDateTime(ticket.fecha)}
+              </span>
+            </EditableReadCell>
+          );
+        case 'amount':
+          if (active && draft) {
+            return (
+              <CellEditorShell className="min-w-[7.5rem]">
+                <Input
+                  ref={activeInputRef}
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={draft.amount}
+                  aria-label={`Editar total de ${ticket.comercio}`}
+                  disabled={liveSaving}
+                  className="h-9 w-full min-w-[7.5rem] rounded-lg bg-background px-2 text-right text-sm tabular-nums shadow-sm"
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) => onAmountDraftChange(ticket.id, event.target.value)}
+                  onKeyDown={commitInputKeys}
+                  onBlur={commitOnBlur}
+                />
+              </CellEditorShell>
+            );
+          }
+          return (
+            <EditableReadCell
+              label={`Editar total de ${ticket.comercio}`}
+              className="text-right"
+              disabled={liveSaving}
+              onActivate={() => liveEditCell(ticket, 'amount')}
+            >
+              <span className="block text-right text-sm font-semibold tabular-nums text-foreground">
+                {formatMxn(ticket.total)}
+              </span>
+            </EditableReadCell>
+          );
+        case 'tax':
+          if (active && draft) {
+            return (
+              <CellEditorShell className="min-w-[7.5rem]">
+                <Input
+                  ref={activeInputRef}
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={draft.tax}
+                  aria-label={`Editar IVA de ${ticket.comercio}`}
+                  disabled={liveSaving}
+                  className="h-9 w-full min-w-[7.5rem] rounded-lg bg-background px-2 text-right text-sm tabular-nums shadow-sm"
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) => onTaxDraftChange(ticket.id, event.target.value)}
+                  onKeyDown={commitInputKeys}
+                  onBlur={commitOnBlur}
+                />
+              </CellEditorShell>
+            );
+          }
+          return (
+            <EditableReadCell
+              label={`Editar IVA de ${ticket.comercio}`}
+              className="text-right"
+              disabled={liveSaving}
+              onActivate={() => liveEditCell(ticket, 'tax')}
+            >
+              <span className="block text-right text-sm tabular-nums text-muted-foreground">
+                {formatMxn(ticket.iva)}
+              </span>
+            </EditableReadCell>
+          );
+        case 'paymentMethod':
+          if (active && draft) {
+            return (
+              <CellEditorShell>
+                <Select
+                  value={draft.paymentMethod}
+                  disabled={liveSaving}
+                  onValueChange={(value) => {
+                    commitFromUi({ paymentMethod: value as BackendPaymentMethod });
+                  }}
+                >
+                  <SelectTrigger
+                    className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
+                    aria-label={`Editar método de pago de ${ticket.comercio}`}
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (!liveSaving) liveCancel();
+                      }
+                    }}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAYMENT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </CellEditorShell>
+            );
+          }
+          return (
+            <EditableReadCell
+              label={`Editar método de pago de ${ticket.comercio}`}
+              disabled={liveSaving}
+              onActivate={() => liveEditCell(ticket, 'paymentMethod')}
+            >
+              <span className="text-sm text-muted-foreground">{ticket.metodoPago}</span>
+            </EditableReadCell>
+          );
+        case 'type':
+          if (active && draft) {
+            return (
+              <CellEditorShell>
+                <Select
+                  value={draft.type}
+                  disabled={liveSaving}
+                  onValueChange={(value) => {
+                    commitFromUi({ type: value as BackendTicketType });
+                  }}
+                >
+                  <SelectTrigger
+                    className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
+                    aria-label={`Editar tipo de ${ticket.comercio}`}
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (!liveSaving) liveCancel();
+                      }
+                    }}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </CellEditorShell>
+            );
+          }
+          return (
+            <EditableReadCell
+              label={`Editar tipo de ${ticket.comercio}`}
+              disabled={liveSaving}
+              onActivate={() => liveEditCell(ticket, 'type')}
+            >
+              <span className={cn(
+                'inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium',
+                ticket.tipo === 'Ingreso'
+                  ? 'bg-success/10 text-success'
+                  : 'bg-destructive/10 text-destructive',
+              )}>
+                {ticket.tipo}
+              </span>
+            </EditableReadCell>
+          );
+        case 'status':
+          if (active && draft) {
+            return (
+              <CellEditorShell>
+                <Select
+                  value={draft.status}
+                  disabled={liveSaving}
+                  onValueChange={(value) => {
+                    commitFromUi({ status: value as BackendTicketStatus });
+                  }}
+                >
+                  <SelectTrigger
+                    className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
+                    aria-label={`Editar estatus de ${ticket.comercio}`}
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (!liveSaving) liveCancel();
+                      }
+                    }}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUS_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </CellEditorShell>
+            );
+          }
+          return (
+            <EditableReadCell
+              label={`Editar estatus de ${ticket.comercio}`}
+              disabled={liveSaving}
+              onActivate={() => liveEditCell(ticket, 'status')}
+            >
+              <StatusBadge status={ticket.estatus} />
+            </EditableReadCell>
+          );
+        case 'category':
+          if (active && draft) {
+            return (
+              <CellEditorShell>
+                <Input
+                  ref={activeInputRef}
+                  value={draft.category}
+                  maxLength={100}
+                  placeholder="Categoría"
+                  aria-label={`Editar categoría de ${ticket.comercio}`}
+                  disabled={liveSaving}
+                  className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) => liveUpdateDraft(ticket.id, { category: event.target.value })}
+                  onKeyDown={commitInputKeys}
+                  onBlur={commitOnBlur}
+                />
+              </CellEditorShell>
+            );
+          }
+          return (
+            <EditableReadCell
+              label={`Editar categoría de ${ticket.comercio}`}
+              disabled={liveSaving}
+              onActivate={() => liveEditCell(ticket, 'category')}
+            >
+              <CategoryBadge category={ticket.categoria} />
+            </EditableReadCell>
+          );
+        case 'isAccreditable': {
+          const checked = ticket.isAccreditable ?? true;
+          const saving = liveSavingAccreditableIds.has(ticket.id);
+          return (
+            <div
+              className="flex min-w-[116px] items-center gap-2 whitespace-nowrap"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <Switch
+                checked={checked}
+                disabled={saving || liveSaving || Boolean(liveEditingTicketId)}
+                aria-label={`Marcar ticket de ${ticket.comercio} como acreditable`}
+                onCheckedChange={(next) => {
+                  if (saving || liveSaving || liveEditingTicketId) return;
+                  liveToggleAccreditable(ticket, next);
+                }}
+              />
+              <span className="text-xs text-muted-foreground">
+                {checked ? 'Sí' : 'No'}
+              </span>
+              {saving ? <Loader2 size={12} className="animate-spin text-muted-foreground" /> : null}
+            </div>
+          );
+        }
+        case 'actions': {
+          const hasImage = Boolean(resolveTicketImageUrl(ticket.imagenUrl));
+          return (
+            <div
+              className="flex min-w-[88px] items-center gap-1"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                aria-label={`Ver imagen del ticket de ${ticket.comercio}`}
+                title={hasImage ? 'Ver imagen' : 'Sin imagen'}
+                disabled={!hasImage || liveSaving}
+                onClick={() => livePreviewImage(ticket)}
+              >
+                <Camera size={15} />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-destructive hover:text-destructive"
+                aria-label={`Eliminar ticket de ${ticket.comercio}`}
+                title="Eliminar ticket"
+                disabled={liveSaving || liveDeletingTicketId === ticket.id || Boolean(liveEditingTicketId)}
+                onClick={() => liveDelete(ticket.id)}
+              >
+                {liveDeletingTicketId === ticket.id
+                  ? <Loader2 size={15} className="animate-spin" />
+                  : <Trash2 size={15} />}
+              </Button>
+              {liveEditingTicketId === ticket.id && liveSaving ? (
+                <Loader2 size={14} className="animate-spin text-muted-foreground" aria-label="Guardando" />
+              ) : null}
+            </div>
+          );
+        }
+        default:
+          return null;
+      }
+    },
+    [commitFromUi, commitInputKeys, commitOnBlur, onAmountDraftChange, onTaxDraftChange],
+  );
+
   const columns = useMemo<ColumnDef<UiTicket>[]>(() => [
     {
       accessorKey: 'comercio',
@@ -449,48 +852,7 @@ export function HistoryTicketTable({
           Comercio <ArrowUpDown size={12} />
         </button>
       ),
-      cell: ({ row }) => {
-        const {
-          drafts: liveDrafts,
-          editingTicketId: liveEditingTicketId,
-          editingField: liveEditingField,
-          isSaving: liveSaving,
-          onUpdateDraft: liveUpdateDraft,
-          onEditCell: liveEditCell,
-        } = liveRefs.current;
-        const draft = liveDrafts[row.original.id];
-        const active = liveEditingTicketId === row.original.id && liveEditingField === 'vendor';
-        if (active && draft) {
-          return (
-            <CellEditorShell>
-              <Input
-                ref={activeInputRef}
-                value={draft.vendor}
-                maxLength={200}
-                placeholder="Nombre del comercio"
-                aria-label={`Editar comercio de ${row.original.comercio}`}
-                disabled={liveSaving}
-                className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
-                onClick={(event) => event.stopPropagation()}
-                onChange={(event) => liveUpdateDraft(row.original.id, { vendor: event.target.value })}
-                onKeyDown={commitInputKeys}
-                onBlur={commitOnBlur}
-              />
-            </CellEditorShell>
-          );
-        }
-        return (
-          <EditableReadCell
-            label={`Editar comercio de ${row.original.comercio}`}
-            disabled={liveSaving}
-            onActivate={() => liveEditCell(row.original, 'vendor')}
-          >
-            <span className="block truncate text-sm font-medium text-foreground" title={row.original.comercio}>
-              {row.original.comercio}
-            </span>
-          </EditableReadCell>
-        );
-      },
+      cell: ({ row }) => renderFieldCell('vendor', row.original),
     },
     {
       accessorKey: 'fecha',
@@ -499,49 +861,7 @@ export function HistoryTicketTable({
           Fecha <ArrowUpDown size={12} />
         </button>
       ),
-      cell: ({ row }) => {
-        const {
-          drafts: liveDrafts,
-          editingTicketId: liveEditingTicketId,
-          editingField: liveEditingField,
-          isSaving: liveSaving,
-          onUpdateDraft: liveUpdateDraft,
-          onEditCell: liveEditCell,
-        } = liveRefs.current;
-        const draft = liveDrafts[row.original.id];
-        const active = liveEditingTicketId === row.original.id && liveEditingField === 'date';
-        if (active && draft) {
-          return (
-            <CellEditorShell>
-              <Input
-                ref={activeInputRef}
-                type="text"
-                inputMode="numeric"
-                placeholder="DD/MM/AAAA"
-                value={draft.date}
-                aria-label={`Editar fecha de ${row.original.comercio}`}
-                disabled={liveSaving}
-                className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
-                onClick={(event) => event.stopPropagation()}
-                onChange={(event) => liveUpdateDraft(row.original.id, { date: event.target.value })}
-                onKeyDown={commitInputKeys}
-                onBlur={commitOnBlur}
-              />
-            </CellEditorShell>
-          );
-        }
-        return (
-          <EditableReadCell
-            label={`Editar fecha de ${row.original.comercio}`}
-            disabled={liveSaving}
-            onActivate={() => liveEditCell(row.original, 'date')}
-          >
-            <span className="text-sm text-muted-foreground">
-              {formatTicketDateTime(row.original.fecha)}
-            </span>
-          </EditableReadCell>
-        );
-      },
+      cell: ({ row }) => renderFieldCell('date', row.original),
     },
     {
       accessorKey: 'total',
@@ -550,321 +870,32 @@ export function HistoryTicketTable({
           Total <ArrowUpDown size={12} />
         </button>
       ),
-      cell: ({ row }) => {
-        const {
-          drafts: liveDrafts,
-          editingTicketId: liveEditingTicketId,
-          editingField: liveEditingField,
-          isSaving: liveSaving,
-          onEditCell: liveEditCell,
-        } = liveRefs.current;
-        const draft = liveDrafts[row.original.id];
-        const active = liveEditingTicketId === row.original.id && liveEditingField === 'amount';
-        if (active && draft) {
-          return (
-            <CellEditorShell className="min-w-[7.5rem]">
-              <Input
-                ref={activeInputRef}
-                type="text"
-                inputMode="decimal"
-                autoComplete="off"
-                value={draft.amount}
-                aria-label={`Editar total de ${row.original.comercio}`}
-                disabled={liveSaving}
-                className="h-9 w-full min-w-[7.5rem] rounded-lg bg-background px-2 text-right text-sm tabular-nums shadow-sm"
-                onClick={(event) => event.stopPropagation()}
-                onChange={(event) => onAmountDraftChange(row.original.id, event.target.value)}
-                onKeyDown={commitInputKeys}
-                onBlur={commitOnBlur}
-              />
-            </CellEditorShell>
-          );
-        }
-        return (
-          <EditableReadCell
-            label={`Editar total de ${row.original.comercio}`}
-            className="text-right"
-            disabled={liveSaving}
-            onActivate={() => liveEditCell(row.original, 'amount')}
-          >
-            <span className="block text-right text-sm font-semibold tabular-nums text-foreground">
-              {formatMxn(row.original.total)}
-            </span>
-          </EditableReadCell>
-        );
-      },
+      cell: ({ row }) => renderFieldCell('amount', row.original),
     },
     {
       accessorKey: 'iva',
       header: 'IVA',
-      cell: ({ row }) => {
-        const {
-          drafts: liveDrafts,
-          editingTicketId: liveEditingTicketId,
-          editingField: liveEditingField,
-          isSaving: liveSaving,
-          onEditCell: liveEditCell,
-        } = liveRefs.current;
-        const draft = liveDrafts[row.original.id];
-        const active = liveEditingTicketId === row.original.id && liveEditingField === 'tax';
-        if (active && draft) {
-          return (
-            <CellEditorShell className="min-w-[7.5rem]">
-              <Input
-                ref={activeInputRef}
-                type="text"
-                inputMode="decimal"
-                autoComplete="off"
-                value={draft.tax}
-                aria-label={`Editar IVA de ${row.original.comercio}`}
-                disabled={liveSaving}
-                className="h-9 w-full min-w-[7.5rem] rounded-lg bg-background px-2 text-right text-sm tabular-nums shadow-sm"
-                onClick={(event) => event.stopPropagation()}
-                onChange={(event) => onTaxDraftChange(row.original.id, event.target.value)}
-                onKeyDown={commitInputKeys}
-                onBlur={commitOnBlur}
-              />
-            </CellEditorShell>
-          );
-        }
-        return (
-          <EditableReadCell
-            label={`Editar IVA de ${row.original.comercio}`}
-            className="text-right"
-            disabled={liveSaving}
-            onActivate={() => liveEditCell(row.original, 'tax')}
-          >
-            <span className="block text-right text-sm tabular-nums text-muted-foreground">
-              {formatMxn(row.original.iva)}
-            </span>
-          </EditableReadCell>
-        );
-      },
+      cell: ({ row }) => renderFieldCell('tax', row.original),
     },
     {
       accessorKey: 'metodoPago',
       header: 'Método de pago',
-      cell: ({ row }) => {
-        const {
-          drafts: liveDrafts,
-          editingTicketId: liveEditingTicketId,
-          editingField: liveEditingField,
-          isSaving: liveSaving,
-          onEditCell: liveEditCell,
-          onCancel: liveCancel,
-        } = liveRefs.current;
-        const draft = liveDrafts[row.original.id];
-        const active = liveEditingTicketId === row.original.id && liveEditingField === 'paymentMethod';
-        if (active && draft) {
-          return (
-            <CellEditorShell>
-              <Select
-                value={draft.paymentMethod}
-                disabled={liveSaving}
-                onValueChange={(value) => {
-                  commitFromUi({ paymentMethod: value as BackendPaymentMethod });
-                }}
-              >
-                <SelectTrigger
-                  className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
-                  aria-label={`Editar método de pago de ${row.original.comercio}`}
-                  onClick={(event) => event.stopPropagation()}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Escape') {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      if (!liveSaving) liveCancel();
-                    }
-                  }}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PAYMENT_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </CellEditorShell>
-          );
-        }
-        return (
-          <EditableReadCell
-            label={`Editar método de pago de ${row.original.comercio}`}
-            disabled={liveSaving}
-            onActivate={() => liveEditCell(row.original, 'paymentMethod')}
-          >
-            <span className="text-sm text-muted-foreground">{row.original.metodoPago}</span>
-          </EditableReadCell>
-        );
-      },
+      cell: ({ row }) => renderFieldCell('paymentMethod', row.original),
     },
     {
       accessorKey: 'tipo',
       header: 'Tipo',
-      cell: ({ row }) => {
-        const {
-          drafts: liveDrafts,
-          editingTicketId: liveEditingTicketId,
-          editingField: liveEditingField,
-          isSaving: liveSaving,
-          onEditCell: liveEditCell,
-          onCancel: liveCancel,
-        } = liveRefs.current;
-        const draft = liveDrafts[row.original.id];
-        const active = liveEditingTicketId === row.original.id && liveEditingField === 'type';
-        if (active && draft) {
-          return (
-            <CellEditorShell>
-              <Select
-                value={draft.type}
-                disabled={liveSaving}
-                onValueChange={(value) => {
-                  commitFromUi({ type: value as BackendTicketType });
-                }}
-              >
-                <SelectTrigger
-                  className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
-                  aria-label={`Editar tipo de ${row.original.comercio}`}
-                  onClick={(event) => event.stopPropagation()}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Escape') {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      if (!liveSaving) liveCancel();
-                    }
-                  }}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TYPE_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </CellEditorShell>
-          );
-        }
-        return (
-          <EditableReadCell
-            label={`Editar tipo de ${row.original.comercio}`}
-            disabled={liveSaving}
-            onActivate={() => liveEditCell(row.original, 'type')}
-          >
-            <span className={cn(
-              'inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium',
-              row.original.tipo === 'Ingreso'
-                ? 'bg-success/10 text-success'
-                : 'bg-destructive/10 text-destructive',
-            )}>
-              {row.original.tipo}
-            </span>
-          </EditableReadCell>
-        );
-      },
+      cell: ({ row }) => renderFieldCell('type', row.original),
     },
     {
       accessorKey: 'estatus',
       header: 'Estatus',
-      cell: ({ row }) => {
-        const {
-          drafts: liveDrafts,
-          editingTicketId: liveEditingTicketId,
-          editingField: liveEditingField,
-          isSaving: liveSaving,
-          onEditCell: liveEditCell,
-          onCancel: liveCancel,
-        } = liveRefs.current;
-        const draft = liveDrafts[row.original.id];
-        const active = liveEditingTicketId === row.original.id && liveEditingField === 'status';
-        if (active && draft) {
-          return (
-            <CellEditorShell>
-              <Select
-                value={draft.status}
-                disabled={liveSaving}
-                onValueChange={(value) => {
-                  commitFromUi({ status: value as BackendTicketStatus });
-                }}
-              >
-                <SelectTrigger
-                  className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
-                  aria-label={`Editar estatus de ${row.original.comercio}`}
-                  onClick={(event) => event.stopPropagation()}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Escape') {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      if (!liveSaving) liveCancel();
-                    }
-                  }}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUS_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </CellEditorShell>
-          );
-        }
-        return (
-          <EditableReadCell
-            label={`Editar estatus de ${row.original.comercio}`}
-            disabled={liveSaving}
-            onActivate={() => liveEditCell(row.original, 'status')}
-          >
-            <StatusBadge status={row.original.estatus} />
-          </EditableReadCell>
-        );
-      },
+      cell: ({ row }) => renderFieldCell('status', row.original),
     },
     {
       accessorKey: 'categoria',
       header: 'Categoría',
-      cell: ({ row }) => {
-        const {
-          drafts: liveDrafts,
-          editingTicketId: liveEditingTicketId,
-          editingField: liveEditingField,
-          isSaving: liveSaving,
-          onUpdateDraft: liveUpdateDraft,
-          onEditCell: liveEditCell,
-        } = liveRefs.current;
-        const draft = liveDrafts[row.original.id];
-        const active = liveEditingTicketId === row.original.id && liveEditingField === 'category';
-        if (active && draft) {
-          return (
-            <CellEditorShell>
-              <Input
-                ref={activeInputRef}
-                value={draft.category}
-                maxLength={100}
-                placeholder="Categoría"
-                aria-label={`Editar categoría de ${row.original.comercio}`}
-                disabled={liveSaving}
-                className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
-                onClick={(event) => event.stopPropagation()}
-                onChange={(event) => liveUpdateDraft(row.original.id, { category: event.target.value })}
-                onKeyDown={commitInputKeys}
-                onBlur={commitOnBlur}
-              />
-            </CellEditorShell>
-          );
-        }
-        return (
-          <EditableReadCell
-            label={`Editar categoría de ${row.original.comercio}`}
-            disabled={liveSaving}
-            onActivate={() => liveEditCell(row.original, 'category')}
-          >
-            <CategoryBadge category={row.original.categoria} />
-          </EditableReadCell>
-        );
-      },
+      cell: ({ row }) => renderFieldCell('category', row.original),
     },
     {
       id: 'isAccreditable',
@@ -891,89 +922,15 @@ export function HistoryTicketTable({
         </div>
       ),
       enableSorting: false,
-      cell: ({ row }) => {
-        const {
-          isSaving: liveSaving,
-          editingTicketId: liveEditingTicketId,
-          savingAccreditableIds: liveSavingAccreditableIds,
-          onToggleAccreditable: liveToggleAccreditable,
-        } = liveRefs.current;
-        const checked = row.original.isAccreditable ?? true;
-        const saving = liveSavingAccreditableIds.has(row.original.id);
-        return (
-          <div
-            className="flex min-w-[116px] items-center gap-2 whitespace-nowrap"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <Switch
-              checked={checked}
-              disabled={saving || liveSaving || Boolean(liveEditingTicketId)}
-              aria-label={`Marcar ticket de ${row.original.comercio} como acreditable`}
-              onCheckedChange={(next) => {
-                if (saving || liveSaving || liveEditingTicketId) return;
-                liveToggleAccreditable(row.original, next);
-              }}
-            />
-            <span className="text-xs text-muted-foreground">
-              {checked ? 'Sí' : 'No'}
-            </span>
-            {saving ? <Loader2 size={12} className="animate-spin text-muted-foreground" /> : null}
-          </div>
-        );
-      },
+      cell: ({ row }) => renderFieldCell('isAccreditable', row.original),
     },
     {
       id: 'actions',
       header: 'Acciones',
       enableSorting: false,
-      cell: ({ row }) => {
-        const {
-          isSaving: liveSaving,
-          deletingTicketId: liveDeletingTicketId,
-          editingTicketId: liveEditingTicketId,
-          onPreviewImage: livePreviewImage,
-          onDelete: liveDelete,
-        } = liveRefs.current;
-        const hasImage = Boolean(resolveTicketImageUrl(row.original.imagenUrl));
-        return (
-          <div
-            className="flex min-w-[88px] items-center gap-1"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              aria-label={`Ver imagen del ticket de ${row.original.comercio}`}
-              title={hasImage ? 'Ver imagen' : 'Sin imagen'}
-              disabled={!hasImage || liveSaving}
-              onClick={() => livePreviewImage(row.original)}
-            >
-              <Camera size={15} />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-destructive hover:text-destructive"
-              aria-label={`Eliminar ticket de ${row.original.comercio}`}
-              title="Eliminar ticket"
-              disabled={liveSaving || liveDeletingTicketId === row.original.id || Boolean(liveEditingTicketId)}
-              onClick={() => liveDelete(row.original.id)}
-            >
-              {liveDeletingTicketId === row.original.id
-                ? <Loader2 size={15} className="animate-spin" />
-                : <Trash2 size={15} />}
-            </Button>
-            {liveEditingTicketId === row.original.id && liveSaving ? (
-              <Loader2 size={14} className="animate-spin text-muted-foreground" aria-label="Guardando" />
-            ) : null}
-          </div>
-        );
-      },
+      cell: ({ row }) => renderFieldCell('actions', row.original),
     },
-  ], [commitFromUi, commitInputKeys, commitOnBlur, onAmountDraftChange, onTaxDraftChange]);
+  ], [renderFieldCell]);
 
   const table = useReactTable({
     data: tickets,
@@ -1032,6 +989,7 @@ export function HistoryTicketTable({
         />
       ) : (
         <>
+          {!isMobile && (
           <div className="overflow-x-auto" tabIndex={0} aria-label="Tabla de tickets">
             <table className="w-full min-w-[1120px] table-fixed border-separate border-spacing-0">
               <thead>
@@ -1084,6 +1042,47 @@ export function HistoryTicketTable({
               </tbody>
             </table>
           </div>
+          )}
+
+          {/* Mobile: stacked cards instead of a horizontally scrolling table */}
+          {isMobile && (
+          <ul className="flex flex-col gap-3 p-3" aria-label="Lista de tickets">
+            {table.getRowModel().rows.map((row) => {
+              const ticket = row.original;
+              const rowError = validationErrors[ticket.id] ?? rowErrors[ticket.id];
+              const isDirty = dirtyIds.has(ticket.id);
+              return (
+                <li
+                  key={row.id}
+                  className={cn(
+                    'rounded-xl border border-border/50 bg-background/40 p-3',
+                    isDirty && 'border-amber-300 bg-amber-50/70 dark:bg-amber-950/20',
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">{renderFieldCell('vendor', ticket)}</div>
+                    <div className="shrink-0">{renderFieldCell('amount', ticket)}</div>
+                  </div>
+                  {rowError ? (
+                    <p className="mt-1 text-xs text-destructive" role="alert">{rowError}</p>
+                  ) : null}
+                  <dl className="mt-3 grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2">
+                    {MOBILE_CARD_FIELDS.map(({ field, label }) => (
+                      <div key={field} className="flex items-center justify-between gap-2">
+                        <dt className="shrink-0 text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</dt>
+                        <dd className="min-w-0 flex-1 text-right">{renderFieldCell(field, ticket)}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <div className="mt-3 flex justify-end border-t border-border/40 pt-2">
+                    {renderFieldCell('actions', ticket)}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          )}
+
           <div className="flex items-center justify-between border-t border-border/50 px-4 py-3">
             <p className="text-sm text-muted-foreground">
               {table.getFilteredRowModel().rows.length} ticket{table.getFilteredRowModel().rows.length === 1 ? '' : 's'}

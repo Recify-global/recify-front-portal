@@ -109,7 +109,7 @@ export default function BalancesPage() {
     <AppLayout>
       <div className="mx-auto max-w-4xl space-y-6 animate-fade-in">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Saldos</h1>
+          <h1 className="text-xl font-bold text-foreground sm:text-2xl">Saldos</h1>
           <p className="mt-1 text-muted-foreground">
             Capturas de saldo de tus cuentas y tarjetas. No cuentan como ingreso ni gasto.
           </p>
