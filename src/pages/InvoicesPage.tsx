@@ -47,6 +47,7 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination';
 import { useAuth } from '@/hooks/use-auth';
+import { useIsMobile } from '@/hooks/use-mobile';
 import {
   captureAuthMutationContext,
   isAuthMutationContextCurrent,
@@ -111,6 +112,7 @@ function looksLikeIssuerRfc(value: string): boolean {
 }
 
 export default function InvoicesPage() {
+  const isMobile = useIsMobile();
   const [periodReference] = useState(() => new Date());
   const [tab, setTab] = useState<InvoiceTab>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | BackendInvoiceType>('all');
@@ -414,7 +416,7 @@ export default function InvoicesPage() {
     <AppLayout>
       <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Facturas</h1>
+          <h1 className="text-xl font-bold text-foreground sm:text-2xl">Facturas</h1>
           <p className="text-muted-foreground mt-1">
             CFDI recibidos y emitidos, conciliados con tus tickets
           </p>
@@ -631,6 +633,7 @@ export default function InvoicesPage() {
                   sheetName="Facturas"
                 />
               </div>
+              {!isMobile && (
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
@@ -726,6 +729,87 @@ export default function InvoicesPage() {
                   </TableBody>
                 </Table>
               </div>
+              )}
+
+              {/* Mobile: stacked cards instead of a horizontally scrolling table */}
+              {isMobile && (
+              <ul className="flex flex-col gap-3 p-3" aria-label="Lista de facturas">
+                {invoices.map((invoice) => (
+                  <li key={invoice._id}>
+                    <div
+                      className="cursor-pointer rounded-xl border border-border/50 bg-background/40 p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      tabIndex={0}
+                      role="button"
+                      aria-label={`Abrir factura de ${invoice.issuerName ?? 'emisor desconocido'}`}
+                      onClick={() => openDetail(invoice)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          openDetail(invoice);
+                        }
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-foreground">
+                            {invoice.issuerName ?? 'Sin emisor'}
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {invoice.issuerRfc ?? '—'}
+                          </p>
+                        </div>
+                        <p className="shrink-0 text-right text-sm font-semibold tabular-nums text-foreground">
+                          {formatMxn(invoice.total)}
+                        </p>
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <span className="whitespace-nowrap">{formatInvoiceDate(invoice.date, timeZone)}</span>
+                        <span className="whitespace-nowrap">{INVOICE_TYPE_LABELS[invoice.type] ?? invoice.type}</span>
+                        <InvoiceMatchStatusBadge status={invoice.matchStatus} />
+                      </div>
+                      <div
+                        className="mt-3 flex justify-end gap-1 border-t border-border/40 pt-2"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-9 rounded-lg"
+                          onClick={() => void openPdf(invoice)}
+                          disabled={pdfBusyId === invoice._id}
+                          aria-label="Abrir PDF"
+                        >
+                          {pdfBusyId === invoice._id ? (
+                            <Loader2 size={15} className="animate-spin" />
+                          ) : (
+                            <FileText size={15} />
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-9 rounded-lg text-destructive hover:text-destructive"
+                          onClick={() => {
+                            if (!companyId) return;
+                            setPendingDelete({ companyId, invoice });
+                          }}
+                          disabled={deleteMutation.isPending}
+                          aria-label="Eliminar factura"
+                        >
+                          {deleteMutation.isPending &&
+                          pendingDelete?.invoice._id === invoice._id ? (
+                            <Loader2 size={15} className="animate-spin" />
+                          ) : (
+                            <Trash2 size={15} />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              )}
 
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-border/50">
                 <p className="text-xs text-muted-foreground" aria-live="polite">

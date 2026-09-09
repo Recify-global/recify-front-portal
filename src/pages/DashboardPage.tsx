@@ -35,7 +35,7 @@ export default function DashboardPage() {
             <div className="p-2 rounded-xl bg-gradient-primary text-primary-foreground">
               <LayoutDashboard size={20} />
             </div>
-            <h1 className="text-2xl font-bold text-foreground">Panel de análisis financiero</h1>
+            <h1 className="text-xl font-bold text-foreground sm:text-2xl">Panel de análisis financiero</h1>
           </div>
           <p className="text-muted-foreground">
             Indicadores de gasto, facturación e IVA deducible ·{' '}

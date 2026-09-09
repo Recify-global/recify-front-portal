@@ -651,7 +651,7 @@ export default function UploadPage() {
     <AppLayout>
       <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Subir ticket o factura</h1>
+          <h1 className="text-xl font-bold text-foreground sm:text-2xl">Subir ticket o factura</h1>
           <p className="text-muted-foreground mt-1">
             Captura la foto de un ticket o sube el PDF de una factura (CFDI) para analizarlos
           </p>
