@@ -25,7 +25,7 @@ function mergeAccreditable(
   ticket: { isAccreditable?: boolean | null },
   dailyTicket: { isAccreditable?: boolean | null } | undefined,
 ): boolean {
-  return ticket.isAccreditable ?? dailyTicket?.isAccreditable ?? true;
+  return ticket.isAccreditable ?? dailyTicket?.isAccreditable ?? false;
 }
 
 function tableProps(
@@ -67,21 +67,21 @@ describe('History accreditable column', () => {
     expect(screen.getByRole('button', { name: 'Qué significa Acreditable' })).toBeInTheDocument();
   });
 
-  it('normalizes missing isAccreditable to Sí with a controlled switch', () => {
+  it('normalizes missing isAccreditable to No with a controlled switch', () => {
     const ticket = mapBackendTicket({ ...backendTicket, isAccreditable: undefined });
-    expect(ticket.isAccreditable).toBe(true);
+    expect(ticket.isAccreditable).toBe(false);
     render(<HistoryTicketTable {...tableProps(ticket)} />);
     const toggle = screen.getByRole('switch', {
       name: 'Marcar ticket de Café Central como acreditable',
     });
-    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
     expect(toggle).not.toHaveAttribute('data-state', 'indeterminate');
-    expect(screen.getByText('Sí')).toBeInTheDocument();
+    expect(screen.getByText('No')).toBeInTheDocument();
   });
 
-  it('normalizes null isAccreditable to Sí', () => {
+  it('normalizes null isAccreditable to No', () => {
     const ticket = mapBackendTicket({ ...backendTicket, isAccreditable: null });
-    expect(ticket.isAccreditable).toBe(true);
+    expect(ticket.isAccreditable).toBe(false);
   });
 
   it('preserves explicit false as No', () => {
@@ -219,10 +219,10 @@ describe('History accreditable merge priority', () => {
     expect(mergeAccreditable({ isAccreditable: false }, { isAccreditable: undefined })).toBe(false);
   });
 
-  it('falls back to daily then true', () => {
+  it('falls back to daily then false', () => {
     expect(mergeAccreditable({ isAccreditable: undefined }, { isAccreditable: true })).toBe(true);
     expect(mergeAccreditable({ isAccreditable: null }, { isAccreditable: false })).toBe(false);
-    expect(mergeAccreditable({}, undefined)).toBe(true);
+    expect(mergeAccreditable({}, undefined)).toBe(false);
   });
 });
 
