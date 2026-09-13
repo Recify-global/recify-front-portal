@@ -35,13 +35,12 @@ import {
 import { invalidateInvoiceQueries } from '@/utils/invoice-queries';
 import { invalidateTicketDerivedQueries } from '@/utils/ticket-derived-queries';
 import { invalidateBalanceQueries } from '@/hooks/use-balances';
+import { TICKET_IMAGE_ACCEPT } from '@/utils/upload-file';
 
 interface BatchUploadDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 const STATUS_LABEL: Record<BatchItemStatus, string> = {
   queued: 'Pendiente',
@@ -228,7 +227,7 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
         <input
           ref={fileInputRef}
           type="file"
-          accept={ALLOWED_MIME_TYPES.join(',')}
+          accept={TICKET_IMAGE_ACCEPT}
           multiple
           className="hidden"
           onChange={(e) => {

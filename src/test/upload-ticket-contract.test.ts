@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { uploadTicket } from '@/services/upload.service';
+import { uploadInvoice, uploadTicket } from '@/services/upload.service';
 
 const mocks = vi.hoisted(() => ({
   apiRequest: vi.fn(),
@@ -9,7 +9,7 @@ vi.mock('@/api/http', () => ({
   apiRequest: mocks.apiRequest,
 }));
 
-describe('upload ticket creation contract', () => {
+describe('upload multipart creation contract', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.apiRequest.mockResolvedValue({
@@ -53,5 +53,22 @@ describe('upload ticket creation contract', () => {
     const file = new File(['img'], 'ticket.png', { type: 'image/png' });
     await uploadTicket('company-a', file);
     expect(mocks.apiRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends an invoice only in the file FormData field', async () => {
+    const file = new File(['%PDF-1.7'], 'invoice.pdf', { type: 'application/pdf' });
+
+    await uploadInvoice('company-a', file);
+
+    expect(mocks.apiRequest).toHaveBeenCalledOnce();
+    const [path, opts] = mocks.apiRequest.mock.calls[0];
+    expect(path).toBe('/companies/company-a/upload/invoice');
+    expect(opts.method).toBe('POST');
+    expect(opts.formData).toBeInstanceOf(FormData);
+
+    const formData = opts.formData as FormData;
+    expect(Array.from(formData.keys())).toEqual(['file']);
+    expect(formData.get('file')).toBe(file);
+    expect(formData.has('image')).toBe(false);
   });
 });

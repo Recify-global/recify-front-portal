@@ -6,6 +6,7 @@ import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
 import { TicketImageDialog } from '@/components/recify/TicketImageDialog';
 import { CameraCaptureDialog } from '@/components/recify/CameraCaptureDialog';
 import { BatchUploadDialog } from '@/components/recify/BatchUploadDialog';
+import { UploadHelpDialog } from '@/components/recify/UploadHelpDialog';
 import { TicketScanAnimation } from '@/components/recify/TicketScanAnimation';
 import { InvoiceUploadResult } from '@/components/recify/InvoiceUploadResult';
 import { BalanceUploadResult, type BalanceLike } from '@/components/recify/BalanceUploadResult';
@@ -46,7 +47,15 @@ import {
   type ActiveUploadContext,
 } from '@/utils/individual-upload-flow';
 import { getInvoiceUploadErrorMessage, isInvoiceAbortError } from '@/utils/invoice-errors';
-import { validateInvoicePdfFile } from '@/utils/invoice-file';
+import {
+  INVOICE_PDF_ACCEPT,
+  isInvoicePdfCandidate,
+  validateInvoicePdfFile,
+} from '@/utils/invoice-file';
+import {
+  TICKET_IMAGE_ACCEPT,
+  validateTicketImageFile,
+} from '@/utils/upload-file';
 
 type UploadState = 'idle' | 'uploaded' | 'analyzing' | 'done';
 type UploadMode = 'ticket' | 'invoice' | 'balance';
@@ -80,16 +89,6 @@ function toBalanceLike(raw: Record<string, unknown>): BalanceLike {
     currency: typeof raw.currency === 'string' ? raw.currency : 'MXN',
   };
 }
-const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-const PDF_MIME_TYPE = 'application/pdf';
-const MAX_SIZE_BYTES = 10 * 1024 * 1024;
-
-function isPdfUploadCandidate(file: File): boolean {
-  const mime = (file.type || '').toLowerCase();
-  if (mime === PDF_MIME_TYPE) return true;
-  return /\.pdf$/i.test(file.name || '');
-}
-
 const PAYMENT_OPTIONS: { value: BackendPaymentMethod; label: string }[] = [
   { value: 'card', label: 'Tarjeta' },
   { value: 'cash', label: 'Efectivo' },
@@ -248,16 +247,9 @@ export default function UploadPage() {
   };
 
   const validateFile = (file: File | null | undefined) => {
-    if (!file) {
-      toast.error('Selecciona un archivo para continuar.');
-      return false;
-    }
-    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-      toast.error('Formato no permitido. Usa PNG, JPG o PDF.');
-      return false;
-    }
-    if (file.size > MAX_SIZE_BYTES) {
-      toast.error('El archivo supera el máximo de 10 MB.');
+    const result = validateTicketImageFile(file);
+    if (!result.ok) {
+      toast.error(result.message);
       return false;
     }
     return true;
@@ -268,7 +260,7 @@ export default function UploadPage() {
     if (!validateSession()) return;
     if (!companyId) return;
 
-    const pdfCheck = validateInvoicePdfFile(file);
+    const pdfCheck = await validateInvoicePdfFile(file);
     if (!pdfCheck.ok) {
       toast.error(pdfCheck.message);
       return;
@@ -386,7 +378,7 @@ export default function UploadPage() {
     if (!validateSession()) return;
 
     // Los PDF son facturas CFDI: van directo al flujo de facturas.
-    if (file && isPdfUploadCandidate(file)) {
+    if (file && (await isInvoicePdfCandidate(file))) {
       await runInvoiceUpload(file);
       return;
     }
@@ -650,11 +642,14 @@ export default function UploadPage() {
   return (
     <AppLayout>
       <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
-        <div>
-          <h1 className="text-xl font-bold text-foreground sm:text-2xl">Subir ticket o factura</h1>
-          <p className="text-muted-foreground mt-1">
-            Captura la foto de un ticket o sube el PDF de una factura (CFDI) para analizarlos
-          </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-foreground sm:text-2xl">Subir ticket o factura</h1>
+            <p className="text-muted-foreground mt-1">
+              Captura la foto de un ticket o sube el PDF de una factura (CFDI) para analizarlos
+            </p>
+          </div>
+          <UploadHelpDialog />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -663,7 +658,7 @@ export default function UploadPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+              accept={`${TICKET_IMAGE_ACCEPT},${INVOICE_PDF_ACCEPT}`}
               className="hidden"
               onChange={handleFileInputChange}
             />
@@ -695,7 +690,7 @@ export default function UploadPage() {
                     </p>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Imágenes PNG/JPG o PDF CFDI · Máx. 10 MB
+                    Imágenes JPG, PNG, WEBP, GIF o PDF CFDI · Máx. 10 MB
                   </p>
                 </div>
               )}

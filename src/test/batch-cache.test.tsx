@@ -49,7 +49,7 @@ vi.mock('@/hooks/use-batch-upload', () => ({
     saveItem: mocks.saveItem,
     saveAll: mocks.saveAll,
     clear: mocks.clear,
-    maxFiles: 20,
+    maxFiles: 5,
   }),
 }));
 

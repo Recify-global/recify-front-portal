@@ -151,7 +151,7 @@ function uploadFile() {
 
 function uploadInvoiceFile() {
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-  const file = new File(['invoice'], 'invoice.pdf', { type: 'application/pdf' });
+  const file = new File(['%PDF-1.7'], 'invoice.pdf', { type: 'application/pdf' });
   fireEvent.change(input, { target: { files: [file] } });
   return file;
 }

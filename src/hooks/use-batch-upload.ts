@@ -8,6 +8,12 @@ import {
   captureAuthMutationContext,
   isAuthMutationContextCurrent,
 } from '@/auth/session-cleanup';
+import {
+  MAX_TICKET_FILES_PER_BATCH,
+  MAX_UPLOAD_FILE_BYTES,
+  TICKET_IMAGE_TRANSPORT_MIME_TYPES,
+  validateTicketImageFile,
+} from '@/utils/upload-file';
 
 export type BatchItemStatus =
   | 'queued'
@@ -35,12 +41,9 @@ export interface UseBatchUploadOptions {
   maxFiles?: number;
   analyzeConcurrency?: number;
   saveConcurrency?: number;
-  allowedMimeTypes?: string[];
+  allowedMimeTypes?: readonly string[];
   maxBytes?: number;
 }
-
-const DEFAULT_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
 
 interface AddFilesResult {
   added: number;
@@ -97,11 +100,11 @@ function emptyCounts(): Record<BatchItemStatus, number> {
  */
 export function useBatchUpload(options: UseBatchUploadOptions = {}) {
   const {
-    maxFiles = 10,
+    maxFiles = MAX_TICKET_FILES_PER_BATCH,
     analyzeConcurrency = 3,
     saveConcurrency = 2,
-    allowedMimeTypes = DEFAULT_MIMES,
-    maxBytes = DEFAULT_MAX_BYTES,
+    allowedMimeTypes = TICKET_IMAGE_TRANSPORT_MIME_TYPES,
+    maxBytes = MAX_UPLOAD_FILE_BYTES,
   } = options;
 
   const { companyId } = useAuth();
@@ -176,13 +179,11 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
 
   const validateFile = useCallback(
     (file: File): string | null => {
-      if (!allowedMimeTypes.includes(file.type)) {
-        return 'Formato no permitido.';
-      }
-      if (file.size > maxBytes) {
-        return `Supera el máximo de ${Math.round(maxBytes / (1024 * 1024))} MB.`;
-      }
-      return null;
+      const result = validateTicketImageFile(file, {
+        allowedMimeTypes,
+        maxBytes,
+      });
+      return result.ok ? null : result.message;
     },
     [allowedMimeTypes, maxBytes],
   );
