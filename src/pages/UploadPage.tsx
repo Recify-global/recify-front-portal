@@ -4,7 +4,6 @@ import { StatusBadge } from '@/components/recify/StatusBadge';
 import { CategoryBadge } from '@/components/recify/CategoryBadge';
 import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
 import { TicketImageDialog } from '@/components/recify/TicketImageDialog';
-import { CameraCaptureDialog } from '@/components/recify/CameraCaptureDialog';
 import { BatchUploadDialog } from '@/components/recify/BatchUploadDialog';
 import { TicketScanAnimation } from '@/components/recify/TicketScanAnimation';
 import { InvoiceUploadResult } from '@/components/recify/InvoiceUploadResult';
@@ -130,7 +129,6 @@ export default function UploadPage() {
   const [previewUrl, setPreviewUrl] = useState<string | undefined>(undefined);
   const [imageDialogUrl, setImageDialogUrl] = useState<string | null>(null);
   const [hasPersistedTicket, setHasPersistedTicket] = useState(false);
-  const [cameraOpen, setCameraOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previewUrlRef = useRef<string | undefined>(undefined);
@@ -442,20 +440,10 @@ export default function UploadPage() {
     fileInputRef.current?.click();
   };
 
-  const openCamera = () => {
-    if (isBusy) return;
-    if (!validateSession()) return;
-    setCameraOpen(true);
-  };
-
   const openBatch = () => {
     if (isBusy) return;
     if (!validateSession()) return;
     setBatchOpen(true);
-  };
-
-  const handleCameraCapture = (file: File) => {
-    void handleNewFile(file);
   };
 
   const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -744,24 +732,14 @@ export default function UploadPage() {
 
             {state === 'idle' && (
               <div className="space-y-2">
-                <div className="flex gap-3">
-                  <Button
-                    variant="outline"
-                    className="flex-1 h-11 rounded-xl"
-                    onClick={openCamera}
-                    disabled={isBusy}
-                  >
-                    <Camera size={16} className="mr-2" /> Tomar foto
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="flex-1 h-11 rounded-xl"
-                    onClick={openFilePicker}
-                    disabled={isBusy}
-                  >
-                    <Upload size={16} className="mr-2" /> Subir archivo
-                  </Button>
-                </div>
+                <Button
+                  variant="outline"
+                  className="w-full h-11 rounded-xl"
+                  onClick={openFilePicker}
+                  disabled={isBusy}
+                >
+                  <Camera size={16} className="mr-2" /> Subir archivo o tomar foto
+                </Button>
                 <Button
                   variant="secondary"
                   className="w-full h-11 rounded-xl"
@@ -772,12 +750,6 @@ export default function UploadPage() {
                 </Button>
               </div>
             )}
-
-            <CameraCaptureDialog
-              open={cameraOpen}
-              onOpenChange={setCameraOpen}
-              onCapture={handleCameraCapture}
-            />
 
             <BatchUploadDialog open={batchOpen} onOpenChange={setBatchOpen} />
 

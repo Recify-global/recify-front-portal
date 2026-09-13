@@ -131,7 +131,9 @@ export function mapBackendTicket(t: BackendTicket, timeZone = HISTORY_TIMEZONE):
     reviewStatus: formatTicketReviewStatus(t.reviewStatus),
     notas,
     imagenUrl: imageUrl,
-    isAccreditable: t.isAccreditable ?? true,
+    // Matches the backend default (new/unknown tickets are not accreditable
+    // until a user marks them). Kept in sync with Ticket.isAccreditable = false.
+    isAccreditable: t.isAccreditable ?? false,
   };
 }
 

@@ -319,7 +319,15 @@ export function normalizeInvoicedVsUninvoiced(raw: unknown): InvoicedVsUninvoice
 
   const totalAmount = invoiced.amount + uninvoiced.amount;
   const totalCount = invoiced.count + uninvoiced.count;
-  const invoicedRatio = totalAmount > 0 ? invoiced.amount / totalAmount : 0;
+  // Prefer the backend's canonical `invoicedPercentage` (amount-based, in points:
+  // 80 = 80%); fall back to a local amount-based ratio for partial/legacy shapes.
+  const backendPercentage = field(record, ['invoicedPercentage']);
+  const invoicedRatio =
+    backendPercentage !== undefined
+      ? toNum(backendPercentage) / 100
+      : totalAmount > 0
+        ? invoiced.amount / totalAmount
+        : 0;
 
   return {
     period: pickPeriod(raw),
