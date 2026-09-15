@@ -10,7 +10,6 @@ import {
   isValidDateRange,
   last12MonthsRange,
   paymentMethodKpiFromTop,
-  resolveMostUsedPaymentMethod,
   startOfCivilDayIso,
 } from '@/utils/financial-kpis';
 
@@ -28,69 +27,6 @@ describe('isKpiExcludedStatus', () => {
   it('includes unknown future statuses by default', () => {
     expect(isKpiExcludedStatus('archived')).toBe(false);
     expect(isKpiExcludedStatus('reviewing')).toBe(false);
-  });
-});
-
-describe('resolveMostUsedPaymentMethod', () => {
-  it('returns a single winner with count percentage', () => {
-    const result = resolveMostUsedPaymentMethod([
-      { paymentMethod: 'card', count: 12 },
-      { paymentMethod: 'cash', count: 5 },
-      { paymentMethod: 'transfer', count: 3 },
-    ]);
-    expect(result.kind).toBe('winner');
-    expect(result.title).toBe('Tarjeta');
-    expect(result.subtitle).toBe('12 movimientos · 60%');
-    expect(result.winners).toEqual(['card']);
-  });
-
-  it('shows a two-way tie', () => {
-    const result = resolveMostUsedPaymentMethod([
-      { paymentMethod: 'cash', count: 4 },
-      { paymentMethod: 'transfer', count: 4 },
-      { paymentMethod: 'card', count: 1 },
-    ]);
-    expect(result.kind).toBe('tie');
-    expect(result.title).toBe('Empate');
-    expect(result.subtitle).toBe('Efectivo y Transferencia');
-  });
-
-  it('shows a three-way tie', () => {
-    const result = resolveMostUsedPaymentMethod([
-      { paymentMethod: 'card', count: 2 },
-      { paymentMethod: 'cash', count: 2 },
-      { paymentMethod: 'transfer', count: 2 },
-    ]);
-    expect(result.kind).toBe('tie');
-    expect(result.subtitle).toBe('Tarjeta, Efectivo y Transferencia');
-  });
-
-  it('excludes other and empty from the winner and counts them as unspecified', () => {
-    const result = resolveMostUsedPaymentMethod([
-      { paymentMethod: 'card', count: 3 },
-      { paymentMethod: 'other', count: 10 },
-      { paymentMethod: '', count: 2 },
-      { paymentMethod: null, count: 1 },
-    ]);
-    expect(result.kind).toBe('winner');
-    expect(result.title).toBe('Tarjeta');
-    expect(result.unspecifiedDetail).toBe('13 movimientos sin especificar');
-    expect(result.identifiedTotal).toBe(3);
-  });
-
-  it('handles only unspecified methods', () => {
-    const result = resolveMostUsedPaymentMethod([
-      { paymentMethod: 'other', count: 4 },
-      { paymentMethod: undefined, count: 1 },
-    ]);
-    expect(result.kind).toBe('unspecified-only');
-    expect(result.title).toBe('Sin especificar');
-  });
-
-  it('returns empty when there are no movements', () => {
-    const result = resolveMostUsedPaymentMethod([]);
-    expect(result.kind).toBe('empty');
-    expect(result.title).toBe('Sin movimientos');
   });
 });
 

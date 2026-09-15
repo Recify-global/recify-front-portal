@@ -42,11 +42,6 @@ export const PAYMENT_METHOD_LABELS: Record<BackendPaymentMethod, string> = {
   other: 'Otro',
 };
 
-export interface PaymentMethodCountInput {
-  paymentMethod: string | null | undefined;
-  count: number;
-}
-
 export interface PaymentMethodKpiResult {
   kind: 'empty' | 'winner' | 'tie' | 'unspecified-only';
   /** Etiqueta principal (método, "Empate" o "Sin movimientos"). */
@@ -58,98 +53,6 @@ export interface PaymentMethodKpiResult {
   winners: BackendPaymentMethod[];
   identifiedTotal: number;
   unspecifiedCount: number;
-}
-
-/**
- * Calcula el método más usado por cantidad de movimientos.
- * Excluye other/null/undefined/vacío del ganador; los cuenta como "Sin especificar".
- */
-export function resolveMostUsedPaymentMethod(
-  rows: PaymentMethodCountInput[],
-): PaymentMethodKpiResult {
-  let unspecifiedCount = 0;
-  const identified = new Map<BackendPaymentMethod, number>();
-
-  for (const row of rows) {
-    const count = Number.isFinite(row.count) && row.count > 0 ? Math.trunc(row.count) : 0;
-    if (count <= 0) continue;
-
-    const raw = typeof row.paymentMethod === 'string' ? row.paymentMethod.trim() : '';
-    if (!raw || raw === 'other' || !isIdentifiedPaymentMethod(raw)) {
-      unspecifiedCount += count;
-      continue;
-    }
-    identified.set(raw, (identified.get(raw) ?? 0) + count);
-  }
-
-  const identifiedTotal = Array.from(identified.values()).reduce((a, b) => a + b, 0);
-  const unspecifiedDetail =
-    unspecifiedCount > 0
-      ? `${unspecifiedCount} movimiento${unspecifiedCount === 1 ? '' : 's'} sin especificar`
-      : null;
-
-  if (identifiedTotal === 0) {
-    if (unspecifiedCount > 0) {
-      return {
-        kind: 'unspecified-only',
-        title: 'Sin especificar',
-        subtitle: unspecifiedDetail ?? 'Sin movimientos identificados',
-        unspecifiedDetail: null,
-        winners: [],
-        identifiedTotal: 0,
-        unspecifiedCount,
-      };
-    }
-    return {
-      kind: 'empty',
-      title: 'Sin movimientos',
-      subtitle: 'Período sin métodos de pago',
-      unspecifiedDetail: null,
-      winners: [],
-      identifiedTotal: 0,
-      unspecifiedCount: 0,
-    };
-  }
-
-  let max = 0;
-  for (const count of identified.values()) {
-    if (count > max) max = count;
-  }
-
-  const winners = (['card', 'cash', 'transfer'] as const).filter(
-    (method) => (identified.get(method) ?? 0) === max,
-  );
-
-  if (winners.length === 1) {
-    const winner = winners[0];
-    const count = identified.get(winner) ?? 0;
-    const pct = Math.round((count / identifiedTotal) * 100);
-    return {
-      kind: 'winner',
-      title: PAYMENT_METHOD_LABELS[winner],
-      subtitle: `${count} movimiento${count === 1 ? '' : 's'} · ${pct}%`,
-      unspecifiedDetail,
-      winners,
-      identifiedTotal,
-      unspecifiedCount,
-    };
-  }
-
-  const labels = winners.map((m) => PAYMENT_METHOD_LABELS[m]);
-  const tieLabel =
-    labels.length === 2
-      ? `${labels[0]} y ${labels[1]}`
-      : `${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}`;
-
-  return {
-    kind: 'tie',
-    title: 'Empate',
-    subtitle: tieLabel,
-    unspecifiedDetail,
-    winners,
-    identifiedTotal,
-    unspecifiedCount,
-  };
 }
 
 /**
