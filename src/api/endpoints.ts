@@ -3,6 +3,8 @@ export const endpoints = {
     login: () => '/auth/login',
     register: () => '/auth/register',
     google: () => '/auth/google',
+    googleLink: () => '/auth/google/link',
+    me: () => '/auth/me',
   },
   companies: {
     list: () => '/companies',

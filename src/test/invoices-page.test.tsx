@@ -20,6 +20,7 @@ vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({
     token: 'token',
     companyId: mocks.companyId,
+    canManage: true,
   }),
 }));
 

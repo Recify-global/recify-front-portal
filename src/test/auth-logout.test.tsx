@@ -33,14 +33,19 @@ vi.mock('@/services/auth.service', () => ({
   loginRequest: vi.fn(),
   registerRequest: vi.fn(),
   googleLoginRequest: vi.fn(),
+  googleLinkRequest: vi.fn(),
+  getMeRequest: vi.fn(() => new Promise(() => {})),
 }));
 
 const userA: AuthUser = {
   _id: 'user-a',
   name: 'Usuario A',
   email: 'a@recify.test',
-  role: 'admin',
-  companies: ['company-a', 'company-b'],
+  platformRole: null,
+  memberships: [
+    { membershipId: 'membership-a', companyId: 'company-a', companyName: 'A', companyStatus: 'active', companyTimezone: 'America/Mexico_City', role: 'accountant', status: 'active' },
+    { membershipId: 'membership-b', companyId: 'company-b', companyName: 'B', companyStatus: 'active', companyTimezone: 'America/Mexico_City', role: 'viewer', status: 'active' },
+  ],
   status: 'active',
 };
 
@@ -49,7 +54,9 @@ const userB: AuthUser = {
   _id: 'user-b',
   name: 'Usuario B',
   email: 'b@recify.test',
-  companies: ['company-b'],
+  memberships: [
+    { membershipId: 'membership-b2', companyId: 'company-b', companyName: 'B', companyStatus: 'active', companyTimezone: 'America/Mexico_City', role: 'viewer', status: 'active' },
+  ],
 };
 
 function wrapperWithClient() {

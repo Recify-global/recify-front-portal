@@ -26,6 +26,8 @@ vi.mock('@/services/auth.service', () => ({
   loginRequest: vi.fn(),
   registerRequest: vi.fn(),
   googleLoginRequest: vi.fn(),
+  googleLinkRequest: vi.fn(),
+  getMeRequest: vi.fn(() => new Promise(() => {})),
 }));
 
 vi.mock('@/components/recify/GoogleSignInButton', () => ({
@@ -36,8 +38,10 @@ const owner: AuthUser = {
   _id: 'user-register',
   name: 'Ana Founder',
   email: 'ana@empresa.test',
-  role: 'accountant',
-  companies: ['company-new'],
+  platformRole: null,
+  memberships: [
+    { membershipId: 'membership-new', companyId: 'company-new', companyName: 'Empresa Ana', companyStatus: 'active', companyTimezone: 'America/Mexico_City', role: 'accountant', status: 'active' },
+  ],
   status: 'active',
 };
 

@@ -2,6 +2,7 @@ import { apiRequest } from '@/api/http';
 import { endpoints } from '@/api/endpoints';
 import type {
   AuthResponse,
+  GoogleLinkRequest,
   GoogleLoginRequest,
   LoginRequest,
   RegisterRequest,
@@ -29,4 +30,16 @@ export async function googleLoginRequest(payload: GoogleLoginRequest): Promise<A
     body: payload,
     auth: false,
   });
+}
+
+export async function googleLinkRequest(payload: GoogleLinkRequest): Promise<AuthResponse> {
+  return apiRequest<AuthResponse>(endpoints.auth.googleLink(), {
+    method: 'POST',
+    body: payload,
+    auth: false,
+  });
+}
+
+export async function getMeRequest(): Promise<{ user: AuthResponse['user'] }> {
+  return apiRequest<{ user: AuthResponse['user'] }>(endpoints.auth.me());
 }

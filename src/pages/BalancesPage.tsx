@@ -9,6 +9,7 @@ import { useBalances, useDeleteBalance } from '@/hooks/use-balances';
 import { useCompanies } from '@/hooks/use-companies';
 import { HISTORY_TIMEZONE, formatMxn } from '@/utils/financial-kpis';
 import type { BackendBalance } from '@/types/balance';
+import { useAuth } from '@/hooks/use-auth';
 
 function formatDate(iso: string, timeZone: string): string {
   const d = new Date(iso);
@@ -26,11 +27,13 @@ function BalanceRow({
   timeZone,
   onDelete,
   deleting,
+  canDelete,
 }: {
   balance: BackendBalance;
   timeZone: string;
   onDelete: (id: string) => void;
   deleting: boolean;
+  canDelete: boolean;
 }) {
   const currency = balance.currency?.trim() || 'MXN';
   const money = (n: number | null) => (n == null ? '—' : `${formatMxn(n)} ${currency}`);
@@ -53,16 +56,18 @@ function BalanceRow({
             </p>
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 rounded-lg text-muted-foreground hover:text-destructive"
-          onClick={() => onDelete(balance._id)}
-          disabled={deleting}
-          aria-label="Eliminar saldo"
-        >
-          {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-        </Button>
+        {canDelete ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 rounded-lg text-muted-foreground hover:text-destructive"
+            onClick={() => onDelete(balance._id)}
+            disabled={deleting}
+            aria-label="Eliminar saldo"
+          >
+            {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+          </Button>
+        ) : null}
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <div className="rounded-xl border border-border/50 bg-background p-3">
@@ -83,6 +88,7 @@ function BalanceRow({
 }
 
 export default function BalancesPage() {
+  const { canManage } = useAuth();
   const [page, setPage] = useState(1);
   const { activeCompany } = useCompanies();
   const timeZone = activeCompany?.timezone?.trim() || HISTORY_TIMEZONE;
@@ -144,6 +150,7 @@ export default function BalancesPage() {
                   timeZone={timeZone}
                   onDelete={handleDelete}
                   deleting={deletingId === b._id}
+                  canDelete={canManage}
                 />
               ))}
             </div>

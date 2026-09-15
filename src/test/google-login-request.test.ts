@@ -6,8 +6,10 @@ const user: AuthUser = {
   _id: 'user-google',
   name: 'Usuario Google',
   email: 'google@recify.test',
-  role: 'accountant',
-  companies: ['company-a'],
+  platformRole: null,
+  memberships: [
+    { membershipId: 'membership-a', companyId: 'company-a', companyName: 'A', companyStatus: 'active', companyTimezone: 'America/Mexico_City', role: 'accountant', status: 'active' },
+  ],
   status: 'active',
 };
 

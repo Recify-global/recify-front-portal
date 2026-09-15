@@ -88,8 +88,10 @@ const userB: AuthUser = {
   _id: 'user-b',
   name: 'User B',
   email: 'b@recify.test',
-  role: 'admin',
-  companies: ['company-b'],
+  platformRole: null,
+  memberships: [
+    { membershipId: 'membership-b', companyId: 'company-b', companyName: 'B', companyStatus: 'active', companyTimezone: 'America/Mexico_City', role: 'accountant', status: 'active' },
+  ],
   status: 'active',
 };
 

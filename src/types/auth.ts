@@ -1,12 +1,23 @@
-export type UserRole = 'admin' | 'accountant' | 'viewer';
+export type PlatformRole = 'admin' | null;
+export type MembershipRole = 'accountant' | 'viewer';
 export type UserStatus = 'active' | 'inactive' | 'suspended';
+
+export interface CompanyMembership {
+  membershipId: string;
+  companyId: string;
+  companyName: string;
+  companyStatus: 'active' | 'suspended';
+  companyTimezone: string;
+  role: MembershipRole;
+  status: 'active' | 'inactive';
+}
 
 export interface AuthUser {
   _id: string;
   name: string;
   email: string;
-  role: UserRole;
-  companies: string[];
+  platformRole: PlatformRole;
+  memberships: CompanyMembership[];
   status: UserStatus;
   created_at?: string;
   updated_at?: string;
@@ -32,6 +43,10 @@ export interface RegisterRequest {
 
 export interface GoogleLoginRequest {
   idToken: string;
+}
+
+export interface GoogleLinkRequest extends GoogleLoginRequest {
+  password: string;
 }
 
 export interface AuthResponse {

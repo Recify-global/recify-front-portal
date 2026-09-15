@@ -5,6 +5,13 @@ import { RecifyLogo } from '@/components/recify/RecifyLogo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Receipt, BarChart3, Shield, Zap, Loader2 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { ApiRequestError } from '@/api/http';
@@ -36,18 +43,23 @@ export default function AuthPage() {
   const [companyName, setCompanyName] = useState('');
   const [rfc, setRfc] = useState('');
   const navigate = useNavigate();
-  const { login, register, googleLogin } = useAuth();
+  const { login, register, googleLogin, googleLink } = useAuth();
+  const [googleLinkToken, setGoogleLinkToken] = useState<string | null>(null);
+  const [googleLinkPassword, setGoogleLinkPassword] = useState('');
 
   const submittingRef = useRef(false);
-  const loading = login.isPending || register.isPending || googleLogin.isPending;
+  const loading =
+    login.isPending || register.isPending || googleLogin.isPending || googleLink.isPending;
 
   // Si el usuario ya tiene sesión válida (token + companyId) y aterriza en /auth
   // (refresh, back del navegador, deep link), lo mandamos directo a la app.
   // Esto también cubre el caso de que otra pestaña haya hecho login mientras tanto.
   useEffect(() => {
     const maybeRedirect = () => {
-      if (getStoredToken() && getStoredCompanyId()) {
-        navigate('/app/upload', { replace: true });
+      if (getStoredToken()) {
+        navigate(getStoredCompanyId() ? '/app/upload' : '/select-company', {
+          replace: true,
+        });
       }
     };
     maybeRedirect();
@@ -60,12 +72,12 @@ export default function AuthPage() {
     return fallback;
   };
 
-  const persistAndEnter = (res: { user: { companies?: string[] } }, emptyCompanyMessage: string) => {
-    if (res.user.companies && res.user.companies.length > 0) {
+  const persistAndEnter = (res: { user: { memberships: unknown[] } }) => {
+    if (res.user.memberships.length === 1) {
       navigate('/app/upload', { replace: true });
       return;
     }
-    toast.info(emptyCompanyMessage);
+    navigate('/select-company', { replace: true });
   };
 
   const handleGoogleCredential = async (idToken: string) => {
@@ -73,11 +85,13 @@ export default function AuthPage() {
     submittingRef.current = true;
     try {
       const res = await googleLogin.mutateAsync({ idToken });
-      persistAndEnter(
-        res,
-        'Tu cuenta aún no tiene una empresa asignada. Contacta al administrador.',
-      );
+      persistAndEnter(res);
     } catch (err) {
+      if (err instanceof ApiRequestError && err.code === 'GOOGLE_LINK_REQUIRED') {
+        setGoogleLinkPassword('');
+        setGoogleLinkToken(idToken);
+        return;
+      }
       toast.error(extractMessage(err, 'No se pudo iniciar sesión.'));
     } finally {
       submittingRef.current = false;
@@ -121,10 +135,7 @@ export default function AuthPage() {
               rfc: normalizedRfc,
             },
           });
-          persistAndEnter(
-            res,
-            'Tu cuenta aún no tiene una empresa asignada. Contacta al administrador.',
-          );
+          persistAndEnter(res);
         } catch (err) {
           toast.error(extractMessage(err, 'No se pudo crear la cuenta.'));
         }
@@ -138,15 +149,28 @@ export default function AuthPage() {
 
       try {
         const res = await login.mutateAsync({ email, password });
-        persistAndEnter(
-          res,
-          'Tu cuenta aún no tiene una empresa asignada. Contacta al administrador.',
-        );
+        persistAndEnter(res);
       } catch (err) {
         toast.error(extractMessage(err, 'No se pudo iniciar sesión.'));
       }
     } finally {
       submittingRef.current = false;
+    }
+  };
+
+  const handleGoogleLink = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!googleLinkToken || !googleLinkPassword || googleLink.isPending) return;
+    try {
+      const res = await googleLink.mutateAsync({
+        idToken: googleLinkToken,
+        password: googleLinkPassword,
+      });
+      setGoogleLinkToken(null);
+      setGoogleLinkPassword('');
+      persistAndEnter(res);
+    } catch (err) {
+      toast.error(extractMessage(err, 'No se pudo confirmar la cuenta.'));
     }
   };
 
@@ -331,6 +355,45 @@ export default function AuthPage() {
           </p>
         </div>
       </div>
+      <Dialog
+        open={Boolean(googleLinkToken)}
+        onOpenChange={(open) => {
+          if (!open && !googleLink.isPending) {
+            setGoogleLinkToken(null);
+            setGoogleLinkPassword('');
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirma tu cuenta de Recify</DialogTitle>
+            <DialogDescription>
+              Para enlazar Google por primera vez, ingresa tu contraseña actual de Recify.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleGoogleLink} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="google-link-password">Contraseña actual</Label>
+              <Input
+                id="google-link-password"
+                type="password"
+                value={googleLinkPassword}
+                onChange={(event) => setGoogleLinkPassword(event.target.value)}
+                autoComplete="current-password"
+                autoFocus
+              />
+            </div>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={!googleLinkPassword || googleLink.isPending}
+            >
+              {googleLink.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Confirmar y continuar
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

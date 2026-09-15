@@ -8,7 +8,7 @@ import AuthPage from '@/pages/AuthPage';
 import { useAuth } from '@/hooks/use-auth';
 import { AUTH_STORAGE_KEYS, getStoredCompanyId, getStoredToken, getStoredUser } from '@/auth/storage';
 import { markAuthSessionActive } from '@/auth/session-cleanup';
-import { googleLoginRequest, loginRequest } from '@/services/auth.service';
+import { googleLinkRequest, googleLoginRequest, loginRequest } from '@/services/auth.service';
 import type { AuthResponse, AuthUser } from '@/types/auth';
 import type { GoogleCredentialResponse, GoogleIdentityServices } from '@/types/google-gis';
 import { ApiRequestError } from '@/api/http';
@@ -34,6 +34,8 @@ vi.mock('@/services/auth.service', () => ({
   loginRequest: vi.fn(),
   registerRequest: vi.fn(),
   googleLoginRequest: vi.fn(),
+  googleLinkRequest: vi.fn(),
+  getMeRequest: vi.fn(() => new Promise(() => {})),
 }));
 
 vi.mock('@/lib/google-identity', async (importOriginal) => {
@@ -49,8 +51,10 @@ const user: AuthUser = {
   _id: 'user-google',
   name: 'Usuario Google',
   email: 'google@recify.test',
-  role: 'accountant',
-  companies: ['company-a'],
+  platformRole: null,
+  memberships: [
+    { membershipId: 'membership-a', companyId: 'company-a', companyName: 'A', companyStatus: 'active', companyTimezone: 'America/Mexico_City', role: 'accountant', status: 'active' },
+  ],
   status: 'active',
 };
 
@@ -194,20 +198,47 @@ describe('Google login UI', () => {
     expect(routerMocks.navigate).toHaveBeenCalledWith('/app/upload', { replace: true });
   });
 
-  it('keeps a Recify user without companies on /auth after Google login', async () => {
+  it('asks for the Recify password when Google linking is required', async () => {
+    vi.mocked(googleLoginRequest).mockRejectedValueOnce(
+      new ApiRequestError(
+        'Confirm your Recify account to link Google',
+        409,
+        [],
+        'GOOGLE_LINK_REQUIRED',
+      ),
+    );
+    vi.mocked(googleLinkRequest).mockResolvedValueOnce(successResponse);
+    renderAuthPage();
+
+    fireEvent.click(await waitForGoogleButton());
+    expect(await screen.findByText('Confirma tu cuenta de Recify')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Contraseña actual'), {
+      target: { value: 'password123' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar y continuar' }));
+
+    await waitFor(() =>
+      expect(googleLinkRequest).toHaveBeenCalledWith({
+        idToken: 'gis-id-token',
+        password: 'password123',
+      }),
+    );
+    expect(storageSnapshot()).not.toContain('gis-id-token');
+    expect(storageSnapshot()).not.toContain('password123');
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/app/upload', { replace: true });
+  });
+
+  it('routes a Recify user without memberships to the company state', async () => {
     vi.mocked(googleLoginRequest).mockResolvedValueOnce({
       token: 'recify-jwt',
-      user: { ...user, companies: [] },
+      user: { ...user, memberships: [] },
     });
     renderAuthPage();
     fireEvent.click(await waitForGoogleButton());
 
     await waitFor(() => expect(getStoredToken()).toBe('recify-jwt'));
     expect(getStoredCompanyId()).toBeNull();
-    expect(toast.info).toHaveBeenCalledWith(
-      'Tu cuenta aún no tiene una empresa asignada. Contacta al administrador.',
-    );
-    expect(routerMocks.navigate).not.toHaveBeenCalled();
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/select-company', { replace: true });
     expect(getFormSubmitButton('Iniciar sesión')).toBeInTheDocument();
     expect(storageSnapshot()).not.toContain('gis-id-token');
   });
