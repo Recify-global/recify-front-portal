@@ -10,6 +10,12 @@ export type InvoicePdfValidationResult =
   | { ok: true }
   | { ok: false; message: string };
 
+export function invoicePdfRejectionMessage(
+  result: InvoicePdfValidationResult,
+): string | null {
+  return 'message' in result ? result.message : null;
+}
+
 function readBlob(blob: Blob): Promise<ArrayBuffer> {
   if (typeof blob.arrayBuffer === 'function') return blob.arrayBuffer();
 

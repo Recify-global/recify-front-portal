@@ -215,4 +215,30 @@ describe('UploadPage format acceptance', () => {
     );
     expect(screen.getByText('Sin archivo cargado')).toBeInTheDocument();
   });
+
+  it('does not show upload success when fake.jpg is rejected by the backend', async () => {
+    mocks.preprocess.mockRejectedValueOnce(
+      new ApiRequestError('File content is not a supported image (jpeg, png, webp, gif)', 400),
+    );
+    render(<UploadPage />);
+
+    uploadFile('fake.jpg', 'image/jpeg', 'not-a-jpeg');
+
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        'File content is not a supported image (jpeg, png, webp, gif)',
+      ),
+    );
+    expect(screen.queryByText('Archivo cargado correctamente')).not.toBeInTheDocument();
+    expect(screen.getByText('Sin archivo cargado')).toBeInTheDocument();
+    expect(screen.getByText('Arrastra tu ticket o factura aquí')).toBeInTheDocument();
+    expect(screen.queryByText('Analizando…')).not.toBeInTheDocument();
+
+    mocks.preprocess.mockClear();
+    uploadFile('ticket.png', 'image/png');
+    await waitFor(() => expect(mocks.preprocess).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(screen.getByText('Ticket analizado correctamente')).toBeInTheDocument(),
+    );
+  });
 });

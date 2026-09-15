@@ -17,12 +17,21 @@ export interface LoginRequest {
   password: string;
 }
 
+export interface RegisterCompanyInput {
+  name: string;
+  rfc: string;
+  timezone?: string;
+}
+
 export interface RegisterRequest {
   name: string;
   email: string;
   password: string;
-  role?: UserRole;
-  companies?: string[];
+  company: RegisterCompanyInput;
+}
+
+export interface GoogleLoginRequest {
+  idToken: string;
 }
 
 export interface AuthResponse {

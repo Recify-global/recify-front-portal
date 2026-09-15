@@ -21,6 +21,12 @@ export type TicketImageValidationResult =
   | { ok: true }
   | { ok: false; message: string };
 
+export function ticketImageRejectionMessage(
+  result: TicketImageValidationResult,
+): string | null {
+  return 'message' in result ? result.message : null;
+}
+
 export function validateTicketImageFile(
   file: File | null | undefined,
   options: {

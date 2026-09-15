@@ -12,6 +12,7 @@ import {
   MAX_TICKET_FILES_PER_BATCH,
   MAX_UPLOAD_FILE_BYTES,
   TICKET_IMAGE_TRANSPORT_MIME_TYPES,
+  ticketImageRejectionMessage,
   validateTicketImageFile,
 } from '@/utils/upload-file';
 
@@ -183,7 +184,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
         allowedMimeTypes,
         maxBytes,
       });
-      return result.ok ? null : result.message;
+      return ticketImageRejectionMessage(result);
     },
     [allowedMimeTypes, maxBytes],
   );

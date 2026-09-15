@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { loginRequest, registerRequest } from '@/services/auth.service';
+import { loginRequest, registerRequest, googleLoginRequest } from '@/services/auth.service';
 import type {
   AuthResponse,
+  GoogleLoginRequest,
   LoginRequest,
   RegisterRequest,
 } from '@/types/auth';
@@ -75,6 +76,15 @@ export function useAuth() {
     },
   });
 
+  const googleLogin = useMutation({
+    mutationFn: (payload: GoogleLoginRequest) => googleLoginRequest(payload),
+    onMutate: captureAuthMutationContext,
+    onSuccess: (data, _variables, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
+      persistSession(data);
+    },
+  });
+
   const logout = useCallback((): Promise<void> => {
     if (logoutClaimRef.current) return logoutClaimRef.current;
 
@@ -107,6 +117,7 @@ export function useAuth() {
     isAuthenticated: Boolean(session.token),
     login,
     register,
+    googleLogin,
     logout,
     setActiveCompany,
   };

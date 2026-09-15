@@ -32,6 +32,7 @@ vi.mock('react-router-dom', async (importOriginal) => {
 vi.mock('@/services/auth.service', () => ({
   loginRequest: vi.fn(),
   registerRequest: vi.fn(),
+  googleLoginRequest: vi.fn(),
 }));
 
 const userA: AuthUser = {

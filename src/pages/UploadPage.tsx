@@ -39,7 +39,7 @@ import type {
 } from '@/types/ticket';
 import type { UploadInvoiceResponse } from '@/types/invoice';
 import type { BackendBalance } from '@/types/balance';
-import { Upload, Camera, FileImage, FileText, Loader2, CheckCircle2, Edit3, Save, Plus, Receipt, XCircle, Layers } from 'lucide-react';
+import { Upload, Camera, Loader2, CheckCircle2, Edit3, Save, Plus, Receipt, XCircle, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import { ApiRequestError } from '@/api/http';
 import {
@@ -49,15 +49,17 @@ import {
 import { getInvoiceUploadErrorMessage, isInvoiceAbortError } from '@/utils/invoice-errors';
 import {
   INVOICE_PDF_ACCEPT,
+  invoicePdfRejectionMessage,
   isInvoicePdfCandidate,
   validateInvoicePdfFile,
 } from '@/utils/invoice-file';
 import {
   TICKET_IMAGE_ACCEPT,
+  ticketImageRejectionMessage,
   validateTicketImageFile,
 } from '@/utils/upload-file';
 
-type UploadState = 'idle' | 'uploaded' | 'analyzing' | 'done';
+type UploadState = 'idle' | 'analyzing' | 'done';
 type UploadMode = 'ticket' | 'invoice' | 'balance';
 
 /** Lee de forma segura un campo numérico del JSON estructurado del preprocess. */
@@ -248,8 +250,9 @@ export default function UploadPage() {
 
   const validateFile = (file: File | null | undefined) => {
     const result = validateTicketImageFile(file);
-    if (!result.ok) {
-      toast.error(result.message);
+    const message = ticketImageRejectionMessage(result);
+    if (message) {
+      toast.error(message);
       return false;
     }
     return true;
@@ -261,8 +264,9 @@ export default function UploadPage() {
     if (!companyId) return;
 
     const pdfCheck = await validateInvoicePdfFile(file);
-    if (!pdfCheck.ok) {
-      toast.error(pdfCheck.message);
+    const pdfMessage = invoicePdfRejectionMessage(pdfCheck);
+    if (pdfMessage) {
+      toast.error(pdfMessage);
       return;
     }
 
@@ -366,7 +370,11 @@ export default function UploadPage() {
       toast.success('Ticket analizado correctamente.');
     } catch (err) {
       if (!isCurrentFlow(context, controller.signal) || isAbortLike(err)) return;
-      setState('uploaded');
+      // Selection is not a successful upload: restore a recoverable idle dropzone.
+      setSelectedFile(null);
+      replacePreview(undefined);
+      setState('idle');
+      uploadFlowRef.current.complete(context);
       toast.error(extractError(err, 'No se pudo analizar el ticket.'));
     } finally {
       uploadFlowRef.current.releaseController(controller);
@@ -400,7 +408,6 @@ export default function UploadPage() {
     setEditBaseline(null);
     setDraft(null);
     setHasPersistedTicket(false);
-    setState('uploaded');
 
     await runPreprocess(nextFile, context, nextPreview);
   };
@@ -624,11 +631,11 @@ export default function UploadPage() {
 
     const result = buildTicketUpdatePayload(editBaseline, draft);
     if (!result.ok) {
-      if (result.reason === 'no-changes') {
+      if ('reason' in result && result.reason === 'no-changes') {
         toast.info('No hay cambios para guardar.');
         return;
       }
-      toast.error(result.message);
+      toast.error('message' in result ? result.message : 'No se pudieron guardar los cambios.');
       return;
     }
 
@@ -692,20 +699,6 @@ export default function UploadPage() {
                   <p className="text-xs text-muted-foreground">
                     Imágenes JPG, PNG, WEBP, GIF o PDF CFDI · Máx. 10 MB
                   </p>
-                </div>
-              )}
-
-              {state === 'uploaded' && (
-                <div className="text-center space-y-3 animate-fade-in">
-                  {uploadMode === 'invoice' ? (
-                    <FileText size={48} className="text-primary mx-auto" />
-                  ) : (
-                    <FileImage size={48} className="text-primary mx-auto" />
-                  )}
-                  <p className="text-sm font-medium text-foreground">
-                    {selectedFile?.name ?? 'ticket.jpg'}
-                  </p>
-                  <p className="text-xs text-muted-foreground">Archivo cargado correctamente</p>
                 </div>
               )}
 
