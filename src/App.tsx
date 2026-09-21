@@ -9,6 +9,7 @@ import UploadPage from "./pages/UploadPage";
 import HistoryPage from "./pages/HistoryPage";
 import InvoicesPage from "./pages/InvoicesPage";
 import BalancesPage from "./pages/BalancesPage";
+import TeamPage from "./pages/TeamPage";
 import SelectCompanyPage from "./pages/SelectCompanyPage";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute, { AuthenticatedRoute } from "./guards/ProtectedRoute";
@@ -35,6 +36,7 @@ const App = () => (
             <Route path="/app/history" element={<HistoryPage />} />
             <Route path="/app/invoices" element={<InvoicesPage />} />
             <Route path="/app/balances" element={<BalancesPage />} />
+            <Route path="/app/team" element={<TeamPage />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

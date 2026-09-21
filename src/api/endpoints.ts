@@ -10,6 +10,11 @@ export const endpoints = {
     list: () => '/companies',
     byId: (id: string) => `/companies/${id}`,
   },
+  team: {
+    members: (companyId: string) => `/companies/${companyId}/members`,
+    member: (companyId: string, memberId: string) =>
+      `/companies/${companyId}/members/${memberId}`,
+  },
   tickets: {
     list: (companyId: string) => `/companies/${companyId}/tickets`,
     byId: (companyId: string, id: string) => `/companies/${companyId}/tickets/${id}`,

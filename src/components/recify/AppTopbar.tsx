@@ -52,7 +52,7 @@ export function AppTopbar() {
               <p className="text-sm font-medium text-foreground leading-none">{displayName}</p>
               {activeMembership ? (
                 <p className="mt-1 text-[10px] text-muted-foreground">
-                  {activeMembership.role === 'accountant' ? 'Administrador' : 'Usuario'}
+                  {activeMembership.role}
                 </p>
               ) : null}
             </div>

@@ -133,7 +133,7 @@ export function CompanySelector({ collapsed = false }: CompanySelectorProps) {
       </Select>
       {activeMembership ? (
         <p className="px-1 text-[11px] text-muted-foreground">
-          {activeMembership.role === 'accountant' ? 'Administrador' : 'Usuario'}
+          {activeMembership.role}
         </p>
       ) : null}
     </div>

@@ -7,7 +7,7 @@ import { RecifyLogo } from '@/components/recify/RecifyLogo';
 import type { CompanyMembership } from '@/types/auth';
 
 const roleLabel = (membership: CompanyMembership) =>
-  membership.role === 'accountant' ? 'Administrador' : 'Usuario';
+  membership.role;
 
 export default function SelectCompanyPage() {
   const navigate = useNavigate();
