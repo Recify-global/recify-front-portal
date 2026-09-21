@@ -49,6 +49,38 @@ describe('upload multipart creation contract', () => {
     expect(formData.has('accreditable')).toBe(false);
   });
 
+  it('appends allowlisted ticketDraft JSON next to the image and still does not PATCH', async () => {
+    const file = new File(['img'], 'ticket.png', { type: 'image/png' });
+    await uploadTicket('company-a', file, {
+      ticketDraft: {
+        vendor: 'Costco',
+        amount: 458.3,
+        date: '2026-09-20',
+        tax: 63.21,
+        paymentMethod: 'card',
+        type: 'egreso',
+        category: 'Supermercado y Abarrotes',
+      },
+    });
+
+    expect(mocks.apiRequest).toHaveBeenCalledTimes(1);
+    const formData = mocks.apiRequest.mock.calls[0][1].formData as FormData;
+    expect(Array.from(formData.keys()).sort()).toEqual(['image', 'ticketDraft']);
+    expect(formData.get('image')).toBe(file);
+    expect(JSON.parse(String(formData.get('ticketDraft')))).toEqual({
+      vendor: 'Costco',
+      amount: 458.3,
+      date: '2026-09-20',
+      tax: 63.21,
+      paymentMethod: 'card',
+      type: 'egreso',
+      category: 'Supermercado y Abarrotes',
+    });
+    expect(formData.has('companyId')).toBe(false);
+    expect(formData.has('documentKind')).toBe(false);
+    expect(formData.has('_id')).toBe(false);
+  });
+
   it('does not invent a follow-up PATCH from the upload service', async () => {
     const file = new File(['img'], 'ticket.png', { type: 'image/png' });
     await uploadTicket('company-a', file);

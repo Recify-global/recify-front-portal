@@ -2,6 +2,7 @@ import type {
   BackendPaymentMethod,
   BackendTicket,
   BackendTicketStatus,
+  TicketPreview,
   UiTicket,
 } from '@/types/ticket';
 import {
@@ -153,10 +154,10 @@ interface PreprocessMapperMeta {
 }
 
 export function mapPreprocessTicket(
-  payload: Record<string, unknown> | null | undefined,
+  payload: TicketPreview | Record<string, unknown> | null | undefined,
   meta: PreprocessMapperMeta = {},
 ): UiTicket {
-  const raw = payload ?? {};
+  const raw = (payload ?? {}) as Record<string, unknown>;
 
   const backendLike: BackendTicket = {
     _id: asString(raw.id) ?? asString(raw._id) ?? meta.fallbackId ?? 'ticket-preview',

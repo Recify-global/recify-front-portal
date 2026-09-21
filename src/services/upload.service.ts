@@ -1,8 +1,8 @@
 import { apiRequest } from '@/api/http';
 import { endpoints } from '@/api/endpoints';
-import type { BackendTicket } from '@/types/ticket';
 import type { BackendBalance } from '@/types/balance';
 import type { BackendInvoice, UploadInvoiceResponse } from '@/types/invoice';
+import type { BackendTicket, PreprocessPreview, TicketDraftOverrides } from '@/types/ticket';
 
 /**
  * El upload de tickets clasifica la imagen: una transacción (ticket fiscal o
@@ -29,7 +29,7 @@ export type UploadTicketResponse = UploadTicketResult | UploadBalanceResult;
 
 export interface PreprocessResponse {
   ocrText: string;
-  ticket: Record<string, unknown>;
+  ticket: PreprocessPreview;
 }
 
 function buildFormData(file: File): FormData {
@@ -53,11 +53,15 @@ export async function preprocessTicket(
 export async function uploadTicket(
   companyId: string,
   file: File,
-  opts: { signal?: AbortSignal } = {},
+  opts: { signal?: AbortSignal; ticketDraft?: TicketDraftOverrides } = {},
 ): Promise<UploadTicketResponse> {
+  const fd = buildFormData(file);
+  if (opts.ticketDraft) {
+    fd.append('ticketDraft', JSON.stringify(opts.ticketDraft));
+  }
   return apiRequest<UploadTicketResponse>(endpoints.upload.ticket(companyId), {
     method: 'POST',
-    formData: buildFormData(file),
+    formData: fd,
     signal: opts.signal,
   });
 }

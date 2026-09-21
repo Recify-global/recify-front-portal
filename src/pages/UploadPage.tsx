@@ -34,6 +34,7 @@ import type {
   BackendTicketReviewStatus,
   BackendTicketStatus,
   BackendTicketType,
+  BalancePreview,
   UiTicket,
 } from '@/types/ticket';
 import type { UploadInvoiceResponse } from '@/types/invoice';
@@ -61,33 +62,16 @@ import {
 type UploadState = 'idle' | 'analyzing' | 'done';
 type UploadMode = 'ticket' | 'invoice' | 'balance';
 
-/** Lee de forma segura un campo numérico del JSON estructurado del preprocess. */
-function toNumberOrNull(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
-    const n = Number(value.replace(/[^0-9.-]/g, ''));
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
 /** Convierte el JSON estructurado (documentKind:'balance') en la forma de la UI. */
-function toBalanceLike(raw: Record<string, unknown>): BalanceLike {
-  const accountType = raw.accountType;
+function toBalanceLike(raw: BalancePreview): BalanceLike {
   return {
-    bank: typeof raw.bank === 'string' ? raw.bank : null,
-    accountType:
-      accountType === 'credit_card' ||
-      accountType === 'debit' ||
-      accountType === 'bank_account' ||
-      accountType === 'other'
-        ? accountType
-        : 'other',
-    accountRef: typeof raw.accountRef === 'string' ? raw.accountRef : null,
-    currentBalance: toNumberOrNull(raw.currentBalance),
-    availableCredit: toNumberOrNull(raw.availableCredit),
-    creditLimit: toNumberOrNull(raw.creditLimit),
-    currency: typeof raw.currency === 'string' ? raw.currency : 'MXN',
+    bank: raw.bank,
+    accountType: raw.accountType ?? 'other',
+    accountRef: raw.accountRef,
+    currentBalance: raw.currentBalance,
+    availableCredit: raw.availableCredit,
+    creditLimit: raw.creditLimit,
+    currency: raw.currency ?? 'MXN',
   };
 }
 const PAYMENT_OPTIONS: { value: BackendPaymentMethod; label: string }[] = [
