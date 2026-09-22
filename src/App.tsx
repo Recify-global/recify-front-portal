@@ -9,8 +9,10 @@ import UploadPage from "./pages/UploadPage";
 import HistoryPage from "./pages/HistoryPage";
 import InvoicesPage from "./pages/InvoicesPage";
 import BalancesPage from "./pages/BalancesPage";
+import TeamPage from "./pages/TeamPage";
+import SelectCompanyPage from "./pages/SelectCompanyPage";
 import NotFound from "./pages/NotFound";
-import ProtectedRoute from "./guards/ProtectedRoute";
+import ProtectedRoute, { AuthenticatedRoute } from "./guards/ProtectedRoute";
 import { SessionCacheBoundary } from "./auth/SessionCacheBoundary";
 
 const queryClient = new QueryClient();
@@ -25,12 +27,16 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Navigate to="/auth" replace />} />
           <Route path="/auth" element={<AuthPage />} />
+          <Route element={<AuthenticatedRoute />}>
+            <Route path="/select-company" element={<SelectCompanyPage />} />
+          </Route>
           <Route element={<ProtectedRoute />}>
             <Route path="/app/dashboard" element={<DashboardPage />} />
             <Route path="/app/upload" element={<UploadPage />} />
             <Route path="/app/history" element={<HistoryPage />} />
             <Route path="/app/invoices" element={<InvoicesPage />} />
             <Route path="/app/balances" element={<BalancesPage />} />
+            <Route path="/app/team" element={<TeamPage />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

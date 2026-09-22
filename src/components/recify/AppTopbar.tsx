@@ -21,7 +21,7 @@ function computeInitials(name: string | undefined): string {
 }
 
 export function AppTopbar() {
-  const { user, logout } = useAuth();
+  const { user, logout, activeMembership } = useAuth();
   const displayName = user?.name?.trim() || 'Usuario';
   const initials = computeInitials(user?.name);
 
@@ -50,6 +50,11 @@ export function AppTopbar() {
             </Avatar>
             <div className="hidden sm:block text-left">
               <p className="text-sm font-medium text-foreground leading-none">{displayName}</p>
+              {activeMembership ? (
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  {activeMembership.role}
+                </p>
+              ) : null}
             </div>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">

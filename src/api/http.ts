@@ -22,12 +22,19 @@ function buildUrl(path: string): string {
 export class ApiRequestError extends Error {
   readonly status: number;
   readonly issues: ApiValidationIssue[];
+  readonly code?: string;
 
-  constructor(message: string, status: number, issues: ApiValidationIssue[] = []) {
+  constructor(
+    message: string,
+    status: number,
+    issues: ApiValidationIssue[] = [],
+    code?: string,
+  ) {
     super(message);
     this.name = 'ApiRequestError';
     this.status = status;
     this.issues = issues;
+    this.code = code;
   }
 }
 
@@ -100,7 +107,12 @@ export async function apiRequest<T>(path: string, opts: RequestOptions = {}): Pr
     }
 
     const message = parsed?.message ?? `Request failed with status ${response.status}`;
-    throw new ApiRequestError(message, response.status, parsed?.errors ?? []);
+    throw new ApiRequestError(
+      message,
+      response.status,
+      parsed?.errors ?? [],
+      parsed?.code,
+    );
   }
 
   return (parsed?.data ?? (parsed as unknown as T)) as T;

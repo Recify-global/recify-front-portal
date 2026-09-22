@@ -1,14 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { RecifyLogo } from '@/components/recify/RecifyLogo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Receipt, BarChart3, Shield, Zap, Loader2 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { ApiRequestError } from '@/api/http';
+import { GoogleSignInButton } from '@/components/recify/GoogleSignInButton';
 import {
   getStoredCompanyId,
   getStoredToken,
@@ -16,6 +23,10 @@ import {
 } from '@/auth/storage';
 
 type AuthMode = 'login' | 'register';
+
+const RFC_REGEX = /^[A-ZÑ&]{3,4}\d{6}[A-Z\d]{3}$/;
+
+const normalizeRfc = (value: string) => value.toUpperCase().replace(/\s+/g, '');
 
 const features = [
   { icon: Receipt, title: 'Escanea tus tickets', desc: 'Captura tickets físicos y digitales al instante' },
@@ -29,21 +40,26 @@ export default function AuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [businessName, setBusinessName] = useState('');
-  const [businessType, setBusinessType] = useState<string | undefined>(undefined);
-  const [phone, setPhone] = useState('');
+  const [companyName, setCompanyName] = useState('');
+  const [rfc, setRfc] = useState('');
   const navigate = useNavigate();
-  const { login, register } = useAuth();
+  const { login, register, googleLogin, googleLink } = useAuth();
+  const [googleLinkToken, setGoogleLinkToken] = useState<string | null>(null);
+  const [googleLinkPassword, setGoogleLinkPassword] = useState('');
 
-  const loading = login.isPending || register.isPending;
+  const submittingRef = useRef(false);
+  const loading =
+    login.isPending || register.isPending || googleLogin.isPending || googleLink.isPending;
 
   // Si el usuario ya tiene sesión válida (token + companyId) y aterriza en /auth
   // (refresh, back del navegador, deep link), lo mandamos directo a la app.
   // Esto también cubre el caso de que otra pestaña haya hecho login mientras tanto.
   useEffect(() => {
     const maybeRedirect = () => {
-      if (getStoredToken() && getStoredCompanyId()) {
-        navigate('/app/upload', { replace: true });
+      if (getStoredToken()) {
+        navigate(getStoredCompanyId() ? '/app/upload' : '/select-company', {
+          replace: true,
+        });
       }
     };
     maybeRedirect();
@@ -56,55 +72,105 @@ export default function AuthPage() {
     return fallback;
   };
 
-  const handleGoogleLogin = () => {
-    // Google OAuth aún no existe en el backend. Mantenemos el botón visible
-    // pero evitamos el flujo simulado con setTimeout.
-    toast.info('Iniciar sesión con Google aún no está disponible.');
+  const persistAndEnter = (res: { user: { memberships: unknown[] } }) => {
+    if (res.user.memberships.length === 1) {
+      navigate('/app/upload', { replace: true });
+      return;
+    }
+    navigate('/select-company', { replace: true });
+  };
+
+  const handleGoogleCredential = async (idToken: string) => {
+    if (loading || submittingRef.current) return;
+    submittingRef.current = true;
+    try {
+      const res = await googleLogin.mutateAsync({ idToken });
+      persistAndEnter(res);
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.code === 'GOOGLE_LINK_REQUIRED') {
+        setGoogleLinkPassword('');
+        setGoogleLinkToken(idToken);
+        return;
+      }
+      toast.error(extractMessage(err, 'No se pudo iniciar sesión.'));
+    } finally {
+      submittingRef.current = false;
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (loading) return;
+    if (loading || submittingRef.current) return;
+    submittingRef.current = true;
 
-    if (mode === 'register') {
-      if (!name || !email || !password) {
-        toast.error('Completa nombre, correo y contraseña para registrarte.');
+    try {
+      if (mode === 'register') {
+        const trimmedName = name.trim();
+        const trimmedEmail = email.trim();
+        const trimmedCompanyName = companyName.trim();
+        const normalizedRfc = normalizeRfc(rfc);
+
+        if (!trimmedName || !trimmedEmail || !password || !trimmedCompanyName || !normalizedRfc) {
+          toast.error('Completa tu nombre, correo, contraseña, empresa y RFC.');
+          return;
+        }
+
+        if (password.length < 8) {
+          toast.error('La contraseña debe tener al menos 8 caracteres.');
+          return;
+        }
+
+        if (normalizedRfc.length < 12 || normalizedRfc.length > 13 || !RFC_REGEX.test(normalizedRfc)) {
+          toast.error('Ingresa un RFC válido de 12 o 13 caracteres.');
+          return;
+        }
+
+        try {
+          const res = await register.mutateAsync({
+            name: trimmedName,
+            email: trimmedEmail,
+            password,
+            company: {
+              name: trimmedCompanyName,
+              rfc: normalizedRfc,
+            },
+          });
+          persistAndEnter(res);
+        } catch (err) {
+          toast.error(extractMessage(err, 'No se pudo crear la cuenta.'));
+        }
+        return;
+      }
+
+      if (!email || !password) {
+        toast.error('Ingresa tu correo y contraseña.');
         return;
       }
 
       try {
-        const res = await register.mutateAsync({
-          name,
-          email,
-          password,
-          role: 'viewer',
-        });
-        if (res.user.companies && res.user.companies.length > 0) {
-          navigate('/app/upload', { replace: true });
-        } else {
-          toast.success('Cuenta creada. Tu usuario aún no tiene una empresa asignada.');
-          setMode('login');
-        }
+        const res = await login.mutateAsync({ email, password });
+        persistAndEnter(res);
       } catch (err) {
-        toast.error(extractMessage(err, 'No se pudo crear la cuenta.'));
+        toast.error(extractMessage(err, 'No se pudo iniciar sesión.'));
       }
-      return;
+    } finally {
+      submittingRef.current = false;
     }
+  };
 
-    if (!email || !password) {
-      toast.error('Ingresa tu correo y contraseña.');
-      return;
-    }
-
+  const handleGoogleLink = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!googleLinkToken || !googleLinkPassword || googleLink.isPending) return;
     try {
-      const res = await login.mutateAsync({ email, password });
-      if (res.user.companies && res.user.companies.length > 0) {
-        navigate('/app/upload', { replace: true });
-      } else {
-        toast.info('Tu cuenta aún no tiene una empresa asignada. Contacta al administrador.');
-      }
+      const res = await googleLink.mutateAsync({
+        idToken: googleLinkToken,
+        password: googleLinkPassword,
+      });
+      setGoogleLinkToken(null);
+      setGoogleLinkPassword('');
+      persistAndEnter(res);
     } catch (err) {
-      toast.error(extractMessage(err, 'No se pudo iniciar sesión.'));
+      toast.error(extractMessage(err, 'No se pudo confirmar la cuenta.'));
     }
   };
 
@@ -151,7 +217,7 @@ export default function AuthPage() {
             <p className="text-muted-foreground mt-1">
               {mode === 'login'
                 ? 'Ingresa a tu cuenta para continuar'
-                : 'Comienza a organizar tus tickets hoy'}
+                : 'Registra tu empresa y el usuario inicial para administrarla'}
             </p>
           </div>
 
@@ -181,106 +247,97 @@ export default function AuthPage() {
             </button>
           </div>
 
-          {/* Google button */}
-          <Button
-            type="button"
-            onClick={handleGoogleLogin}
-            disabled={loading}
-            variant="outline"
-            className="w-full h-12 rounded-xl text-sm font-medium border-border hover:bg-secondary transition-all"
-          >
-            <svg className="mr-2 h-5 w-5" viewBox="0 0 24 24">
-              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
-              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
-              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-            </svg>
-            Continuar con Google
-          </Button>
+          {mode === 'login' && (
+            <>
+              <GoogleSignInButton disabled={loading} onCredential={handleGoogleCredential} />
 
-          <div className="flex items-center gap-3 my-6">
-            <div className="flex-1 h-px bg-border" />
-            <span className="text-xs text-muted-foreground">o</span>
-            <div className="flex-1 h-px bg-border" />
-          </div>
+              <div className="flex items-center gap-3 my-6">
+                <div className="flex-1 h-px bg-border" />
+                <span className="text-xs text-muted-foreground">o</span>
+                <div className="flex-1 h-px bg-border" />
+              </div>
+            </>
+          )}
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             {mode === 'register' && (
               <>
+                <p className="text-sm font-medium text-foreground">Tu cuenta</p>
                 <div className="space-y-2">
-                  <Label className="text-sm text-foreground">Nombre completo</Label>
+                  <Label htmlFor="register-name" className="text-sm text-foreground">Nombre completo</Label>
                   <Input
+                    id="register-name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="María Rodríguez"
                     className="h-11 rounded-xl bg-background border-border"
+                    autoComplete="name"
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm text-foreground">Nombre del negocio</Label>
-                  <Input
-                    value={businessName}
-                    onChange={(e) => setBusinessName(e.target.value)}
-                    placeholder="Mi Empresa S.A. de C.V."
-                    className="h-11 rounded-xl bg-background border-border"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm text-foreground">Tipo de negocio</Label>
-                  <Select value={businessType} onValueChange={setBusinessType}>
-                    <SelectTrigger className="h-11 rounded-xl bg-background border-border">
-                      <SelectValue placeholder="Selecciona un tipo" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="freelancer">Freelancer</SelectItem>
-                      <SelectItem value="micro">Microempresa</SelectItem>
-                      <SelectItem value="pequena">Pequeña empresa</SelectItem>
-                      <SelectItem value="mediana">Mediana empresa</SelectItem>
-                    </SelectContent>
-                  </Select>
                 </div>
               </>
             )}
             <div className="space-y-2">
-              <Label className="text-sm text-foreground">Correo electrónico</Label>
+              <Label htmlFor="auth-email" className="text-sm text-foreground">Correo electrónico</Label>
               <Input
+                id="auth-email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="maria@miempresa.com"
                 className="h-11 rounded-xl bg-background border-border"
+                autoComplete="email"
               />
             </div>
-            {mode === 'register' && (
-              <div className="space-y-2">
-                <Label className="text-sm text-foreground">Teléfono <span className="text-muted-foreground">(opcional)</span></Label>
-                <Input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+52 55 1234 5678"
-                  className="h-11 rounded-xl bg-background border-border"
-                />
-              </div>
-            )}
             <div className="space-y-2">
-              <Label className="text-sm text-foreground">Contraseña</Label>
+              <Label htmlFor="auth-password" className="text-sm text-foreground">Contraseña</Label>
               <Input
+                id="auth-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 className="h-11 rounded-xl bg-background border-border"
+                autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
               />
             </div>
+            {mode === 'register' && (
+              <>
+                <p className="text-sm font-medium text-foreground pt-2">Datos de tu empresa</p>
+                <div className="space-y-2">
+                  <Label htmlFor="register-company-name" className="text-sm text-foreground">Nombre de la empresa</Label>
+                  <Input
+                    id="register-company-name"
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
+                    placeholder="Mi Empresa S.A. de C.V."
+                    className="h-11 rounded-xl bg-background border-border"
+                    autoComplete="organization"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="register-rfc" className="text-sm text-foreground">RFC</Label>
+                  <Input
+                    id="register-rfc"
+                    value={rfc}
+                    onChange={(e) => setRfc(normalizeRfc(e.target.value))}
+                    placeholder="XAXX010101000"
+                    className="h-11 rounded-xl bg-background border-border uppercase"
+                    autoComplete="off"
+                    spellCheck={false}
+                    maxLength={13}
+                  />
+                  <p className="text-xs text-muted-foreground">12 o 13 caracteres, como en tu constancia fiscal.</p>
+                </div>
+              </>
+            )}
             <Button
               type="submit"
               disabled={loading}
               className="w-full h-12 rounded-xl bg-gradient-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
             >
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {mode === 'login' ? 'Iniciar sesión' : 'Crear cuenta'}
+              {mode === 'login' ? 'Iniciar sesión' : 'Crear cuenta y empresa'}
             </Button>
           </form>
 
@@ -298,6 +355,45 @@ export default function AuthPage() {
           </p>
         </div>
       </div>
+      <Dialog
+        open={Boolean(googleLinkToken)}
+        onOpenChange={(open) => {
+          if (!open && !googleLink.isPending) {
+            setGoogleLinkToken(null);
+            setGoogleLinkPassword('');
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirma tu cuenta de Recify</DialogTitle>
+            <DialogDescription>
+              Para enlazar Google por primera vez, ingresa tu contraseña actual de Recify.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleGoogleLink} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="google-link-password">Contraseña actual</Label>
+              <Input
+                id="google-link-password"
+                type="password"
+                value={googleLinkPassword}
+                onChange={(event) => setGoogleLinkPassword(event.target.value)}
+                autoComplete="current-password"
+                autoFocus
+              />
+            </div>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={!googleLinkPassword || googleLink.isPending}
+            >
+              {googleLink.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Confirmar y continuar
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

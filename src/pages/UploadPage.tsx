@@ -5,6 +5,7 @@ import { CategoryBadge } from '@/components/recify/CategoryBadge';
 import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
 import { TicketImageDialog } from '@/components/recify/TicketImageDialog';
 import { BatchUploadDialog } from '@/components/recify/BatchUploadDialog';
+import { UploadHelpDialog } from '@/components/recify/UploadHelpDialog';
 import { TicketScanAnimation } from '@/components/recify/TicketScanAnimation';
 import { InvoiceUploadResult } from '@/components/recify/InvoiceUploadResult';
 import { BalanceUploadResult, type BalanceLike } from '@/components/recify/BalanceUploadResult';
@@ -33,11 +34,12 @@ import type {
   BackendTicketReviewStatus,
   BackendTicketStatus,
   BackendTicketType,
+  BalancePreview,
   UiTicket,
 } from '@/types/ticket';
 import type { UploadInvoiceResponse } from '@/types/invoice';
 import type { BackendBalance } from '@/types/balance';
-import { Upload, Camera, FileImage, FileText, Loader2, CheckCircle2, Edit3, Save, Plus, Receipt, XCircle, Layers } from 'lucide-react';
+import { Upload, Camera, Loader2, CheckCircle2, Edit3, Save, Plus, Receipt, XCircle, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import { ApiRequestError } from '@/api/http';
 import {
@@ -45,50 +47,33 @@ import {
   type ActiveUploadContext,
 } from '@/utils/individual-upload-flow';
 import { getInvoiceUploadErrorMessage, isInvoiceAbortError } from '@/utils/invoice-errors';
-import { validateInvoicePdfFile } from '@/utils/invoice-file';
+import {
+  INVOICE_PDF_ACCEPT,
+  invoicePdfRejectionMessage,
+  isInvoicePdfCandidate,
+  validateInvoicePdfFile,
+} from '@/utils/invoice-file';
+import {
+  TICKET_IMAGE_ACCEPT,
+  ticketImageRejectionMessage,
+  validateTicketImageFile,
+} from '@/utils/upload-file';
 
-type UploadState = 'idle' | 'uploaded' | 'analyzing' | 'done';
+type UploadState = 'idle' | 'analyzing' | 'done';
 type UploadMode = 'ticket' | 'invoice' | 'balance';
 
-/** Lee de forma segura un campo numérico del JSON estructurado del preprocess. */
-function toNumberOrNull(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
-    const n = Number(value.replace(/[^0-9.-]/g, ''));
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
 /** Convierte el JSON estructurado (documentKind:'balance') en la forma de la UI. */
-function toBalanceLike(raw: Record<string, unknown>): BalanceLike {
-  const accountType = raw.accountType;
+function toBalanceLike(raw: BalancePreview): BalanceLike {
   return {
-    bank: typeof raw.bank === 'string' ? raw.bank : null,
-    accountType:
-      accountType === 'credit_card' ||
-      accountType === 'debit' ||
-      accountType === 'bank_account' ||
-      accountType === 'other'
-        ? accountType
-        : 'other',
-    accountRef: typeof raw.accountRef === 'string' ? raw.accountRef : null,
-    currentBalance: toNumberOrNull(raw.currentBalance),
-    availableCredit: toNumberOrNull(raw.availableCredit),
-    creditLimit: toNumberOrNull(raw.creditLimit),
-    currency: typeof raw.currency === 'string' ? raw.currency : 'MXN',
+    bank: raw.bank,
+    accountType: raw.accountType ?? 'other',
+    accountRef: raw.accountRef,
+    currentBalance: raw.currentBalance,
+    availableCredit: raw.availableCredit,
+    creditLimit: raw.creditLimit,
+    currency: raw.currency ?? 'MXN',
   };
 }
-const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-const PDF_MIME_TYPE = 'application/pdf';
-const MAX_SIZE_BYTES = 10 * 1024 * 1024;
-
-function isPdfUploadCandidate(file: File): boolean {
-  const mime = (file.type || '').toLowerCase();
-  if (mime === PDF_MIME_TYPE) return true;
-  return /\.pdf$/i.test(file.name || '');
-}
-
 const PAYMENT_OPTIONS: { value: BackendPaymentMethod; label: string }[] = [
   { value: 'card', label: 'Tarjeta' },
   { value: 'cash', label: 'Efectivo' },
@@ -246,16 +231,10 @@ export default function UploadPage() {
   };
 
   const validateFile = (file: File | null | undefined) => {
-    if (!file) {
-      toast.error('Selecciona un archivo para continuar.');
-      return false;
-    }
-    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-      toast.error('Formato no permitido. Usa PNG, JPG o PDF.');
-      return false;
-    }
-    if (file.size > MAX_SIZE_BYTES) {
-      toast.error('El archivo supera el máximo de 10 MB.');
+    const result = validateTicketImageFile(file);
+    const message = ticketImageRejectionMessage(result);
+    if (message) {
+      toast.error(message);
       return false;
     }
     return true;
@@ -266,9 +245,10 @@ export default function UploadPage() {
     if (!validateSession()) return;
     if (!companyId) return;
 
-    const pdfCheck = validateInvoicePdfFile(file);
-    if (!pdfCheck.ok) {
-      toast.error(pdfCheck.message);
+    const pdfCheck = await validateInvoicePdfFile(file);
+    const pdfMessage = invoicePdfRejectionMessage(pdfCheck);
+    if (pdfMessage) {
+      toast.error(pdfMessage);
       return;
     }
 
@@ -372,7 +352,11 @@ export default function UploadPage() {
       toast.success('Ticket analizado correctamente.');
     } catch (err) {
       if (!isCurrentFlow(context, controller.signal) || isAbortLike(err)) return;
-      setState('uploaded');
+      // Selection is not a successful upload: restore a recoverable idle dropzone.
+      setSelectedFile(null);
+      replacePreview(undefined);
+      setState('idle');
+      uploadFlowRef.current.complete(context);
       toast.error(extractError(err, 'No se pudo analizar el ticket.'));
     } finally {
       uploadFlowRef.current.releaseController(controller);
@@ -384,7 +368,7 @@ export default function UploadPage() {
     if (!validateSession()) return;
 
     // Los PDF son facturas CFDI: van directo al flujo de facturas.
-    if (file && isPdfUploadCandidate(file)) {
+    if (file && (await isInvoicePdfCandidate(file))) {
       await runInvoiceUpload(file);
       return;
     }
@@ -406,7 +390,6 @@ export default function UploadPage() {
     setEditBaseline(null);
     setDraft(null);
     setHasPersistedTicket(false);
-    setState('uploaded');
 
     await runPreprocess(nextFile, context, nextPreview);
   };
@@ -620,11 +603,11 @@ export default function UploadPage() {
 
     const result = buildTicketUpdatePayload(editBaseline, draft);
     if (!result.ok) {
-      if (result.reason === 'no-changes') {
+      if ('reason' in result && result.reason === 'no-changes') {
         toast.info('No hay cambios para guardar.');
         return;
       }
-      toast.error(result.message);
+      toast.error('message' in result ? result.message : 'No se pudieron guardar los cambios.');
       return;
     }
 
@@ -638,11 +621,14 @@ export default function UploadPage() {
   return (
     <AppLayout>
       <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
-        <div>
-          <h1 className="text-xl font-bold text-foreground sm:text-2xl">Subir ticket o factura</h1>
-          <p className="text-muted-foreground mt-1">
-            Captura la foto de un ticket o sube el PDF de una factura (CFDI) para analizarlos
-          </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-foreground sm:text-2xl">Subir ticket o factura</h1>
+            <p className="text-muted-foreground mt-1">
+              Captura la foto de un ticket o sube el PDF de una factura (CFDI) para analizarlos
+            </p>
+          </div>
+          <UploadHelpDialog />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -651,7 +637,7 @@ export default function UploadPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+              accept={`${TICKET_IMAGE_ACCEPT},${INVOICE_PDF_ACCEPT}`}
               className="hidden"
               onChange={handleFileInputChange}
             />
@@ -683,22 +669,8 @@ export default function UploadPage() {
                     </p>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Imágenes PNG/JPG o PDF CFDI · Máx. 10 MB
+                    Imágenes JPG, PNG, WEBP, GIF o PDF CFDI · Máx. 10 MB
                   </p>
-                </div>
-              )}
-
-              {state === 'uploaded' && (
-                <div className="text-center space-y-3 animate-fade-in">
-                  {uploadMode === 'invoice' ? (
-                    <FileText size={48} className="text-primary mx-auto" />
-                  ) : (
-                    <FileImage size={48} className="text-primary mx-auto" />
-                  )}
-                  <p className="text-sm font-medium text-foreground">
-                    {selectedFile?.name ?? 'ticket.jpg'}
-                  </p>
-                  <p className="text-xs text-muted-foreground">Archivo cargado correctamente</p>
                 </div>
               )}
 

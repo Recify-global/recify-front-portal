@@ -21,6 +21,7 @@ const ticket: UiTicket = {
   estatus: 'analizado',
   reviewStatus: 'Pendiente de revisión',
   isAccreditable: true,
+  notas: '',
 };
 
 const backendTicket: BackendTicket = {

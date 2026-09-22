@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   flexRender,
   getCoreRowModel,
@@ -16,7 +16,6 @@ import {
   ChevronRight,
   HelpCircle,
   Loader2,
-  Pencil,
   Receipt,
   Trash2,
 } from 'lucide-react';
@@ -40,6 +39,7 @@ import { CategoryBadge } from './CategoryBadge';
 import { EmptyState } from './EmptyState';
 import { StatusBadge } from './StatusBadge';
 import { TableExportButton } from './TableExportButton';
+import { EditableField } from './EditableField';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { formatMxn } from '@/utils/financial-kpis';
@@ -103,6 +103,7 @@ const TICKET_EXPORT_COLUMNS: ExportColumn<UiTicket>[] = [
 ];
 
 interface HistoryTicketTableProps {
+  canManage?: boolean;
   tickets: UiTicket[];
   globalFilter: string;
   onGlobalFilterChange: (value: string) => void;
@@ -157,38 +158,6 @@ function columnClass(columnId: string): string {
   }
 }
 
-const editableCellClass =
-  'relative rounded-lg px-1.5 py-1 transition-colors duration-150 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer';
-
-const HINT_OFFSET_X = 12;
-const HINT_OFFSET_Y = -10;
-const HINT_SIZE = 14;
-
-function hideEditHint(hint: HTMLElement | null) {
-  if (!hint) return;
-  hint.dataset.visible = 'false';
-  delete hint.dataset.mode;
-}
-
-function movePointerHint(hint: HTMLElement | null, event: React.MouseEvent<HTMLElement>) {
-  if (!hint) return;
-  const rect = event.currentTarget.getBoundingClientRect();
-  const x = event.clientX - rect.left + HINT_OFFSET_X;
-  const y = event.clientY - rect.top + HINT_OFFSET_Y;
-  const maxX = Math.max(0, rect.width - HINT_SIZE);
-  const maxY = Math.max(0, rect.height - HINT_SIZE);
-  hint.style.transform = `translate(${Math.min(Math.max(0, x), maxX)}px, ${Math.min(Math.max(0, y), maxY)}px)`;
-  hint.dataset.mode = 'pointer';
-  hint.dataset.visible = 'true';
-}
-
-function pinFocusHint(hint: HTMLElement | null) {
-  if (!hint) return;
-  hint.style.transform = '';
-  hint.dataset.mode = 'focus';
-  hint.dataset.visible = 'true';
-}
-
 function EditableReadCell({
   label,
   className,
@@ -198,61 +167,21 @@ function EditableReadCell({
 }: {
   label: string;
   className?: string;
-  children: React.ReactNode;
+  children: ReactNode;
   onActivate: () => void;
   disabled?: boolean;
 }) {
-  const hintRef = useRef<HTMLSpanElement>(null);
-
   return (
-    <div
-      role="button"
-      tabIndex={disabled ? -1 : 0}
-      aria-label={label}
-      data-history-editable-cell=""
-      className={cn(editableCellClass, disabled && 'pointer-events-none opacity-60', className)}
-      onClick={(event) => {
-        event.stopPropagation();
-        if (disabled) return;
-        onActivate();
-      }}
-      onKeyDown={(event) => {
-        if (disabled) return;
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          event.stopPropagation();
-          onActivate();
-        }
-      }}
-      onMouseEnter={(event) => {
-        if (!disabled) movePointerHint(hintRef.current, event);
-      }}
-      onMouseMove={(event) => {
-        if (!disabled) movePointerHint(hintRef.current, event);
-      }}
-      onMouseLeave={() => hideEditHint(hintRef.current)}
-      onFocus={() => {
-        if (!disabled) pinFocusHint(hintRef.current);
-      }}
-      onBlur={() => hideEditHint(hintRef.current)}
+    <EditableField
+      label={label}
+      className={className}
+      onStartEdit={onActivate}
+      disabled={disabled}
+      cellDataAttr="data-history-editable-cell"
+      hintDataAttr="data-history-edit-hint"
     >
       {children}
-      <span
-        ref={hintRef}
-        aria-hidden
-        data-history-edit-hint=""
-        data-visible="false"
-        className={cn(
-          'pointer-events-none absolute left-0 top-0 z-10 text-muted-foreground',
-          'opacity-0 transition-opacity duration-150',
-          'data-[mode=focus]:left-auto data-[mode=focus]:right-1 data-[mode=focus]:top-1/2 data-[mode=focus]:-translate-y-1/2',
-          'data-[mode=focus]:opacity-100',
-          '[@media(hover:hover)]:data-[mode=pointer]:data-[visible=true]:opacity-100',
-        )}
-      >
-        <Pencil size={12} />
-      </span>
-    </div>
+    </EditableField>
   );
 }
 
@@ -260,7 +189,7 @@ function CellEditorShell({
   children,
   className,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
 }) {
   return (
@@ -285,6 +214,7 @@ function isExternalEditorTarget(target: EventTarget | null): boolean {
 }
 
 export function HistoryTicketTable({
+  canManage = true,
   tickets,
   globalFilter,
   onGlobalFilterChange,
@@ -318,6 +248,7 @@ export function HistoryTicketTable({
   const suppressBlurCommitRef = useRef(false);
   const blurCommitTimerRef = useRef<number | null>(null);
   const liveRefs = useRef({
+    canManage,
     drafts,
     editingTicketId,
     editingField,
@@ -333,6 +264,7 @@ export function HistoryTicketTable({
     onToggleAccreditable,
   });
   liveRefs.current = {
+    canManage,
     drafts,
     editingTicketId,
     editingField,
@@ -475,6 +407,7 @@ export function HistoryTicketTable({
         onPreviewImage: livePreviewImage,
         onDelete: liveDelete,
         onToggleAccreditable: liveToggleAccreditable,
+        canManage: liveCanManage,
       } = liveRefs.current;
       const draft = liveDrafts[ticket.id];
       const active = liveEditingTicketId === ticket.id && liveEditingField === field;
@@ -490,7 +423,7 @@ export function HistoryTicketTable({
                   maxLength={200}
                   placeholder="Nombre del comercio"
                   aria-label={`Editar comercio de ${ticket.comercio}`}
-                  disabled={liveSaving}
+                  disabled={liveSaving || !liveCanManage}
                   className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
                   onClick={(event) => event.stopPropagation()}
                   onChange={(event) => liveUpdateDraft(ticket.id, { vendor: event.target.value })}
@@ -503,7 +436,7 @@ export function HistoryTicketTable({
           return (
             <EditableReadCell
               label={`Editar comercio de ${ticket.comercio}`}
-              disabled={liveSaving}
+              disabled={liveSaving || !liveCanManage}
               onActivate={() => liveEditCell(ticket, 'vendor')}
             >
               <span className="block truncate text-sm font-medium text-foreground" title={ticket.comercio}>
@@ -522,7 +455,7 @@ export function HistoryTicketTable({
                   placeholder="DD/MM/AAAA"
                   value={draft.date}
                   aria-label={`Editar fecha de ${ticket.comercio}`}
-                  disabled={liveSaving}
+                  disabled={liveSaving || !liveCanManage}
                   className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
                   onClick={(event) => event.stopPropagation()}
                   onChange={(event) => liveUpdateDraft(ticket.id, { date: event.target.value })}
@@ -535,7 +468,7 @@ export function HistoryTicketTable({
           return (
             <EditableReadCell
               label={`Editar fecha de ${ticket.comercio}`}
-              disabled={liveSaving}
+              disabled={liveSaving || !liveCanManage}
               onActivate={() => liveEditCell(ticket, 'date')}
             >
               <span className="text-sm text-muted-foreground">
@@ -554,7 +487,7 @@ export function HistoryTicketTable({
                   autoComplete="off"
                   value={draft.amount}
                   aria-label={`Editar total de ${ticket.comercio}`}
-                  disabled={liveSaving}
+                  disabled={liveSaving || !liveCanManage}
                   className="h-9 w-full min-w-[7.5rem] rounded-lg bg-background px-2 text-right text-sm tabular-nums shadow-sm"
                   onClick={(event) => event.stopPropagation()}
                   onChange={(event) => onAmountDraftChange(ticket.id, event.target.value)}
@@ -568,7 +501,7 @@ export function HistoryTicketTable({
             <EditableReadCell
               label={`Editar total de ${ticket.comercio}`}
               className="text-right"
-              disabled={liveSaving}
+              disabled={liveSaving || !liveCanManage}
               onActivate={() => liveEditCell(ticket, 'amount')}
             >
               <span className="block text-right text-sm font-semibold tabular-nums text-foreground">
@@ -587,7 +520,7 @@ export function HistoryTicketTable({
                   autoComplete="off"
                   value={draft.tax}
                   aria-label={`Editar IVA de ${ticket.comercio}`}
-                  disabled={liveSaving}
+                  disabled={liveSaving || !liveCanManage}
                   className="h-9 w-full min-w-[7.5rem] rounded-lg bg-background px-2 text-right text-sm tabular-nums shadow-sm"
                   onClick={(event) => event.stopPropagation()}
                   onChange={(event) => onTaxDraftChange(ticket.id, event.target.value)}
@@ -601,7 +534,7 @@ export function HistoryTicketTable({
             <EditableReadCell
               label={`Editar IVA de ${ticket.comercio}`}
               className="text-right"
-              disabled={liveSaving}
+              disabled={liveSaving || !liveCanManage}
               onActivate={() => liveEditCell(ticket, 'tax')}
             >
               <span className="block text-right text-sm tabular-nums text-muted-foreground">
@@ -615,7 +548,7 @@ export function HistoryTicketTable({
               <CellEditorShell>
                 <Select
                   value={draft.paymentMethod}
-                  disabled={liveSaving}
+                  disabled={liveSaving || !liveCanManage}
                   onValueChange={(value) => {
                     commitFromUi({ paymentMethod: value as BackendPaymentMethod });
                   }}
@@ -646,7 +579,7 @@ export function HistoryTicketTable({
           return (
             <EditableReadCell
               label={`Editar método de pago de ${ticket.comercio}`}
-              disabled={liveSaving}
+              disabled={liveSaving || !liveCanManage}
               onActivate={() => liveEditCell(ticket, 'paymentMethod')}
             >
               <span className="text-sm text-muted-foreground">{ticket.metodoPago}</span>
@@ -658,7 +591,7 @@ export function HistoryTicketTable({
               <CellEditorShell>
                 <Select
                   value={draft.type}
-                  disabled={liveSaving}
+                  disabled={liveSaving || !liveCanManage}
                   onValueChange={(value) => {
                     commitFromUi({ type: value as BackendTicketType });
                   }}
@@ -689,7 +622,7 @@ export function HistoryTicketTable({
           return (
             <EditableReadCell
               label={`Editar tipo de ${ticket.comercio}`}
-              disabled={liveSaving}
+              disabled={liveSaving || !liveCanManage}
               onActivate={() => liveEditCell(ticket, 'type')}
             >
               <span className={cn(
@@ -708,7 +641,7 @@ export function HistoryTicketTable({
               <CellEditorShell>
                 <Select
                   value={draft.status}
-                  disabled={liveSaving}
+                  disabled={liveSaving || !liveCanManage}
                   onValueChange={(value) => {
                     commitFromUi({ status: value as BackendTicketStatus });
                   }}
@@ -739,7 +672,7 @@ export function HistoryTicketTable({
           return (
             <EditableReadCell
               label={`Editar estatus de ${ticket.comercio}`}
-              disabled={liveSaving}
+              disabled={liveSaving || !liveCanManage}
               onActivate={() => liveEditCell(ticket, 'status')}
             >
               <StatusBadge status={ticket.estatus} />
@@ -755,7 +688,7 @@ export function HistoryTicketTable({
                   maxLength={100}
                   placeholder="Categoría"
                   aria-label={`Editar categoría de ${ticket.comercio}`}
-                  disabled={liveSaving}
+                  disabled={liveSaving || !liveCanManage}
                   className="h-9 w-full rounded-lg bg-background text-sm shadow-sm"
                   onClick={(event) => event.stopPropagation()}
                   onChange={(event) => liveUpdateDraft(ticket.id, { category: event.target.value })}
@@ -768,7 +701,7 @@ export function HistoryTicketTable({
           return (
             <EditableReadCell
               label={`Editar categoría de ${ticket.comercio}`}
-              disabled={liveSaving}
+              disabled={liveSaving || !liveCanManage}
               onActivate={() => liveEditCell(ticket, 'category')}
             >
               <CategoryBadge category={ticket.categoria} />
@@ -784,10 +717,10 @@ export function HistoryTicketTable({
             >
               <Switch
                 checked={checked}
-                disabled={saving || liveSaving || Boolean(liveEditingTicketId)}
+                disabled={!liveCanManage || saving || liveSaving || Boolean(liveEditingTicketId)}
                 aria-label={`Marcar ticket de ${ticket.comercio} como acreditable`}
                 onCheckedChange={(next) => {
-                  if (saving || liveSaving || liveEditingTicketId) return;
+                  if (!liveCanManage || saving || liveSaving || liveEditingTicketId) return;
                   liveToggleAccreditable(ticket, next);
                 }}
               />
@@ -817,20 +750,22 @@ export function HistoryTicketTable({
               >
                 <Camera size={15} />
               </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-destructive hover:text-destructive"
-                aria-label={`Eliminar ticket de ${ticket.comercio}`}
-                title="Eliminar ticket"
-                disabled={liveSaving || liveDeletingTicketId === ticket.id || Boolean(liveEditingTicketId)}
-                onClick={() => liveDelete(ticket.id)}
-              >
-                {liveDeletingTicketId === ticket.id
-                  ? <Loader2 size={15} className="animate-spin" />
-                  : <Trash2 size={15} />}
-              </Button>
+              {liveCanManage ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-destructive hover:text-destructive"
+                  aria-label={`Eliminar ticket de ${ticket.comercio}`}
+                  title="Eliminar ticket"
+                  disabled={liveSaving || liveDeletingTicketId === ticket.id || Boolean(liveEditingTicketId)}
+                  onClick={() => liveDelete(ticket.id)}
+                >
+                  {liveDeletingTicketId === ticket.id
+                    ? <Loader2 size={15} className="animate-spin" />
+                    : <Trash2 size={15} />}
+                </Button>
+              ) : null}
               {liveEditingTicketId === ticket.id && liveSaving ? (
                 <Loader2 size={14} className="animate-spin text-muted-foreground" aria-label="Guardando" />
               ) : null}

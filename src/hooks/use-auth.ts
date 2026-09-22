@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { loginRequest, registerRequest } from '@/services/auth.service';
+import {
+  loginRequest,
+  registerRequest,
+  googleLoginRequest,
+  googleLinkRequest,
+  getMeRequest,
+} from '@/services/auth.service';
 import type {
   AuthResponse,
+  GoogleLinkRequest,
+  GoogleLoginRequest,
   LoginRequest,
   RegisterRequest,
 } from '@/types/auth';
@@ -13,6 +21,7 @@ import {
   getStoredUser,
   setActiveCompany as persistActiveCompany,
   setAuthSession,
+  updateStoredUser,
   subscribeAuthChanges,
 } from '@/auth/storage';
 import {
@@ -57,6 +66,18 @@ export function useAuth() {
     return subscribeAuthChanges(sync);
   }, []);
 
+  const profile = useQuery({
+    queryKey: ['auth', 'me', session.user?._id ?? null],
+    queryFn: getMeRequest,
+    enabled: Boolean(session.token && session.user),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+
+  useEffect(() => {
+    if (profile.data?.user) updateStoredUser(profile.data.user);
+  }, [profile.data]);
+
   const login = useMutation({
     mutationFn: (payload: LoginRequest) => loginRequest(payload),
     onMutate: captureAuthMutationContext,
@@ -68,6 +89,24 @@ export function useAuth() {
 
   const register = useMutation({
     mutationFn: (payload: RegisterRequest) => registerRequest(payload),
+    onMutate: captureAuthMutationContext,
+    onSuccess: (data, _variables, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
+      persistSession(data);
+    },
+  });
+
+  const googleLogin = useMutation({
+    mutationFn: (payload: GoogleLoginRequest) => googleLoginRequest(payload),
+    onMutate: captureAuthMutationContext,
+    onSuccess: (data, _variables, context) => {
+      if (!isAuthMutationContextCurrent(context)) return;
+      persistSession(data);
+    },
+  });
+
+  const googleLink = useMutation({
+    mutationFn: (payload: GoogleLinkRequest) => googleLinkRequest(payload),
     onMutate: captureAuthMutationContext,
     onSuccess: (data, _variables, context) => {
       if (!isAuthMutationContextCurrent(context)) return;
@@ -100,6 +139,11 @@ export function useAuth() {
     persistActiveCompany(nextCompanyId);
   }, []);
 
+  const activeMembership =
+    session.user?.memberships.find(
+      (membership) => membership.companyId === session.companyId,
+    ) ?? null;
+
   return {
     token: session.token,
     user: session.user,
@@ -107,7 +151,14 @@ export function useAuth() {
     isAuthenticated: Boolean(session.token),
     login,
     register,
+    googleLogin,
+    googleLink,
     logout,
     setActiveCompany,
+    activeMembership,
+    activeRole: activeMembership?.role ?? null,
+    isPlatformAdmin: session.user?.platformRole === 'admin',
+    canManage:
+      session.user?.platformRole === 'admin' || activeMembership?.role === 'accountant',
   };
 }

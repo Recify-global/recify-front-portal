@@ -1,13 +1,34 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { preprocessTicket, uploadTicket } from '@/services/upload.service';
 import { mapBackendTicket, mapPreprocessTicket } from '@/mappers/ticket.mapper';
-import type { UiTicket } from '@/types/ticket';
+import type {
+  PreprocessPreview,
+  TicketDraftOverrides,
+  TicketPreview,
+  UiTicket,
+} from '@/types/ticket';
+import { isTicketPreview } from '@/types/ticket';
 import { useAuth } from './use-auth';
 import { ApiRequestError } from '@/api/http';
 import {
   captureAuthMutationContext,
   isAuthMutationContextCurrent,
 } from '@/auth/session-cleanup';
+import {
+  MAX_TICKET_FILES_PER_BATCH,
+  MAX_UPLOAD_FILE_BYTES,
+  TICKET_IMAGE_TRANSPORT_MIME_TYPES,
+  ticketImageRejectionMessage,
+  validateTicketImageFile,
+} from '@/utils/upload-file';
+import {
+  buildTicketDraftOverrides,
+  createBatchDraftFromPreview,
+  getBatchTicketDraftValidationMessage,
+  parseAmount,
+  type BatchTicketDraft,
+} from '@/utils/ticket-edit';
+import { coerceToWireCivilDate } from '@/utils/civil-date-input';
 
 export type BatchItemStatus =
   | 'queued'
@@ -16,6 +37,8 @@ export type BatchItemStatus =
   | 'saving'
   | 'saved'
   | 'error';
+
+export type BatchFailedStage = 'analyze' | 'save';
 
 export interface BatchItem {
   id: string;
@@ -26,21 +49,22 @@ export interface BatchItem {
   status: BatchItemStatus;
   /** Compañía con la que se encoló el ítem. */
   companyId: string;
+  preview: PreprocessPreview | null;
+  baseline: BatchTicketDraft | null;
+  draft: BatchTicketDraft | null;
   ticket: UiTicket | null;
   savedTicket: UiTicket | null;
   error: string | null;
+  failedStage: BatchFailedStage | null;
 }
 
 export interface UseBatchUploadOptions {
   maxFiles?: number;
   analyzeConcurrency?: number;
   saveConcurrency?: number;
-  allowedMimeTypes?: string[];
+  allowedMimeTypes?: readonly string[];
   maxBytes?: number;
 }
-
-const DEFAULT_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
 
 interface AddFilesResult {
   added: number;
@@ -79,6 +103,15 @@ export type BatchSaveResult = {
   balance: boolean;
 };
 
+function canClaimForSave(item: BatchItem, companyId: string | null): boolean {
+  if (!companyId || item.companyId !== companyId) return false;
+  if (item.status !== 'analyzed' && !(item.status === 'error' && item.failedStage === 'save')) {
+    return false;
+  }
+  if (item.draft && getBatchTicketDraftValidationMessage(item.draft)) return false;
+  return true;
+}
+
 function emptyCounts(): Record<BatchItemStatus, number> {
   return {
     queued: 0,
@@ -97,11 +130,11 @@ function emptyCounts(): Record<BatchItemStatus, number> {
  */
 export function useBatchUpload(options: UseBatchUploadOptions = {}) {
   const {
-    maxFiles = 10,
+    maxFiles = MAX_TICKET_FILES_PER_BATCH,
     analyzeConcurrency = 3,
     saveConcurrency = 2,
-    allowedMimeTypes = DEFAULT_MIMES,
-    maxBytes = DEFAULT_MAX_BYTES,
+    allowedMimeTypes = TICKET_IMAGE_TRANSPORT_MIME_TYPES,
+    maxBytes = MAX_UPLOAD_FILE_BYTES,
   } = options;
 
   const { companyId } = useAuth();
@@ -113,6 +146,14 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
   const analyzeInFlightRef = useRef(0);
   const saveInFlightRef = useRef(0);
   const abortByIdRef = useRef<Map<string, AbortController>>(new Map());
+  const saveItemRef = useRef<(id: string) => Promise<BatchSaveResult>>(async () => ({
+    persisted: false,
+    companyId: null,
+    uiUpdated: false,
+    effectsAllowed: true,
+    matchedInvoice: false,
+    balance: false,
+  }));
 
   const syncItems = useCallback((next: BatchItem[]) => {
     itemsRef.current = next;
@@ -176,13 +217,11 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
 
   const validateFile = useCallback(
     (file: File): string | null => {
-      if (!allowedMimeTypes.includes(file.type)) {
-        return 'Formato no permitido.';
-      }
-      if (file.size > maxBytes) {
-        return `Supera el máximo de ${Math.round(maxBytes / (1024 * 1024))} MB.`;
-      }
-      return null;
+      const result = validateTicketImageFile(file, {
+        allowedMimeTypes,
+        maxBytes,
+      });
+      return ticketImageRejectionMessage(result);
     },
     [allowedMimeTypes, maxBytes],
   );
@@ -198,18 +237,54 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
         });
         if (isStale(generation, item.companyId) || controller.signal.aborted) return;
 
-        const mapped = mapPreprocessTicket(response.ticket, {
+        if (response.ticket.documentKind === 'balance') {
+          patchItem(item.id, {
+            status: 'analyzed',
+            preview: response.ticket,
+            baseline: null,
+            draft: null,
+            ticket: null,
+            error: null,
+            failedStage: null,
+          });
+          return;
+        }
+
+        const preview: TicketPreview = isTicketPreview(response.ticket)
+          ? response.ticket
+          : {
+              documentKind: 'transaction',
+              type: 'egreso',
+              date: null,
+              amount: 0,
+              tax: null,
+              category: null,
+              paymentMethod: null,
+              vendor: null,
+              vendorRFC: null,
+            };
+        const mapped = mapPreprocessTicket(preview, {
           imageUrl: item.previewUrl,
           fallbackId: `${item.id}-preview`,
           ocrText: response.ocrText,
         });
-        patchItem(item.id, { status: 'analyzed', ticket: mapped, error: null });
+        const nextDraft = createBatchDraftFromPreview(preview);
+        patchItem(item.id, {
+          status: 'analyzed',
+          preview,
+          baseline: nextDraft,
+          draft: nextDraft,
+          ticket: mapped,
+          error: null,
+          failedStage: null,
+        });
       } catch (err) {
         if (isStale(generation, item.companyId) || controller.signal.aborted || isAbortLike(err)) {
           return;
         }
         patchItem(item.id, {
           status: 'error',
+          failedStage: 'analyze',
           error: extractError(err, 'No se pudo analizar el ticket.'),
         });
       } finally {
@@ -281,9 +356,13 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
           previewUrl: URL.createObjectURL(file),
           status: 'queued',
           companyId: activeCompany,
+          preview: null,
+          baseline: null,
+          draft: null,
           ticket: null,
           savedTicket: null,
           error: null,
+          failedStage: null,
         });
         existingKeys.add(key);
       }
@@ -321,9 +400,17 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
         clear();
         return;
       }
+      if (target.failedStage === 'save') {
+        queueMicrotask(() => {
+          void saveItemRef.current?.(id);
+        });
+        return;
+      }
       syncItems(
         itemsRef.current.map((it) =>
-          it.id === id ? { ...it, status: 'queued', error: null } : it,
+          it.id === id
+            ? { ...it, status: 'queued', error: null, failedStage: null }
+            : it,
         ),
       );
       queueMicrotask(() => pumpAnalyze());
@@ -339,8 +426,43 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
       const authContext = captureAuthMutationContext();
 
       try {
+        let ticketDraft: TicketDraftOverrides | undefined;
+        if (item.draft && isTicketPreview(item.preview)) {
+          const built = buildTicketDraftOverrides(item.draft);
+          if (built.ok === false) {
+            if (
+              !isAuthMutationContextCurrent(authContext) ||
+              isStale(generation, originCompanyId)
+            ) {
+              return {
+                persisted: false,
+                companyId: originCompanyId,
+                uiUpdated: false,
+                effectsAllowed: false,
+                matchedInvoice: false,
+                balance: false,
+              };
+            }
+            patchItem(item.id, {
+              status: 'error',
+              failedStage: 'save',
+              error: built.message,
+            });
+            return {
+              persisted: false,
+              companyId: originCompanyId,
+              uiUpdated: true,
+              effectsAllowed: true,
+              matchedInvoice: false,
+              balance: false,
+            };
+          }
+          ticketDraft = built.payload;
+        }
+
         const response = await uploadTicket(originCompanyId, item.file, {
           signal: controller.signal,
+          ...(ticketDraft ? { ticketDraft } : {}),
         });
         const effectsAllowed = isAuthMutationContextCurrent(authContext);
 
@@ -365,7 +487,12 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
         // Una captura de saldo se guardó como Balance, no como ticket: no hay
         // savedTicket que mostrar en el lote.
         if (isBalance) {
-          patchItem(item.id, { status: 'saved', savedTicket: null, error: null });
+          patchItem(item.id, {
+            status: 'saved',
+            savedTicket: null,
+            error: null,
+            failedStage: null,
+          });
           return {
             persisted: true,
             companyId: originCompanyId,
@@ -384,6 +511,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
             imagenUrl: mapped.imagenUrl ?? response.imageUrl ?? item.previewUrl,
           },
           error: null,
+          failedStage: null,
         });
         return {
           persisted: true,
@@ -419,6 +547,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
         }
         patchItem(item.id, {
           status: 'error',
+          failedStage: 'save',
           error: extractError(err, 'No se pudo guardar el ticket.'),
         });
         return {
@@ -443,8 +572,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
 
       const next = itemsRef.current.map((it) => {
         if (it.id !== id) return it;
-        if (it.status !== 'analyzed') return it;
-        if (it.companyId !== companyIdRef.current) return it;
+        if (!canClaimForSave(it, companyIdRef.current)) return it;
         claimed = { ...it, status: 'saving', error: null };
         return claimed;
       });
@@ -494,9 +622,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
       };
     }
 
-    const queue = itemsRef.current.filter(
-      (it) => it.status === 'analyzed' && it.companyId === activeCompany,
-    );
+    const queue = itemsRef.current.filter((it) => canClaimForSave(it, activeCompany));
     let ok = 0;
     let failed = 0;
     let index = 0;
@@ -514,7 +640,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
 
         let claimed: BatchItem | null = null;
         const next = itemsRef.current.map((it) => {
-          if (it.id !== item.id || it.status !== 'analyzed') return it;
+          if (it.id !== item.id || !canClaimForSave(it, activeCompany)) return it;
           claimed = { ...it, status: 'saving', error: null };
           return claimed;
         });
@@ -554,10 +680,42 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
     };
   }, [runSave, saveConcurrency, syncItems]);
 
+  saveItemRef.current = saveItem;
+
+  const updateItemDraft = useCallback(
+    (id: string, patch: Partial<BatchTicketDraft>) => {
+      const target = itemsRef.current.find((it) => it.id === id);
+      if (!target?.draft) return;
+      if (
+        target.status !== 'analyzed' &&
+        !(target.status === 'error' && target.failedStage === 'save')
+      ) {
+        return;
+      }
+      const nextDraft = { ...target.draft, ...patch };
+      const amount = parseAmount(nextDraft.amount);
+      const date = coerceToWireCivilDate(nextDraft.date);
+      patchItem(id, {
+        draft: nextDraft,
+        ticket: target.ticket
+          ? {
+              ...target.ticket,
+              comercio: nextDraft.vendor.trim() || target.ticket.comercio,
+              total: amount ?? target.ticket.total,
+              fecha: date ?? target.ticket.fecha,
+              categoria: nextDraft.category.trim() || target.ticket.categoria,
+            }
+          : target.ticket,
+      });
+    },
+    [patchItem],
+  );
+
   const counts = items.reduce((acc, it) => {
     acc[it.status] += 1;
     return acc;
   }, emptyCounts());
+  const readyCount = items.filter((it) => canClaimForSave(it, companyId)).length;
 
   const isProcessing =
     counts.queued > 0 ||
@@ -569,12 +727,14 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
   return {
     items,
     counts,
+    readyCount,
     isProcessing,
     addFiles,
     removeItem,
     retryItem,
     saveItem,
     saveAll,
+    updateItemDraft,
     clear,
     maxFiles,
     boundCompanyId: companyId,

@@ -6,7 +6,7 @@ import { useUpdateDashboardTicket } from '@/hooks/use-tickets';
 import { usePreprocessTicket, useUploadTicket } from '@/hooks/use-upload-ticket';
 import { updateDashboardDailyReportTicket } from '@/services/dashboard.service';
 import { preprocessTicket, uploadTicket } from '@/services/upload.service';
-import type { BackendTicket } from '@/types/ticket';
+import type { BackendTicket, TicketPreview } from '@/types/ticket';
 import { DASHBOARD_ANALYTICS_QUERY_ROOTS } from '@/utils/ticket-derived-queries';
 
 vi.mock('@/services/upload.service', () => ({
@@ -46,10 +46,22 @@ function testQueryClient() {
 
 afterEach(cleanup);
 
+const preprocessPreview: TicketPreview = {
+  documentKind: 'transaction',
+  vendor: 'Comercio A',
+  type: 'egreso',
+  date: '2026-07-13',
+  amount: 100,
+  tax: null,
+  category: 'Pruebas',
+  paymentMethod: 'card',
+  vendorRFC: null,
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(preprocessTicket).mockResolvedValue({
-    ticket: { vendor: 'Comercio A' },
+    ticket: preprocessPreview,
     ocrText: 'producto',
   });
   vi.mocked(uploadTicket).mockResolvedValue({
