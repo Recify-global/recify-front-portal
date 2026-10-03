@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import UploadPage from '@/pages/UploadPage';
+import { ApiRequestError } from '@/api/http';
 
 const mocks = vi.hoisted(() => ({
   preprocess: vi.fn(),
@@ -101,9 +102,9 @@ vi.mock('@/components/recify/TicketScanAnimation', () => ({
   TicketScanAnimation: () => <span>Analizando imagen</span>,
 }));
 
-function uploadFile(name: string, type: string) {
+function uploadFile(name: string, type: string, content = 'content') {
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-  const file = new File(['content'], name, { type });
+  const file = new File([content], name, { type });
   fireEvent.change(input, { target: { files: [file] } });
   return file;
 }
@@ -143,11 +144,11 @@ afterEach(() => {
 });
 
 describe('UploadPage format hint', () => {
-  it('shows the simplified supported formats and size limit', () => {
+  it('shows every supported format and the size limit', () => {
     render(<UploadPage />);
-    expect(screen.getByText('Imágenes PNG/JPG o PDF CFDI · Máx. 10 MB')).toBeInTheDocument();
-    expect(screen.queryByText(/WEBP/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/GIF/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Imágenes JPG, PNG, WEBP, GIF o PDF CFDI · Máx. 10 MB'),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/PDF de una página/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Ticket: PNG/i)).not.toBeInTheDocument();
   });
@@ -167,8 +168,27 @@ describe('UploadPage format acceptance', () => {
 
   it('accepts PDF uploads for invoice analysis', async () => {
     render(<UploadPage />);
-    uploadFile('invoice.pdf', 'application/pdf');
+    uploadFile('invoice.pdf', 'application/pdf', '%PDF-1.7');
     await waitFor(() => expect(mocks.invoiceUpload).toHaveBeenCalledOnce());
+    expect(mocks.preprocess).not.toHaveBeenCalled();
+  });
+
+  it('accepts a real PDF whose browser MIME is empty', async () => {
+    render(<UploadPage />);
+    uploadFile('invoice.pdf', '', '%PDF-1.7');
+    await waitFor(() => expect(mocks.invoiceUpload).toHaveBeenCalledOnce());
+    expect(mocks.preprocess).not.toHaveBeenCalled();
+  });
+
+  it('rejects renamed non-PDF content before upload', async () => {
+    render(<UploadPage />);
+    uploadFile('malware.pdf', 'application/pdf', 'MZ executable');
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        'El contenido del archivo no corresponde a un PDF válido.',
+      ),
+    );
+    expect(mocks.invoiceUpload).not.toHaveBeenCalled();
     expect(mocks.preprocess).not.toHaveBeenCalled();
   });
 
@@ -176,9 +196,49 @@ describe('UploadPage format acceptance', () => {
     render(<UploadPage />);
     uploadFile('notes.txt', 'text/plain');
     await waitFor(() =>
-      expect(mocks.toastError).toHaveBeenCalledWith('Formato no permitido. Usa PNG, JPG o PDF.'),
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        'Formato no permitido. Usa JPG, PNG, WEBP o GIF.',
+      ),
     );
     expect(mocks.preprocess).not.toHaveBeenCalled();
     expect(mocks.invoiceUpload).not.toHaveBeenCalled();
+  });
+
+  it('shows a backend PDF error and restores the idle state', async () => {
+    mocks.invoiceUpload.mockRejectedValueOnce(new ApiRequestError('Invalid PDF', 400));
+    render(<UploadPage />);
+
+    uploadFile('invoice.pdf', 'application/pdf', '%PDF-1.7');
+
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith('El archivo no es un PDF válido.'),
+    );
+    expect(screen.getByText('Sin archivo cargado')).toBeInTheDocument();
+  });
+
+  it('does not show upload success when fake.jpg is rejected by the backend', async () => {
+    mocks.preprocess.mockRejectedValueOnce(
+      new ApiRequestError('File content is not a supported image (jpeg, png, webp, gif)', 400),
+    );
+    render(<UploadPage />);
+
+    uploadFile('fake.jpg', 'image/jpeg', 'not-a-jpeg');
+
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        'File content is not a supported image (jpeg, png, webp, gif)',
+      ),
+    );
+    expect(screen.queryByText('Archivo cargado correctamente')).not.toBeInTheDocument();
+    expect(screen.getByText('Sin archivo cargado')).toBeInTheDocument();
+    expect(screen.getByText('Arrastra tu ticket o factura aquí')).toBeInTheDocument();
+    expect(screen.queryByText('Analizando…')).not.toBeInTheDocument();
+
+    mocks.preprocess.mockClear();
+    uploadFile('ticket.png', 'image/png');
+    await waitFor(() => expect(mocks.preprocess).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(screen.getByText('Ticket analizado correctamente')).toBeInTheDocument(),
+    );
   });
 });

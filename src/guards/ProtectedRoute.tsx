@@ -17,6 +17,7 @@ function readSnapshot() {
   return {
     token: user ? getStoredToken() : null,
     companyId: user ? getStoredCompanyId() : null,
+    user,
   };
 }
 
@@ -31,8 +32,26 @@ export default function ProtectedRoute({ children, redirectTo = '/auth' }: Prote
   }, []);
 
   if (!snapshot.token || !snapshot.companyId) {
-    return <Navigate to={redirectTo} replace state={{ from: location }} />;
+    return (
+      <Navigate
+        to={!snapshot.token || !snapshot.user ? redirectTo : '/select-company'}
+        replace
+        state={{ from: location }}
+      />
+    );
   }
 
+  return <>{children ?? <Outlet />}</>;
+}
+
+export function AuthenticatedRoute({ children }: { children?: React.ReactNode }) {
+  const location = useLocation();
+  const [snapshot, setSnapshot] = useState(readSnapshot);
+
+  useEffect(() => subscribeAuthChanges(() => setSnapshot(readSnapshot())), []);
+
+  if (!snapshot.token || !snapshot.user) {
+    return <Navigate to="/auth" replace state={{ from: location }} />;
+  }
   return <>{children ?? <Outlet />}</>;
 }

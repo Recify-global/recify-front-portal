@@ -5,12 +5,14 @@ import type {
   BackendTicketReviewStatus,
   BackendTicketStatus,
   BackendTicketType,
+  TicketDraftOverrides,
+  TicketPreview,
   UiTicket,
   UiTicketStatus,
 } from '@/types/ticket';
 import { formatTicketPaymentMethod, formatTicketReviewStatus, formatTicketType } from './ticket-display';
 import { HISTORY_TIMEZONE, resolveCompanyTimeZone } from './financial-kpis';
-import { coerceToWireCivilDate } from './civil-date-input';
+import { coerceToWireCivilDate, isValidWireCivilDate } from './civil-date-input';
 
 export interface TicketEditDraft {
   type: BackendTicketType;
@@ -118,10 +120,10 @@ export function createDraftFromTicket(
 }
 
 export function createDraftFromAnalyzedTicket(
-  payload: Record<string, unknown> | null | undefined,
+  payload: Record<string, unknown> | TicketPreview | null | undefined,
   fallback: UiTicket,
 ): TicketEditDraft {
-  const raw = payload ?? {};
+  const raw = (payload ?? {}) as Record<string, unknown>;
   const rawDate = asString(raw.date) ?? asString(raw.fecha);
   const sourceDate = rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
     ? `${rawDate}T${fallback.hora || '00:00'}:00.000-06:00`
@@ -398,4 +400,106 @@ export function getTicketEditValidationMessage(draft: TicketEditDraft | null): s
   if (!draft) return null;
   const validation = validateDraft(draft);
   return 'message' in validation ? validation.message : null;
+}
+
+export interface BatchTicketDraft {
+  type: BackendTicketType;
+  date: string;
+  vendor: string;
+  amount: string;
+  tax: string;
+  category: string;
+  paymentMethod: BackendPaymentMethod;
+  vendorRFC: string;
+}
+
+export function createBatchDraftFromPreview(preview: TicketPreview): BatchTicketDraft {
+  return {
+    type: preview.type,
+    date: preview.date && isValidWireCivilDate(preview.date) ? preview.date : '',
+    vendor: preview.vendor ?? '',
+    amount: String(preview.amount),
+    tax: preview.tax == null ? '' : String(preview.tax),
+    category: preview.category ?? '',
+    paymentMethod: preview.paymentMethod ?? 'other',
+    vendorRFC: preview.vendorRFC ?? '',
+  };
+}
+
+export function normalizeBatchTicketDraft(draft: BatchTicketDraft): BatchTicketDraft {
+  const amount = parseAmount(draft.amount);
+  const parsedTax = parseTaxDraft(draft.tax);
+  return {
+    ...draft,
+    vendor: draft.vendor.trim(),
+    category: draft.category.trim(),
+    vendorRFC: draft.vendorRFC.trim(),
+    amount: amount === null ? draft.amount.trim() : String(amount),
+    tax: parsedTax === undefined ? draft.tax.trim() : parsedTax === null ? '' : String(parsedTax),
+    date: coerceToWireCivilDate(draft.date) ?? draft.date.trim(),
+  };
+}
+
+export function getBatchTicketDraftValidationMessage(draft: BatchTicketDraft | null): string | null {
+  if (!draft) return null;
+  const normalized = normalizeBatchTicketDraft(draft);
+  if (parseAmount(normalized.amount) === null) {
+    return 'Ingresa un monto válido mayor o igual a 0.';
+  }
+  if (normalized.date && !coerceToWireCivilDate(normalized.date)) {
+    return 'Ingresa una fecha válida.';
+  }
+  if (parseTaxDraft(normalized.tax) === undefined) {
+    return 'Ingresa un IVA válido mayor o igual a 0.';
+  }
+  const amount = parseAmount(normalized.amount);
+  const tax = parseTaxDraft(normalized.tax);
+  if (amount != null && tax != null && tax > amount) {
+    return 'El IVA no puede ser mayor que el total.';
+  }
+  if (normalized.vendor.length > 200) {
+    return 'El comercio no puede exceder 200 caracteres.';
+  }
+  if (normalized.category.length > 100) {
+    return 'La categoría no puede exceder 100 caracteres.';
+  }
+  return null;
+}
+
+export function hasBatchTicketDraftChanges(
+  baseline: BatchTicketDraft | null,
+  draft: BatchTicketDraft | null,
+): boolean {
+  if (!baseline || !draft) return false;
+  return (
+    JSON.stringify(normalizeBatchTicketDraft(baseline)) !==
+    JSON.stringify(normalizeBatchTicketDraft(draft))
+  );
+}
+
+export function buildTicketDraftOverrides(
+  draft: BatchTicketDraft,
+): { ok: true; payload: TicketDraftOverrides } | { ok: false; message: string } {
+  const message = getBatchTicketDraftValidationMessage(draft);
+  if (message) return { ok: false, message };
+
+  const normalized = normalizeBatchTicketDraft(draft);
+  const amount = parseAmount(normalized.amount);
+  const tax = parseTaxDraft(normalized.tax);
+  if (amount === null || tax === undefined) {
+    return { ok: false, message: 'Ingresa un monto válido mayor o igual a 0.' };
+  }
+
+  const payload: TicketDraftOverrides = {
+    type: normalized.type,
+    amount,
+    tax,
+    paymentMethod: normalized.paymentMethod,
+    vendor: normalized.vendor,
+    category: normalized.category,
+  };
+  const date = coerceToWireCivilDate(normalized.date);
+  if (date) payload.date = date;
+  if (normalized.vendorRFC) payload.vendorRFC = normalized.vendorRFC;
+  return { ok: true, payload };
 }

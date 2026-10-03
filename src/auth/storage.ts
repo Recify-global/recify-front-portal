@@ -64,10 +64,23 @@ function isStoredAuthUser(value: unknown): value is AuthUser {
     user._id.length > 0 &&
     typeof user.name === 'string' &&
     typeof user.email === 'string' &&
-    (user.role === 'admin' || user.role === 'accountant' || user.role === 'viewer') &&
+    (user.platformRole === null || user.platformRole === 'admin') &&
     (user.status === 'active' || user.status === 'inactive' || user.status === 'suspended') &&
-    Array.isArray(user.companies) &&
-    user.companies.every((companyId) => typeof companyId === 'string' && companyId.length > 0)
+    Array.isArray(user.memberships) &&
+    user.memberships.every((membership) => {
+      if (!membership || typeof membership !== 'object' || Array.isArray(membership)) return false;
+      const item = membership as Record<string, unknown>;
+      return (
+        typeof item.membershipId === 'string' &&
+        typeof item.companyId === 'string' &&
+        item.companyId.length > 0 &&
+        typeof item.companyName === 'string' &&
+        typeof item.companyTimezone === 'string' &&
+        (item.companyStatus === 'active' || item.companyStatus === 'suspended') &&
+        (item.role === 'accountant' || item.role === 'viewer') &&
+        item.status === 'active'
+      );
+    })
   );
 }
 
@@ -78,7 +91,27 @@ export function getStoredToken(): string | null {
 
 export function getStoredCompanyId(): string | null {
   const value = safeGet(AUTH_STORAGE_KEYS.companyId);
-  return value && value.length > 0 ? value : null;
+  if (!value || value.length === 0) return null;
+  const rawUser = safeGet(AUTH_STORAGE_KEYS.user);
+  if (!rawUser) return null;
+  try {
+    const parsed = JSON.parse(rawUser) as unknown;
+    if (
+      isStoredAuthUser(parsed) &&
+      parsed.memberships.some(
+        (membership) =>
+          membership.status === 'active' &&
+          membership.companyStatus === 'active' &&
+          membership.companyId === value,
+      )
+    ) {
+      return value;
+    }
+  } catch {
+    // Invalid session data is cleared by getStoredUser.
+  }
+  safeRemove(AUTH_STORAGE_KEYS.companyId);
+  return null;
 }
 
 export function getStoredUser(): AuthUser | null {
@@ -102,10 +135,10 @@ export function getStoredUser(): AuthUser | null {
 }
 
 export function pickPrimaryCompanyId(user: AuthUser | null | undefined): string | null {
-  if (!user || !Array.isArray(user.companies)) return null;
-  const first = user.companies[0];
-  if (typeof first !== 'string' || first.length === 0) return null;
-  return first;
+  if (!user || user.memberships.length !== 1) return null;
+  return user.memberships[0]?.companyStatus === 'active'
+    ? user.memberships[0].companyId
+    : null;
 }
 
 export interface PersistSessionInput {
@@ -130,6 +163,23 @@ export function setAuthSession({ token, user }: PersistSessionInput): void {
   emitAuthChange();
 }
 
+export function updateStoredUser(user: AuthUser): void {
+  if (!getStoredToken()) return;
+  const previousCompanyId = safeGet(AUTH_STORAGE_KEYS.companyId);
+  safeSet(AUTH_STORAGE_KEYS.user, JSON.stringify(user));
+  const previousStillValid = user.memberships.some(
+    (membership) =>
+      membership.companyId === previousCompanyId &&
+      membership.companyStatus === 'active',
+  );
+  if (!previousStillValid) {
+    const onlyCompanyId = pickPrimaryCompanyId(user);
+    if (onlyCompanyId) safeSet(AUTH_STORAGE_KEYS.companyId, onlyCompanyId);
+    else safeRemove(AUTH_STORAGE_KEYS.companyId);
+  }
+  emitAuthChange();
+}
+
 export function clearAuthSession(options: { advanceGeneration?: boolean } = {}): void {
   if (options.advanceGeneration !== false) {
     advanceAuthSessionGeneration();
@@ -142,7 +192,7 @@ export function clearAuthSession(options: { advanceGeneration?: boolean } = {}):
 
 /**
  * Cambia la compañía activa sin tocar token ni user.
- * Solo acepta IDs presentes en `user.companies` de la sesión actual.
+ * Solo acepta IDs presentes en las memberships activas de la sesión actual.
  */
 export function setActiveCompany(companyId: string): void {
   const nextId = typeof companyId === 'string' ? companyId.trim() : '';
@@ -153,7 +203,13 @@ export function setActiveCompany(companyId: string): void {
     throw new Error('No hay sesión activa.');
   }
   const user = getStoredUser();
-  if (!user || !Array.isArray(user.companies) || !user.companies.includes(nextId)) {
+  if (
+    !user ||
+    !user.memberships.some(
+      (membership) =>
+        membership.companyId === nextId && membership.companyStatus === 'active',
+    )
+  ) {
     throw new Error('La compañía no pertenece al usuario autenticado.');
   }
   if (getStoredCompanyId() === nextId) return;
@@ -180,4 +236,10 @@ export function subscribeAuthChanges(listener: () => void): () => void {
 
 export function hasActiveSession(): boolean {
   return Boolean(getStoredToken() && getStoredCompanyId());
+}
+
+export function getActiveMembership(user = getStoredUser()) {
+  const companyId = getStoredCompanyId();
+  if (!user || !companyId) return null;
+  return user.memberships.find((membership) => membership.companyId === companyId) ?? null;
 }

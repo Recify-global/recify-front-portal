@@ -1,40 +1,23 @@
-﻿import { useQuery } from '@tanstack/react-query';
-import { useMemo } from 'react';
-import { listMyCompanies } from '@/services/company.service';
+﻿import { useMemo } from 'react';
 import type { Company } from '@/types/company';
 import { useAuth } from './use-auth';
 
 /**
- * Lista compañías del usuario autenticado.
- * Cruza `listMyCompanies()` con `user.companies` para no mostrar IDs ajenos.
- * Si el endpoint falla, no inventa datos: el caller debe degradar la UI.
+ * Proyecta las compañías desde memberships verificadas por el backend.
+ * La selección sigue siendo contexto UX; cada request vuelve a autorizarse.
  */
 export function useCompanies() {
   const { user, companyId } = useAuth();
 
-  const allowedIds = useMemo(() => {
-    if (!user || !Array.isArray(user.companies)) return [] as string[];
-    return user.companies.filter((id): id is string => typeof id === 'string' && id.length > 0);
-  }, [user]);
-
-  const query = useQuery({
-    queryKey: ['companies', 'mine', allowedIds.join(',')],
-    queryFn: () => listMyCompanies({ page: 1, limit: 100 }),
-    enabled: allowedIds.length > 0,
-    staleTime: 60_000,
-    retry: 1,
-  });
-
   const companies = useMemo(() => {
-    const rows = query.data?.data;
-    if (!Array.isArray(rows) || allowedIds.length === 0) return [] as Company[];
-    const allowed = new Set(allowedIds);
-    return rows.filter((c): c is Company => {
-      if (!c || typeof c !== 'object') return false;
-      const id = typeof c._id === 'string' ? c._id : '';
-      return id.length > 0 && allowed.has(id);
-    });
-  }, [allowedIds, query.data?.data]);
+    return (user?.memberships ?? []).map<Company>((membership) => ({
+      _id: membership.companyId,
+      name: membership.companyName,
+      timezone: membership.companyTimezone,
+      status: membership.companyStatus,
+    }));
+  }, [user]);
+  const allowedIds = useMemo(() => companies.map((company) => company._id), [companies]);
 
   const activeCompany = useMemo(() => {
     if (!companyId) return null;
@@ -51,8 +34,8 @@ export function useCompanies() {
     activeCompany,
     allowedIds,
     hasNames,
-    isLoading: query.isPending,
-    isError: query.isError,
-    refetch: query.refetch,
+    isLoading: false,
+    isError: false,
+    refetch: async () => undefined,
   };
 }

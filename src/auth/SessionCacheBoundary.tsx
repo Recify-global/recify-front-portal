@@ -9,14 +9,6 @@ import {
   getStoredCompanyId,
   subscribeAuthChanges,
 } from '@/auth/storage';
-import {
-  INVOICE_DETAIL_QUERY_ROOT,
-  INVOICE_LIST_QUERY_ROOT,
-} from '@/utils/invoice-queries';
-import {
-  TICKET_DETAIL_QUERY_ROOT,
-  TICKET_LIST_QUERY_ROOT,
-} from '@/utils/ticket-queries';
 
 /**
  * Conecta el coordinador de sesión con la misma instancia de QueryClient
@@ -53,21 +45,15 @@ export function SessionCacheBoundary() {
         nextCompanyId &&
         previousCompanyId !== nextCompanyId
       ) {
-        void queryClient.cancelQueries({
-          queryKey: [TICKET_LIST_QUERY_ROOT, previousCompanyId],
-        });
-        void queryClient.cancelQueries({
-          queryKey: [TICKET_DETAIL_QUERY_ROOT, previousCompanyId],
-        });
-        void queryClient.cancelQueries({
-          queryKey: [INVOICE_LIST_QUERY_ROOT, previousCompanyId],
-        });
-        void queryClient.cancelQueries({
-          queryKey: [INVOICE_DETAIL_QUERY_ROOT, previousCompanyId],
-        });
-        void queryClient.cancelQueries({
-          queryKey: ['dashboard-daily-report', previousCompanyId],
-        });
+        void queryClient
+          .cancelQueries({
+            predicate: (query) => query.queryKey.includes(previousCompanyId),
+          })
+          .then(() => {
+            queryClient.removeQueries({
+              predicate: (query) => query.queryKey.includes(previousCompanyId),
+            });
+          });
       }
 
       previousCompanyIdRef.current = nextCompanyId;

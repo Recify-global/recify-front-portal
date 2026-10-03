@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Upload,
   Loader2,
@@ -19,8 +19,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   useBatchUpload,
   type BatchItem,
@@ -35,13 +50,21 @@ import {
 import { invalidateInvoiceQueries } from '@/utils/invoice-queries';
 import { invalidateTicketDerivedQueries } from '@/utils/ticket-derived-queries';
 import { invalidateBalanceQueries } from '@/hooks/use-balances';
+import { TICKET_IMAGE_ACCEPT } from '@/utils/upload-file';
+import { EditableField } from '@/components/recify/EditableField';
+import {
+  getBatchTicketDraftValidationMessage,
+  hasBatchTicketDraftChanges,
+  type BatchTicketDraft,
+} from '@/utils/ticket-edit';
+import { formatCivilDateDisplay } from '@/utils/civil-date-input';
+import { formatMxn } from '@/utils/financial-kpis';
+import type { BackendPaymentMethod, BackendTicketType } from '@/types/ticket';
 
 interface BatchUploadDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 const STATUS_LABEL: Record<BatchItemStatus, string> = {
   queued: 'Pendiente',
@@ -52,9 +75,22 @@ const STATUS_LABEL: Record<BatchItemStatus, string> = {
   error: 'Error',
 };
 
-function formatMXN(n: number) {
-  return `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
-}
+const PAYMENT_OPTIONS: { value: BackendPaymentMethod; label: string }[] = [
+  { value: 'card', label: 'Tarjeta' },
+  { value: 'cash', label: 'Efectivo' },
+  { value: 'transfer', label: 'Transferencia' },
+  { value: 'other', label: 'Otro' },
+];
+
+const TYPE_OPTIONS: { value: BackendTicketType; label: string }[] = [
+  { value: 'ingreso', label: 'Ingreso' },
+  { value: 'egreso', label: 'Gasto' },
+];
+
+type BatchEditableField = keyof Pick<
+  BatchTicketDraft,
+  'vendor' | 'date' | 'amount' | 'tax' | 'paymentMethod' | 'type' | 'category'
+>;
 
 export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -65,16 +101,17 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
   const {
     items,
     counts,
+    readyCount,
     addFiles,
     removeItem,
     retryItem,
     saveItem,
     saveAll,
+    updateItemDraft,
     clear,
     maxFiles,
   } = useBatchUpload();
 
-  // Al cerrar el diálogo, limpiar cola no guardada para no mezclar al reabrir.
   useEffect(() => {
     if (!open) {
       clear();
@@ -135,8 +172,18 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
   };
 
   const handleSaveAll = async () => {
-    if (savingBusy || counts.analyzed === 0) {
-      if (counts.analyzed === 0) toast.info('No hay tickets listos para guardar.');
+    if (savingBusy || readyCount === 0) {
+      if (readyCount === 0) toast.info('No hay tickets listos para guardar.');
+      return;
+    }
+    const invalid = items.find(
+      (item) =>
+        item.draft &&
+        (item.status === 'analyzed' || item.failedStage === 'save') &&
+        getBatchTicketDraftValidationMessage(item.draft),
+    );
+    if (invalid?.draft) {
+      toast.error(getBatchTicketDraftValidationMessage(invalid.draft));
       return;
     }
     const authContext = captureAuthMutationContext();
@@ -168,6 +215,14 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
 
   const handleSaveOne = async (id: string) => {
     if (savingBusy) return;
+    const item = items.find((it) => it.id === id);
+    if (item?.draft) {
+      const message = getBatchTicketDraftValidationMessage(item.draft);
+      if (message) {
+        toast.error(message);
+        return;
+      }
+    }
     const authContext = captureAuthMutationContext();
     setSavingBusy(true);
     try {
@@ -219,16 +274,15 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
         <DialogHeader>
           <DialogTitle>Subir varios tickets</DialogTitle>
           <DialogDescription>
-            Hasta {maxFiles} imágenes. Se analizan en paralelo (máx. 3). Revisa el resumen y guarda
-            los que confirmes. La edición detallada de productos/notas sigue en el flujo de un solo
-            ticket.
+            Hasta {maxFiles} imágenes. Revisa cada ticket, corrige los campos y guarda. La
+            confirmación crea el ticket con tus cambios; no edita tickets ya existentes.
           </DialogDescription>
         </DialogHeader>
 
         <input
           ref={fileInputRef}
           type="file"
-          accept={ALLOWED_MIME_TYPES.join(',')}
+          accept={TICKET_IMAGE_ACCEPT}
           multiple
           className="hidden"
           onChange={(e) => {
@@ -290,18 +344,20 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
             </div>
 
             <div className="flex-1 overflow-y-auto rounded-xl border border-border/50">
-              <ul className="divide-y divide-border/50">
-                {items.map((item) => (
-                  <BatchListItem
+              <Accordion type="multiple" className="w-full">
+                {items.map((item, index) => (
+                  <BatchAccordionItem
                     key={item.id}
+                    index={index}
                     item={item}
                     disabled={savingBusy}
                     onSave={() => void handleSaveOne(item.id)}
                     onRemove={() => removeItem(item.id)}
                     onRetry={() => retryItem(item.id)}
+                    onUpdateDraft={(patch) => updateItemDraft(item.id, patch)}
                   />
                 ))}
-              </ul>
+              </Accordion>
             </div>
 
             {slotsLeft > 0 && (
@@ -333,14 +389,14 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
             </Button>
             <Button
               onClick={() => void handleSaveAll()}
-              disabled={counts.analyzed === 0 || counts.saving > 0 || savingBusy}
+              disabled={readyCount === 0 || counts.saving > 0 || savingBusy}
             >
               {savingBusy || counts.saving > 0 ? (
                 <Loader2 size={16} className="mr-2 animate-spin" />
               ) : (
                 <Save size={16} className="mr-2" />
               )}
-              Guardar analizados ({counts.analyzed})
+              Guardar tickets ({readyCount})
             </Button>
           </div>
         </DialogFooter>
@@ -349,54 +405,382 @@ export function BatchUploadDialog({ open, onOpenChange }: BatchUploadDialogProps
   );
 }
 
-function BatchListItem({
+function BatchAccordionItem({
+  index,
   item,
   disabled,
   onSave,
   onRemove,
   onRetry,
+  onUpdateDraft,
 }: {
+  index: number;
   item: BatchItem;
   disabled?: boolean;
   onSave: () => void;
   onRemove: () => void;
   onRetry: () => void;
+  onUpdateDraft: (patch: Partial<BatchTicketDraft>) => void;
 }) {
   const busy = item.status === 'analyzing' || item.status === 'saving' || Boolean(disabled);
+  const canEdit =
+    Boolean(item.draft) &&
+    (item.status === 'analyzed' || (item.status === 'error' && item.failedStage === 'save'));
+  const dirty = hasBatchTicketDraftChanges(item.baseline, item.draft);
+  const validation = getBatchTicketDraftValidationMessage(item.draft);
 
   return (
-    <li className="flex items-center gap-3 p-3">
-      <img
-        src={item.previewUrl}
-        alt={item.file.name}
-        className="h-14 w-14 rounded-lg object-cover bg-muted"
-      />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-foreground">{item.file.name}</p>
-        <ItemSummary item={item} />
+    <AccordionItem value={item.id} className="border-b border-border/50 px-3">
+      <div className="flex items-center gap-2">
+        <AccordionTrigger className="flex-1 py-3 hover:no-underline text-left">
+          <div className="flex min-w-0 items-center gap-3">
+            <img
+              src={item.previewUrl}
+              alt=""
+              className="h-12 w-12 rounded-lg object-cover bg-muted"
+            />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-foreground">
+                Ticket {index + 1}
+                {item.ticket?.comercio ? ` · ${item.ticket.comercio}` : ''}
+              </p>
+              <ItemSummary item={item} />
+            </div>
+            {dirty ? (
+              <Badge variant="outline" className="shrink-0">
+                Modificado
+              </Badge>
+            ) : null}
+          </div>
+        </AccordionTrigger>
+        <div className="flex gap-1 shrink-0 pr-1">
+          {(item.status === 'analyzed' ||
+            (item.status === 'error' && item.failedStage === 'save')) && (
+            <Button
+              size="sm"
+              onClick={(event) => {
+                event.stopPropagation();
+                onSave();
+              }}
+              disabled={busy || Boolean(validation)}
+            >
+              <Save size={14} className="mr-1" /> Guardar
+            </Button>
+          )}
+          {item.status === 'error' && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(event) => {
+                event.stopPropagation();
+                onRetry();
+              }}
+              disabled={busy}
+            >
+              <RefreshCw size={14} className="mr-1" /> Reintentar
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemove();
+            }}
+            disabled={busy}
+            aria-label="Quitar"
+          >
+            <Trash2 size={16} />
+          </Button>
+        </div>
       </div>
-      <div className="flex gap-1 shrink-0">
-        {item.status === 'analyzed' && (
-          <Button size="sm" onClick={onSave} disabled={busy}>
-            <Save size={14} className="mr-1" /> Guardar
-          </Button>
+      <AccordionContent>
+        {item.preview?.documentKind === 'balance' ? (
+          <p className="text-sm text-muted-foreground">
+            Captura de saldo. Se registrará como saldo, no como ticket.
+          </p>
+        ) : canEdit && item.draft ? (
+          <BatchDraftFields
+            item={item}
+            draft={item.draft}
+            disabled={busy}
+            validation={validation}
+            onUpdateDraft={onUpdateDraft}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">{STATUS_LABEL[item.status]}</p>
         )}
-        {item.status === 'error' && (
-          <Button variant="outline" size="sm" onClick={onRetry} disabled={busy}>
-            <RefreshCw size={14} className="mr-1" /> Reintentar
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onRemove}
-          disabled={busy}
-          aria-label="Quitar"
+      </AccordionContent>
+    </AccordionItem>
+  );
+}
+
+function BatchDraftFields({
+  item,
+  draft,
+  disabled,
+  validation,
+  onUpdateDraft,
+}: {
+  item: BatchItem;
+  draft: BatchTicketDraft;
+  disabled: boolean;
+  validation: string | null;
+  onUpdateDraft: (patch: Partial<BatchTicketDraft>) => void;
+}) {
+  const [editingField, setEditingField] = useState<BatchEditableField | null>(null);
+  const vendorLabel = draft.vendor.trim() || item.ticket?.comercio || 'este ticket';
+
+  const endEdit = () => setEditingField(null);
+
+  return (
+    <div className="space-y-3 pb-2">
+      {validation ? <p className="text-xs text-destructive">{validation}</p> : null}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <DraftField
+          label={`Editar comercio de ${vendorLabel}`}
+          caption="Comercio"
+          editing={editingField === 'vendor'}
+          disabled={disabled}
+          onStartEdit={() => setEditingField('vendor')}
+          editor={
+            <Input
+              value={draft.vendor}
+              maxLength={200}
+              aria-label={`Editar comercio de ${vendorLabel}`}
+              className="h-9 rounded-lg text-sm"
+              onChange={(event) => onUpdateDraft({ vendor: event.target.value })}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === 'Escape') {
+                  event.preventDefault();
+                  endEdit();
+                }
+              }}
+              onBlur={endEdit}
+            />
+          }
         >
-          <Trash2 size={16} />
-        </Button>
+          <span className="text-sm font-medium">{draft.vendor || 'Sin comercio'}</span>
+        </DraftField>
+
+        <DraftField
+          label={`Editar fecha de ${vendorLabel}`}
+          caption="Fecha"
+          editing={editingField === 'date'}
+          disabled={disabled}
+          onStartEdit={() => setEditingField('date')}
+          editor={
+            <Input
+              type="date"
+              value={draft.date}
+              aria-label={`Editar fecha de ${vendorLabel}`}
+              className="h-9 rounded-lg text-sm"
+              onChange={(event) => onUpdateDraft({ date: event.target.value })}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === 'Escape') {
+                  event.preventDefault();
+                  endEdit();
+                }
+              }}
+              onBlur={endEdit}
+            />
+          }
+        >
+          <span className="text-sm">{formatCivilDateDisplay(draft.date) || 'Sin fecha'}</span>
+        </DraftField>
+
+        <DraftField
+          label={`Editar total de ${vendorLabel}`}
+          caption="Total"
+          editing={editingField === 'amount'}
+          disabled={disabled}
+          onStartEdit={() => setEditingField('amount')}
+          editor={
+            <Input
+              inputMode="decimal"
+              value={draft.amount}
+              aria-label={`Editar total de ${vendorLabel}`}
+              className="h-9 rounded-lg text-sm"
+              onChange={(event) => {
+                const raw = event.target.value;
+                if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                onUpdateDraft({ amount: raw });
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === 'Escape') {
+                  event.preventDefault();
+                  endEdit();
+                }
+              }}
+              onBlur={endEdit}
+            />
+          }
+        >
+          <span className="text-sm font-semibold tabular-nums">
+            {formatMxn(Number(draft.amount) || 0)}
+          </span>
+        </DraftField>
+
+        <DraftField
+          label={`Editar IVA de ${vendorLabel}`}
+          caption="IVA"
+          editing={editingField === 'tax'}
+          disabled={disabled}
+          onStartEdit={() => setEditingField('tax')}
+          editor={
+            <Input
+              inputMode="decimal"
+              value={draft.tax}
+              aria-label={`Editar IVA de ${vendorLabel}`}
+              className="h-9 rounded-lg text-sm"
+              onChange={(event) => {
+                const raw = event.target.value;
+                if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                onUpdateDraft({ tax: raw });
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === 'Escape') {
+                  event.preventDefault();
+                  endEdit();
+                }
+              }}
+              onBlur={endEdit}
+            />
+          }
+        >
+          <span className="text-sm tabular-nums">
+            {draft.tax === '' ? 'Sin IVA' : formatMxn(Number(draft.tax) || 0)}
+          </span>
+        </DraftField>
+
+        <DraftField
+          label={`Editar método de pago de ${vendorLabel}`}
+          caption="Método de pago"
+          editing={editingField === 'paymentMethod'}
+          disabled={disabled}
+          onStartEdit={() => setEditingField('paymentMethod')}
+          editor={
+            <Select
+              value={draft.paymentMethod}
+              onValueChange={(value) => {
+                onUpdateDraft({ paymentMethod: value as BackendPaymentMethod });
+                endEdit();
+              }}
+            >
+              <SelectTrigger
+                className="h-9 rounded-lg text-sm"
+                aria-label={`Editar método de pago de ${vendorLabel}`}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAYMENT_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          }
+        >
+          <span className="text-sm">
+            {PAYMENT_OPTIONS.find((option) => option.value === draft.paymentMethod)?.label}
+          </span>
+        </DraftField>
+
+        <DraftField
+          label={`Editar tipo de ${vendorLabel}`}
+          caption="Tipo"
+          editing={editingField === 'type'}
+          disabled={disabled}
+          onStartEdit={() => setEditingField('type')}
+          editor={
+            <Select
+              value={draft.type}
+              onValueChange={(value) => {
+                onUpdateDraft({ type: value as BackendTicketType });
+                endEdit();
+              }}
+            >
+              <SelectTrigger
+                className="h-9 rounded-lg text-sm"
+                aria-label={`Editar tipo de ${vendorLabel}`}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TYPE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          }
+        >
+          <span className="text-sm">
+            {TYPE_OPTIONS.find((option) => option.value === draft.type)?.label}
+          </span>
+        </DraftField>
+
+        <DraftField
+          label={`Editar categoría de ${vendorLabel}`}
+          caption="Categoría"
+          editing={editingField === 'category'}
+          disabled={disabled}
+          onStartEdit={() => setEditingField('category')}
+          editor={
+            <Input
+              value={draft.category}
+              maxLength={100}
+              aria-label={`Editar categoría de ${vendorLabel}`}
+              className="h-9 rounded-lg text-sm"
+              onChange={(event) => onUpdateDraft({ category: event.target.value })}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === 'Escape') {
+                  event.preventDefault();
+                  endEdit();
+                }
+              }}
+              onBlur={endEdit}
+            />
+          }
+        >
+          <span className="text-sm">{draft.category || 'Sin categoría'}</span>
+        </DraftField>
       </div>
-    </li>
+    </div>
+  );
+}
+
+function DraftField({
+  label,
+  caption,
+  editing,
+  disabled,
+  onStartEdit,
+  editor,
+  children,
+}: {
+  label: string;
+  caption: string;
+  editing: boolean;
+  disabled: boolean;
+  onStartEdit: () => void;
+  editor: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs text-muted-foreground">{caption}</Label>
+      {editing && !disabled ? (
+        editor
+      ) : (
+        <EditableField label={label} disabled={disabled} onStartEdit={onStartEdit}>
+          {children}
+        </EditableField>
+      )}
+    </div>
   );
 }
 
@@ -411,15 +795,18 @@ function ItemSummary({ item }: { item: BatchItem }) {
 
   if (item.status === 'analyzed' || item.status === 'saved') {
     const ticket = item.status === 'saved' ? item.savedTicket : item.ticket;
+    const dateLabel = ticket?.fecha ? formatCivilDateDisplay(ticket.fecha) : null;
     return (
-      <p className="text-xs text-muted-foreground">
+      <p className="truncate text-xs text-muted-foreground">
         {STATUS_LABEL[item.status]}
         {ticket ? (
           <>
             {' '}
-            — {ticket.comercio} —{' '}
-            <span className="font-medium text-foreground">{formatMXN(ticket.total)}</span>
+            — {ticket.comercio} — {formatMxn(ticket.total)}
+            {dateLabel ? ` · ${dateLabel}` : ''}
           </>
+        ) : item.preview?.documentKind === 'balance' ? (
+          ' — Captura de saldo'
         ) : null}
       </p>
     );

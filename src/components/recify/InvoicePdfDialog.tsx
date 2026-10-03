@@ -86,6 +86,8 @@ export function InvoicePdfDialog({
               key={pdfUrl}
               src={pdfUrl}
               title="Vista del PDF de la factura"
+              sandbox=""
+              referrerPolicy="no-referrer"
               className="h-full min-h-[12rem] w-full border-0 bg-background"
               onLoad={() => setFrameLoaded(true)}
               onError={() => setFrameFailed(true)}

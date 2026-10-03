@@ -136,7 +136,7 @@ export default function HistoryPage() {
   );
   const [isImageRetrying, setIsImageRetrying] = useState(false);
 
-  const { companyId } = useAuth();
+  const { companyId, canManage } = useAuth();
   const { activeCompany } = useCompanies();
   const companyTimeZone = resolveCompanyTimeZone(activeCompany?.timezone);
   const queryClient = useQueryClient();
@@ -880,6 +880,7 @@ export default function HistoryPage() {
 
         {/* Table */}
         <HistoryTicketTable
+          canManage={canManage}
           tickets={filteredData}
           globalFilter={globalFilter}
           onGlobalFilterChange={setGlobalFilter}

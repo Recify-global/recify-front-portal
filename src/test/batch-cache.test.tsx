@@ -43,13 +43,15 @@ vi.mock('@/hooks/use-batch-upload', () => ({
       saved: 0,
       error: 0,
     },
+    readyCount: 2,
     addFiles: vi.fn(() => ({ accepted: [], rejected: [] })),
     removeItem: vi.fn(),
     retryItem: vi.fn(),
     saveItem: mocks.saveItem,
     saveAll: mocks.saveAll,
+    updateItemDraft: vi.fn(),
     clear: mocks.clear,
-    maxFiles: 20,
+    maxFiles: 5,
   }),
 }));
 
@@ -86,7 +88,7 @@ describe('batch cache effects', () => {
     });
     renderDialog();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Guardar analizados (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar tickets (2)' }));
 
     await waitFor(() => {
       expect(mocks.invalidateTicketDerivedQueries).toHaveBeenCalledTimes(1);
@@ -117,7 +119,7 @@ describe('batch cache effects', () => {
     });
     renderDialog();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Guardar analizados (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar tickets (2)' }));
     await waitFor(() => expect(mocks.saveAll).toHaveBeenCalledOnce());
 
     expect(mocks.invalidateTicketDerivedQueries).not.toHaveBeenCalled();
@@ -133,7 +135,7 @@ describe('batch cache effects', () => {
         }),
     );
     renderDialog();
-    fireEvent.click(screen.getByRole('button', { name: 'Guardar analizados (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar tickets (2)' }));
     await waitFor(() => expect(mocks.saveAll).toHaveBeenCalledOnce());
 
     state.generation += 1;

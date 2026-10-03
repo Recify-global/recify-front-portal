@@ -129,7 +129,7 @@ export default function InvoicesPage() {
     invoice: BackendInvoice;
   } | null>(null);
 
-  const { companyId } = useAuth();
+  const { companyId, canManage } = useAuth();
   const { activeCompany } = useCompanies();
   const timeZone = resolveCompanyTimeZone(activeCompany?.timezone || HISTORY_TIMEZONE);
   const companyIdRef = useRef(companyId);
@@ -712,7 +712,7 @@ export default function InvoicesPage() {
                                 if (!companyId) return;
                                 setPendingDelete({ companyId, invoice });
                               }}
-                              disabled={deleteMutation.isPending}
+                              disabled={!canManage || deleteMutation.isPending}
                               aria-label="Eliminar factura"
                             >
                               {deleteMutation.isPending &&
@@ -794,7 +794,7 @@ export default function InvoicesPage() {
                             if (!companyId) return;
                             setPendingDelete({ companyId, invoice });
                           }}
-                          disabled={deleteMutation.isPending}
+                          disabled={!canManage || deleteMutation.isPending}
                           aria-label="Eliminar factura"
                         >
                           {deleteMutation.isPending &&
@@ -984,7 +984,7 @@ export default function InvoicesPage() {
                 </div>
               </div>
 
-              {companyId && selection?.companyId === companyId ? (
+              {canManage && companyId && selection?.companyId === companyId ? (
                 <InvoiceMatchPanel
                   companyId={selection.companyId}
                   activeCompanyId={companyId}
@@ -1017,7 +1017,7 @@ export default function InvoicesPage() {
                     if (!companyId) return;
                     setPendingDelete({ companyId, invoice: selectedInvoice });
                   }}
-                  disabled={deleteMutation.isPending}
+                  disabled={!canManage || deleteMutation.isPending}
                 >
                   <Trash2 size={15} className="mr-2" /> Eliminar
                 </Button>

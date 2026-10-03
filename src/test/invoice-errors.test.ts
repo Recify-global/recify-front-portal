@@ -20,6 +20,9 @@ describe('invoice user errors', () => {
     expect(getInvoiceUserErrorMessage(new ApiRequestError('not found path', 404), 'x')).toMatch(
       /no encontramos/i,
     );
+    expect(getInvoiceUploadErrorMessage(new ApiRequestError('size detail', 413))).toBe(
+      'El archivo es demasiado grande.',
+    );
     expect(getInvoiceUserErrorMessage(new ApiRequestError('Too many', 429), 'x')).toMatch(/límite/i);
     expect(getInvoiceUserErrorMessage(new ApiRequestError('Failed to fetch', 0), 'x')).toMatch(
       /conexión/i,

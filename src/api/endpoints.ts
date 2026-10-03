@@ -2,10 +2,18 @@ export const endpoints = {
   auth: {
     login: () => '/auth/login',
     register: () => '/auth/register',
+    google: () => '/auth/google',
+    googleLink: () => '/auth/google/link',
+    me: () => '/auth/me',
   },
   companies: {
     list: () => '/companies',
     byId: (id: string) => `/companies/${id}`,
+  },
+  team: {
+    members: (companyId: string) => `/companies/${companyId}/members`,
+    member: (companyId: string, memberId: string) =>
+      `/companies/${companyId}/members/${memberId}`,
   },
   tickets: {
     list: (companyId: string) => `/companies/${companyId}/tickets`,

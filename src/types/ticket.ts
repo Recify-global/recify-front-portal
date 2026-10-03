@@ -73,6 +73,49 @@ export interface TicketUpdatePayload {
 
 export type UiTicketStatus = 'analizado' | 'pendiente' | 'error';
 
+export interface TicketPreview {
+  documentKind: 'transaction';
+  type: BackendTicketType;
+  date: string | null;
+  amount: number;
+  tax: number | null;
+  category: string | null;
+  paymentMethod: BackendPaymentMethod | null;
+  vendor: string | null;
+  vendorRFC: string | null;
+  folio?: string | null;
+}
+
+export interface BalancePreview {
+  documentKind: 'balance';
+  bank: string | null;
+  accountType: 'credit_card' | 'debit' | 'bank_account' | 'other' | null;
+  accountRef: string | null;
+  currentBalance: number | null;
+  availableCredit: number | null;
+  creditLimit: number | null;
+  currency: string | null;
+  date: string | null;
+}
+
+export type PreprocessPreview = TicketPreview | BalancePreview;
+
+export function isTicketPreview(value: PreprocessPreview | null | undefined): value is TicketPreview {
+  return value?.documentKind === 'transaction';
+}
+
+/** Allowlisted body sent as multipart `ticketDraft` on persist. */
+export interface TicketDraftOverrides {
+  type?: BackendTicketType;
+  date?: string;
+  amount?: number;
+  tax?: number | null;
+  category?: string;
+  paymentMethod?: BackendPaymentMethod;
+  vendor?: string;
+  vendorRFC?: string;
+}
+
 export interface UiTicket {
   id: string;
   comercio: string;

@@ -20,12 +20,23 @@ import {
 import { apiRequest, ApiRequestError } from '@/api/http';
 import type { AuthUser } from '@/types/auth';
 
+const memberships = (...companyIds: string[]): AuthUser['memberships'] =>
+  companyIds.map((companyId) => ({
+    membershipId: `membership-${companyId}`,
+    companyId,
+    companyName: companyId,
+    companyStatus: 'active',
+    companyTimezone: 'America/Mexico_City',
+    role: 'accountant',
+    status: 'active',
+  }));
+
 const userA: AuthUser = {
   _id: 'user-a',
   name: 'Usuario A',
   email: 'a@recify.test',
-  role: 'admin',
-  companies: ['company-a'],
+  platformRole: null,
+  memberships: memberships('company-a'),
   status: 'active',
 };
 
@@ -96,9 +107,10 @@ describe('session cache cleanup', () => {
   it('aborts an in-flight ticket request when switching companies', async () => {
     setAuthSession({
       token: 'token-a',
-      user: { ...userA, companies: ['company-a', 'company-b'] },
+      user: { ...userA, memberships: memberships('company-a', 'company-b') },
     });
     markAuthSessionActive();
+    setActiveCompany('company-a');
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -125,6 +137,30 @@ describe('session cache cleanup', () => {
     await waitFor(() => expect(requestSignal?.aborted).toBe(true));
     await request.catch(() => undefined);
     expect(queryClient.getQueryData(['tickets', 'company-b'])).toBeUndefined();
+  });
+
+  it('removes cached tenant data when switching companies', async () => {
+    setAuthSession({
+      token: 'token-a',
+      user: { ...userA, memberships: memberships('company-a', 'company-b') },
+    });
+    markAuthSessionActive();
+    setActiveCompany('company-a');
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(['tickets', 'company-a'], [{ vendor: 'Sensitive A' }]);
+    queryClient.setQueryData(['invoices', 'company-a'], [{ issuer: 'Sensitive A' }]);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionCacheBoundary />
+      </QueryClientProvider>,
+    );
+    setActiveCompany('company-b');
+
+    await waitFor(() => {
+      expect(queryClient.getQueryData(['tickets', 'company-a'])).toBeUndefined();
+      expect(queryClient.getQueryData(['invoices', 'company-a'])).toBeUndefined();
+    });
   });
 
   it('clears auth storage even when query cancellation fails', async () => {
@@ -197,7 +233,7 @@ describe('session cache cleanup', () => {
         ...userA,
         _id: 'user-b',
         email: 'b@recify.test',
-        companies: ['company-b'],
+        memberships: memberships('company-b'),
       },
     });
     markAuthSessionActive();
@@ -233,7 +269,7 @@ describe('session cache cleanup', () => {
         ...userA,
         _id: 'user-b',
         email: 'b@recify.test',
-        companies: ['company-b'],
+        memberships: memberships('company-b'),
       },
     });
     markAuthSessionActive();
@@ -261,7 +297,7 @@ describe('session cache cleanup', () => {
         ...userA,
         _id: 'user-b',
         email: 'b@recify.test',
-        companies: ['company-b'],
+        memberships: memberships('company-b'),
       },
     });
     markAuthSessionActive();
@@ -293,7 +329,7 @@ describe('session cache cleanup', () => {
         ...userA,
         _id: 'user-b',
         email: 'b@recify.test',
-        companies: ['company-b'],
+        memberships: memberships('company-b'),
       },
     });
     markAuthSessionActive();
@@ -320,7 +356,7 @@ describe('session cache cleanup', () => {
     await terminateAuthSession();
     setAuthSession({
       token: 'token-b',
-      user: { ...userA, _id: 'user-b', email: 'b@recify.test', companies: ['company-b'] },
+      user: { ...userA, _id: 'user-b', email: 'b@recify.test', memberships: memberships('company-b') },
     });
     markAuthSessionActive();
 
@@ -402,7 +438,7 @@ describe('HTTP auth status cleanup', () => {
         ...userA,
         _id: 'user-b',
         email: 'b@recify.test',
-        companies: ['company-b'],
+        memberships: memberships('company-b'),
       },
     });
     markAuthSessionActive();

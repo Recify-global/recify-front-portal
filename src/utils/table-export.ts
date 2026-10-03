@@ -45,11 +45,23 @@ function escapeCsvValue(value: string): string {
   return value;
 }
 
+export function neutralizeCsvFormula(value: string): string {
+  return /^[=+\-@]/.test(value) ? `'${value}` : value;
+}
+
 function toCsv<T>(columns: ExportColumn<T>[], rows: readonly T[]): string {
   const { headers, body } = buildMatrix(columns, rows);
   const lines = [
-    headers.map(escapeCsvValue).join(','),
-    ...body.map((cells) => cells.map((cell) => escapeCsvValue(cell.text)).join(',')),
+    headers.map((header) => escapeCsvValue(neutralizeCsvFormula(header))).join(','),
+    ...body.map((cells) =>
+      cells
+        .map((cell) =>
+          escapeCsvValue(
+            cell.number === null ? neutralizeCsvFormula(cell.text) : cell.text,
+          ),
+        )
+        .join(','),
+    ),
   ];
   // BOM (\uFEFF) para que Excel abra el CSV en UTF-8.
   return `\uFEFF${lines.join('\r\n')}`;

@@ -14,6 +14,8 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 
 function shortCompanyId(id: string): string {
   if (id.length <= 10) return id;
@@ -25,7 +27,8 @@ interface CompanySelectorProps {
 }
 
 export function CompanySelector({ collapsed = false }: CompanySelectorProps) {
-  const { companyId, setActiveCompany } = useAuth();
+  const { companyId, setActiveCompany, activeMembership } = useAuth();
+  const queryClient = useQueryClient();
   const { companies, isLoading, isError, hasNames } = useCompanies();
 
   if (!companyId) return null;
@@ -91,8 +94,19 @@ export function CompanySelector({ collapsed = false }: CompanySelectorProps) {
       </p>
       <Select
         value={companyId}
-        onValueChange={(nextId) => {
+        onValueChange={async (nextId) => {
+          if (nextId === companyId) return;
+          if (queryClient.isMutating() > 0) {
+            toast.info('Espera a que termine la operación actual antes de cambiar de empresa.');
+            return;
+          }
           try {
+            await queryClient.cancelQueries({
+              predicate: (query) => query.queryKey.includes(companyId),
+            });
+            queryClient.removeQueries({
+              predicate: (query) => query.queryKey.includes(companyId),
+            });
             setActiveCompany(nextId);
           } catch {
             /* invalid company — ignore */
@@ -107,12 +121,21 @@ export function CompanySelector({ collapsed = false }: CompanySelectorProps) {
         </SelectTrigger>
         <SelectContent>
           {companies.map((company) => (
-            <SelectItem key={company._id} value={company._id}>
+            <SelectItem
+              key={company._id}
+              value={company._id}
+              disabled={company.status !== 'active'}
+            >
               {company.name.trim() || shortCompanyId(company._id)}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
+      {activeMembership ? (
+        <p className="px-1 text-[11px] text-muted-foreground">
+          {activeMembership.role}
+        </p>
+      ) : null}
     </div>
   );
 }
