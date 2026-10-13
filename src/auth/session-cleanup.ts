@@ -2,7 +2,7 @@ import {
   advanceAuthSessionGeneration,
   clearAuthSession,
   getAuthSessionGeneration,
-  getStoredToken,
+  getStoredUser,
   isCurrentAuthSessionGeneration,
 } from '@/auth/storage';
 
@@ -13,6 +13,7 @@ let cleanupInFlight: Promise<void> | null = null;
 let cleanupInFlightGeneration: number | null = null;
 let activeClosingGeneration: number | null = null;
 let sessionClosing = false;
+let logoutAbort: AbortController | null = null;
 
 /**
  * Registra el cleanup del QueryClient real montado por la aplicación.
@@ -60,6 +61,49 @@ export function shouldFinalizeSessionCleanup(closingGeneration: number): boolean
   return getAuthSessionGeneration() === closingGeneration;
 }
 
+/** Abre una generación de cierre para el logout antes de llamar al servidor. */
+export function openSignOut(): number {
+  const closingGeneration = advanceAuthSessionGeneration();
+  sessionClosing = true;
+  activeClosingGeneration = closingGeneration;
+  return closingGeneration;
+}
+
+/**
+ * The browser applies Set-Cookie in arrival order. Aborting a logout that has
+ * not been received yet discards that response. A response already applied
+ * cannot be recalled from here.
+ */
+export function beginLogoutAbort(): AbortSignal {
+  abortInFlightLogout();
+  logoutAbort = new AbortController();
+  return logoutAbort.signal;
+}
+
+export function abortInFlightLogout(): void {
+  logoutAbort?.abort();
+  logoutAbort = null;
+}
+
+export function finishLogoutAbort(signal: AbortSignal): void {
+  if (logoutAbort?.signal === signal) logoutAbort = null;
+}
+
+export async function drainSessionCacheCleanup(): Promise<void> {
+  const cleanup = cacheCleanup;
+  try {
+    await cleanup?.();
+  } catch {
+    // La interfaz privada se oculta aunque la caché no pueda cancelarse.
+  }
+}
+
+export function releaseSignOutGeneration(closingGeneration: number): void {
+  if (activeClosingGeneration === closingGeneration) {
+    activeClosingGeneration = null;
+  }
+}
+
 /**
  * Terminación de sesión para logout manual y respuestas 401.
  * Solo deduplica cleanups de la misma generación; un login posterior invalida
@@ -73,7 +117,7 @@ export function terminateAuthSession(): Promise<void> {
   }
   if (
     sessionClosing &&
-    !getStoredToken() &&
+    !getStoredUser() &&
     activeClosingGeneration === currentGeneration
   ) {
     return Promise.resolve();
@@ -105,7 +149,7 @@ export function terminateAuthSession(): Promise<void> {
       cleanupInFlight = null;
       cleanupInFlightGeneration = null;
     }
-    if (!getStoredToken()) {
+    if (!getStoredUser()) {
       sessionClosing = false;
     }
   });

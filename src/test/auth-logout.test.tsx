@@ -14,7 +14,7 @@ import {
   getStoredUser,
   setAuthSession,
 } from '@/auth/storage';
-import { loginRequest } from '@/services/auth.service';
+import { loginRequest, logoutRequest } from '@/services/auth.service';
 import type { AuthResponse, AuthUser } from '@/types/auth';
 
 const mocks = vi.hoisted(() => ({
@@ -34,6 +34,7 @@ vi.mock('@/services/auth.service', () => ({
   registerRequest: vi.fn(),
   googleLoginRequest: vi.fn(),
   googleLinkRequest: vi.fn(),
+  logoutRequest: vi.fn(async () => undefined),
   getMeRequest: vi.fn(() => new Promise(() => {})),
 }));
 
@@ -101,7 +102,7 @@ describe('useAuth session lifecycle', () => {
     expect(getStoredUser()).toBeNull();
     expect(getStoredCompanyId()).toBeNull();
     await waitFor(() => {
-      expect(result.current.token).toBeNull();
+      expect(result.current.isAuthenticated).toBe(false);
       expect(result.current.user).toBeNull();
       expect(result.current.companyId).toBeNull();
     });
@@ -130,14 +131,13 @@ describe('useAuth session lifecycle', () => {
     });
 
     expect(mocks.navigate).not.toHaveBeenCalled();
-    expect(getStoredToken()).toBe('token-b');
     expect(getStoredUser()).toEqual(userB);
     expect(getStoredCompanyId()).toBe('company-b');
     unregister();
   });
 
   it('keeps normal login working and starts with the returned company', async () => {
-    const response: AuthResponse = { token: 'token-b', user: userB };
+    const response: AuthResponse = { user: userB };
     vi.mocked(loginRequest).mockResolvedValueOnce(response);
     const { result } = renderHook(() => useAuth(), { wrapper: wrapperWithClient() });
 
@@ -148,7 +148,6 @@ describe('useAuth session lifecycle', () => {
       });
     });
 
-    expect(getStoredToken()).toBe('token-b');
     expect(getStoredUser()).toEqual(userB);
     expect(getStoredCompanyId()).toBe('company-b');
     await waitFor(() => expect(result.current.user).toEqual(userB));
@@ -165,5 +164,37 @@ describe('useAuth session lifecycle', () => {
 
     expect(getStoredCompanyId()).toBe('company-b');
     expect(result.current.companyId).toBe('company-b');
+  });
+
+  it('aborts an in-flight logout when a new login starts and keeps that session', async () => {
+    setAuthSession({ token: 'token-a', user: userA });
+    markAuthSessionActive();
+    let signal: AbortSignal | undefined;
+    vi.mocked(logoutRequest).mockImplementationOnce((next?: AbortSignal) => new Promise((_resolve, reject) => {
+      signal = next;
+      next?.addEventListener('abort', () => {
+        reject(new DOMException('The operation was aborted.', 'AbortError'));
+      });
+    }));
+    vi.mocked(loginRequest).mockResolvedValueOnce({ user: userB });
+    const { result } = renderHook(() => useAuth(), { wrapper: wrapperWithClient() });
+
+    let logoutPromise!: Promise<void>;
+    await act(async () => {
+      logoutPromise = result.current.logout();
+    });
+
+    await act(async () => {
+      await result.current.login.mutateAsync({
+        email: 'b@recify.test',
+        password: 'secret',
+      });
+      await logoutPromise;
+    });
+
+    expect(signal?.aborted).toBe(true);
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(getStoredUser()).toEqual(userB);
+    expect(result.current.logoutError).toBeNull();
   });
 });

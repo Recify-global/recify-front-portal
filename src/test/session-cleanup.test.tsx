@@ -241,7 +241,7 @@ describe('session cache cleanup', () => {
     releaseCleanup();
     await cleanupPromise;
 
-    expect(getStoredToken()).toBe('token-b');
+    expect(getStoredUser()?._id).toBe('user-b');
     expect(getStoredUser()?._id).toBe('user-b');
     expect(getStoredCompanyId()).toBe('company-b');
     unregister();
@@ -278,7 +278,7 @@ describe('session cache cleanup', () => {
     releaseCleanup();
     await cleanupPromise;
 
-    expect(getStoredToken()).toBe('token-b');
+    expect(getStoredUser()?._id).toBe('user-b');
     expect(queryClient.getQueryData(['tickets', 'company-b'])).toEqual(['secret-b']);
   });
 
@@ -304,7 +304,7 @@ describe('session cache cleanup', () => {
     releaseCleanup();
     await cleanupA;
 
-    expect(getStoredToken()).toBe('token-b');
+    expect(getStoredUser()?._id).toBe('user-b');
 
     await terminateAuthSession();
 
@@ -430,7 +430,7 @@ describe('HTTP auth status cleanup', () => {
     )));
 
     const request = apiRequest('/companies');
-    await waitFor(() => expect(getStoredToken()).toBe('token-a'));
+    await waitFor(() => expect(getStoredUser()?._id).toBe('user-a'));
 
     setAuthSession({
       token: 'token-b',
@@ -445,7 +445,7 @@ describe('HTTP auth status cleanup', () => {
     releaseCleanup();
     await request.catch(() => undefined);
 
-    expect(getStoredToken()).toBe('token-b');
+    expect(getStoredUser()?._id).toBe('user-b');
     expect(getStoredCompanyId()).toBe('company-b');
     unregister();
   });
@@ -464,7 +464,7 @@ describe('HTTP auth status cleanup', () => {
     await expect(apiRequest('/companies')).rejects.toMatchObject({ status: 403 });
 
     expect(cacheCleanup).not.toHaveBeenCalled();
-    expect(getStoredToken()).toBe('token-a');
+    expect(getStoredUser()?._id).toBe('user-a');
     expect(getStoredCompanyId()).toBe('company-a');
     unregister();
   });

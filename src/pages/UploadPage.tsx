@@ -123,7 +123,7 @@ export default function UploadPage() {
   const saveClaimRef = useRef(false);
   const invoiceClaimRef = useRef(false);
   const uploadFlowRef = useRef(createIndividualUploadFlow());
-  const { token, companyId } = useAuth();
+  const { isAuthenticated, companyId } = useAuth();
   const preprocessMutation = usePreprocessTicket();
   const uploadMutation = useUploadTicket();
   const updateMutation = useUpdateDashboardTicket();
@@ -219,7 +219,7 @@ export default function UploadPage() {
     uploadFlowRef.current.isCurrent(context, companyIdRef.current);
 
   const validateSession = () => {
-    if (!token) {
+    if (!isAuthenticated) {
       toast.error('Tu sesión expiró. Inicia sesión de nuevo.');
       return false;
     }

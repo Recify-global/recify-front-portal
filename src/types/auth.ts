@@ -51,5 +51,4 @@ export interface GoogleLinkRequest extends GoogleLoginRequest {
 
 export interface AuthResponse {
   user: AuthUser;
-  token: string;
 }

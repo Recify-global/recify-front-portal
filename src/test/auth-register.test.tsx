@@ -46,7 +46,6 @@ const owner: AuthUser = {
 };
 
 const successResponse: AuthResponse = {
-  token: 'recify-jwt-register',
   user: owner,
 };
 
@@ -150,7 +149,7 @@ describe('Register onboarding UI', () => {
     fireEvent.click(getFormSubmitButton('Crear cuenta y empresa')!);
 
     await waitFor(() => {
-      expect(getStoredToken()).toBe('recify-jwt-register');
+      expect(getStoredUser()?._id).toBe('user-register');
     });
     expect(getStoredUser()?._id).toBe('user-register');
     expect(getStoredCompanyId()).toBe('company-new');
@@ -227,7 +226,7 @@ describe('Register onboarding UI', () => {
 
     resolveRegister(successResponse);
     await waitFor(() => {
-      expect(getStoredToken()).toBe('recify-jwt-register');
+      expect(getStoredUser()?._id).toBe('user-register');
     });
   });
 });

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({
     token: 'test-token',
+    isAuthenticated: true,
     companyId: 'company-a',
   }),
 }));

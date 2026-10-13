@@ -1,23 +1,43 @@
 import type { AuthUser } from '@/types/auth';
 
 /**
- * Claves y helpers centralizados para la sesión de Recify en localStorage.
- *
- * Todo lo que lea/escriba `recify.token`, `recify.user` o `recify.companyId`
- * debe usar este módulo. Evita strings duplicados, parseo inseguro y mantiene
- * un único punto para emitir cambios de sesión al resto de la app.
+ * Preferencia de empresa y señal entre pestañas. El JWT de sesión no se guarda.
+ * `recify.token` es una clave legacy que solo se borra.
  */
-
 export const AUTH_STORAGE_KEYS = {
   token: 'recify.token',
   user: 'recify.user',
   companyId: 'recify.companyId',
+  sessionSignal: 'recify.sessionSignal',
 } as const;
 
 export const AUTH_EVENT = 'recify:auth-changed';
 
-/** Generación monotónica en memoria; nunca se persiste ni retrocede. */
+export type SessionStatus =
+  | 'loading'
+  | 'authenticated'
+  | 'anonymous'
+  | 'offline'
+  | 'forbidden'
+  | 'signing-out';
+
+export interface ClientSession {
+  status: SessionStatus;
+  user: AuthUser | null;
+  companyId: string | null;
+  revocationConfirmed: boolean | null;
+  logoutError: string | null;
+}
+
 let authSessionGeneration = 0;
+let probeBlocked = false;
+let snapshot: ClientSession = {
+  status: 'loading',
+  user: null,
+  companyId: null,
+  revocationConfirmed: null,
+  logoutError: null,
+};
 
 export function getAuthSessionGeneration(): number {
   return authSessionGeneration;
@@ -30,6 +50,23 @@ export function advanceAuthSessionGeneration(): number {
 
 export function isCurrentAuthSessionGeneration(generation: number): boolean {
   return generation === authSessionGeneration;
+}
+
+export function isProbeBlocked(): boolean {
+  return probeBlocked;
+}
+
+export function setProbeBlocked(blocked: boolean): void {
+  probeBlocked = blocked;
+}
+
+export function getClientSession(): ClientSession {
+  return snapshot;
+}
+
+function publish(next: ClientSession): void {
+  snapshot = next;
+  emitAuthChange();
 }
 
 function safeGet(key: string): string | null {
@@ -56,82 +93,14 @@ function safeRemove(key: string): void {
   }
 }
 
-function isStoredAuthUser(value: unknown): value is AuthUser {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const user = value as Record<string, unknown>;
-  return (
-    typeof user._id === 'string' &&
-    user._id.length > 0 &&
-    typeof user.name === 'string' &&
-    typeof user.email === 'string' &&
-    (user.platformRole === null || user.platformRole === 'admin') &&
-    (user.status === 'active' || user.status === 'inactive' || user.status === 'suspended') &&
-    Array.isArray(user.memberships) &&
-    user.memberships.every((membership) => {
-      if (!membership || typeof membership !== 'object' || Array.isArray(membership)) return false;
-      const item = membership as Record<string, unknown>;
-      return (
-        typeof item.membershipId === 'string' &&
-        typeof item.companyId === 'string' &&
-        item.companyId.length > 0 &&
-        typeof item.companyName === 'string' &&
-        typeof item.companyTimezone === 'string' &&
-        (item.companyStatus === 'active' || item.companyStatus === 'suspended') &&
-        (item.role === 'accountant' || item.role === 'viewer') &&
-        item.status === 'active'
-      );
-    })
-  );
+/** Borra solo el JWT legacy. No toca tema ni otras preferencias. */
+export function purgeLegacyJwt(): void {
+  safeRemove(AUTH_STORAGE_KEYS.token);
 }
 
-export function getStoredToken(): string | null {
-  const value = safeGet(AUTH_STORAGE_KEYS.token);
-  return value && value.length > 0 ? value : null;
-}
-
-export function getStoredCompanyId(): string | null {
+function readCompanyPreference(): string | null {
   const value = safeGet(AUTH_STORAGE_KEYS.companyId);
-  if (!value || value.length === 0) return null;
-  const rawUser = safeGet(AUTH_STORAGE_KEYS.user);
-  if (!rawUser) return null;
-  try {
-    const parsed = JSON.parse(rawUser) as unknown;
-    if (
-      isStoredAuthUser(parsed) &&
-      parsed.memberships.some(
-        (membership) =>
-          membership.status === 'active' &&
-          membership.companyStatus === 'active' &&
-          membership.companyId === value,
-      )
-    ) {
-      return value;
-    }
-  } catch {
-    // Invalid session data is cleared by getStoredUser.
-  }
-  safeRemove(AUTH_STORAGE_KEYS.companyId);
-  return null;
-}
-
-export function getStoredUser(): AuthUser | null {
-  const raw = safeGet(AUTH_STORAGE_KEYS.user);
-  if (!raw) {
-    if (safeGet(AUTH_STORAGE_KEYS.token) || safeGet(AUTH_STORAGE_KEYS.companyId)) {
-      clearAuthSession();
-    }
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (isStoredAuthUser(parsed) && safeGet(AUTH_STORAGE_KEYS.token)) return parsed;
-  } catch {
-    // El cleanup completo ocurre debajo.
-  }
-  // Un perfil inválido no puede convivir con token/company válidos: el guard
-  // no debe reconstruir una sesión parcial desde storage corrupto.
-  clearAuthSession();
-  return null;
+  return value && value.length > 0 ? value : null;
 }
 
 export function pickPrimaryCompanyId(user: AuthUser | null | undefined): string | null {
@@ -141,70 +110,183 @@ export function pickPrimaryCompanyId(user: AuthUser | null | undefined): string 
     : null;
 }
 
-export interface PersistSessionInput {
-  token: string;
-  user: AuthUser;
+function resolveCompanyId(user: AuthUser, preferred: string | null): string | null {
+  const allowed = user.memberships.some(
+    (membership) =>
+      membership.companyId === preferred &&
+      membership.status === 'active' &&
+      membership.companyStatus === 'active',
+  );
+  if (preferred && allowed) return preferred;
+  return pickPrimaryCompanyId(user);
 }
 
-export function setAuthSession({ token, user }: PersistSessionInput): void {
+function isAuthUser(value: unknown): value is AuthUser {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const user = value as Record<string, unknown>;
+  return typeof user._id === 'string' && user._id.length > 0 && Array.isArray(user.memberships);
+}
+
+export function getStoredToken(): string | null {
+  purgeLegacyJwt();
+  return null;
+}
+
+export function getStoredUser(): AuthUser | null {
+  return snapshot.user;
+}
+
+export function getStoredCompanyId(): string | null {
+  const user = snapshot.user;
+  const stored = readCompanyPreference();
+  if (user && stored && stored !== snapshot.companyId) {
+    const allowed = user.memberships.some(
+      (membership) =>
+        membership.companyId === stored &&
+        membership.status === 'active' &&
+        membership.companyStatus === 'active',
+    );
+    if (!allowed) safeRemove(AUTH_STORAGE_KEYS.companyId);
+  }
+  return snapshot.companyId;
+}
+
+type SessionInput = AuthUser | { user: AuthUser; token?: string };
+
+function readUser(input: SessionInput): AuthUser {
+  if (input && typeof input === 'object' && 'user' in input && isAuthUser(input.user)) {
+    return input.user;
+  }
+  return input as AuthUser;
+}
+
+export function setAuthSession(input: SessionInput, options: { signal?: boolean } = {}): void {
   advanceAuthSessionGeneration();
-  safeSet(AUTH_STORAGE_KEYS.token, token);
-  try {
-    safeSet(AUTH_STORAGE_KEYS.user, JSON.stringify(user));
-  } catch {
-    /* ignore */
-  }
-  const companyId = pickPrimaryCompanyId(user);
-  if (companyId) {
-    safeSet(AUTH_STORAGE_KEYS.companyId, companyId);
-  } else {
-    safeRemove(AUTH_STORAGE_KEYS.companyId);
-  }
-  emitAuthChange();
+  probeBlocked = false;
+  purgeLegacyJwt();
+  safeRemove(AUTH_STORAGE_KEYS.user);
+  const user = readUser(input);
+  const companyId = resolveCompanyId(user, readCompanyPreference());
+  if (companyId) safeSet(AUTH_STORAGE_KEYS.companyId, companyId);
+  else safeRemove(AUTH_STORAGE_KEYS.companyId);
+  publish({
+    status: 'authenticated',
+    user,
+    companyId,
+    revocationConfirmed: null,
+    logoutError: null,
+  });
+  if (options.signal !== false) writeSessionSignal('in');
 }
 
 export function updateStoredUser(user: AuthUser): void {
-  if (!getStoredToken()) return;
-  const previousCompanyId = safeGet(AUTH_STORAGE_KEYS.companyId);
-  safeSet(AUTH_STORAGE_KEYS.user, JSON.stringify(user));
+  if (snapshot.status !== 'authenticated' || !snapshot.user) return;
+  const previousCompanyId = snapshot.companyId;
   const previousStillValid = user.memberships.some(
     (membership) =>
       membership.companyId === previousCompanyId &&
       membership.companyStatus === 'active',
   );
-  if (!previousStillValid) {
-    const onlyCompanyId = pickPrimaryCompanyId(user);
-    if (onlyCompanyId) safeSet(AUTH_STORAGE_KEYS.companyId, onlyCompanyId);
-    else safeRemove(AUTH_STORAGE_KEYS.companyId);
-  }
-  emitAuthChange();
+  const companyId = previousStillValid
+    ? previousCompanyId
+    : pickPrimaryCompanyId(user);
+  if (companyId) safeSet(AUTH_STORAGE_KEYS.companyId, companyId);
+  else safeRemove(AUTH_STORAGE_KEYS.companyId);
+  publish({
+    ...snapshot,
+    user,
+    companyId,
+  });
 }
 
-export function clearAuthSession(options: { advanceGeneration?: boolean } = {}): void {
-  if (options.advanceGeneration !== false) {
-    advanceAuthSessionGeneration();
-  }
-  safeRemove(AUTH_STORAGE_KEYS.token);
+export function clearAuthSession(options: { advanceGeneration?: boolean; signal?: boolean } = {}): void {
+  if (options.advanceGeneration !== false) advanceAuthSessionGeneration();
+  purgeLegacyJwt();
   safeRemove(AUTH_STORAGE_KEYS.user);
   safeRemove(AUTH_STORAGE_KEYS.companyId);
-  emitAuthChange();
+  publish({
+    status: 'anonymous',
+    user: null,
+    companyId: null,
+    revocationConfirmed: true,
+    logoutError: null,
+  });
+  if (options.signal !== false) writeSessionSignal('out');
 }
 
-/**
- * Cambia la compañía activa sin tocar token ni user.
- * Solo acepta IDs presentes en las memberships activas de la sesión actual.
- */
+export function beginSigningOut(): void {
+  probeBlocked = true;
+  publish({
+    status: 'signing-out',
+    user: null,
+    companyId: null,
+    revocationConfirmed: null,
+    logoutError: null,
+  });
+}
+
+export function markSignOutUnconfirmed(message: string): void {
+  probeBlocked = true;
+  publish({
+    status: 'signing-out',
+    user: null,
+    companyId: null,
+    revocationConfirmed: false,
+    logoutError: message,
+  });
+}
+
+export function markSessionLoading(): void {
+  publish({
+    status: 'loading',
+    user: null,
+    companyId: null,
+    revocationConfirmed: null,
+    logoutError: null,
+  });
+}
+
+export function markSessionOffline(): void {
+  publish({
+    status: 'offline',
+    user: null,
+    companyId: null,
+    revocationConfirmed: null,
+    logoutError: null,
+  });
+}
+
+export function markSessionForbidden(): void {
+  publish({
+    status: 'forbidden',
+    user: null,
+    companyId: null,
+    revocationConfirmed: null,
+    logoutError: null,
+  });
+}
+
+/** Another tab already revoked the session. Do not write localStorage again. */
+export function adoptRemoteLogout(): void {
+  advanceAuthSessionGeneration();
+  probeBlocked = false;
+  publish({
+    status: 'anonymous',
+    user: null,
+    companyId: null,
+    revocationConfirmed: true,
+    logoutError: null,
+  });
+}
+
 export function setActiveCompany(companyId: string): void {
   const nextId = typeof companyId === 'string' ? companyId.trim() : '';
-  if (!nextId) {
-    throw new Error('companyId inválido.');
-  }
-  if (!getStoredToken()) {
+  if (!nextId) throw new Error('companyId inválido.');
+  const user = snapshot.user;
+  if (snapshot.status !== 'authenticated' || !user) {
     throw new Error('No hay sesión activa.');
   }
-  const user = getStoredUser();
   if (
-    !user ||
     !user.memberships.some(
       (membership) =>
         membership.companyId === nextId && membership.companyStatus === 'active',
@@ -212,9 +294,14 @@ export function setActiveCompany(companyId: string): void {
   ) {
     throw new Error('La compañía no pertenece al usuario autenticado.');
   }
-  if (getStoredCompanyId() === nextId) return;
+  if (snapshot.companyId === nextId) return;
   safeSet(AUTH_STORAGE_KEYS.companyId, nextId);
-  emitAuthChange();
+  publish({ ...snapshot, companyId: nextId });
+  writeSessionSignal('in');
+}
+
+function writeSessionSignal(kind: 'in' | 'out'): void {
+  safeSet(AUTH_STORAGE_KEYS.sessionSignal, `${kind}:${Date.now()}`);
 }
 
 export function emitAuthChange(): void {
@@ -227,19 +314,28 @@ export function emitAuthChange(): void {
 
 export function subscribeAuthChanges(listener: () => void): () => void {
   window.addEventListener(AUTH_EVENT, listener);
-  window.addEventListener('storage', listener);
-  return () => {
-    window.removeEventListener(AUTH_EVENT, listener);
-    window.removeEventListener('storage', listener);
-  };
+  return () => window.removeEventListener(AUTH_EVENT, listener);
 }
 
 export function hasActiveSession(): boolean {
-  return Boolean(getStoredToken() && getStoredCompanyId());
+  return snapshot.status === 'authenticated' && Boolean(snapshot.user && snapshot.companyId);
 }
 
 export function getActiveMembership(user = getStoredUser()) {
-  const companyId = getStoredCompanyId();
+  const companyId = snapshot.companyId;
   if (!user || !companyId) return null;
   return user.memberships.find((membership) => membership.companyId === companyId) ?? null;
 }
+
+export function resetClientSession(): void {
+  probeBlocked = false;
+  snapshot = {
+    status: 'anonymous',
+    user: null,
+    companyId: null,
+    revocationConfirmed: null,
+    logoutError: null,
+  };
+}
+
+purgeLegacyJwt();

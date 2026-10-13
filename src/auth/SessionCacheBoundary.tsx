@@ -1,14 +1,20 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
+  abortInFlightLogout,
   getActiveClosingGeneration,
+  markAuthSessionActive,
   registerSessionCacheCleanup,
   shouldFinalizeSessionCleanup,
 } from '@/auth/session-cleanup';
 import {
+  AUTH_STORAGE_KEYS,
+  adoptRemoteLogout,
   getStoredCompanyId,
+  setProbeBlocked,
   subscribeAuthChanges,
 } from '@/auth/storage';
+import { probeSession } from '@/auth/session-probe';
 
 /**
  * Conecta el coordinador de sesión con la misma instancia de QueryClient
@@ -30,9 +36,31 @@ export function SessionCacheBoundary() {
       await queryClient.cancelQueries();
       if (!shouldFinalizeSessionCleanup(closingGeneration)) return;
 
-      // clear() elimina QueryCache y MutationCache.
       queryClient.clear();
     });
+  }, [queryClient]);
+
+  useEffect(() => {
+    void probeSession();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== AUTH_STORAGE_KEYS.sessionSignal) return;
+      if (event.newValue?.startsWith('out')) {
+        adoptRemoteLogout();
+        markAuthSessionActive();
+        void queryClient.cancelQueries().finally(() => {
+          queryClient.clear();
+        });
+        return;
+      }
+      if (event.newValue?.startsWith('in')) {
+        abortInFlightLogout();
+        setProbeBlocked(false);
+        markAuthSessionActive();
+        void probeSession({ force: true });
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, [queryClient]);
 
   useEffect(() => {

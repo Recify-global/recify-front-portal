@@ -5,6 +5,7 @@ export const endpoints = {
     google: () => '/auth/google',
     googleLink: () => '/auth/google/link',
     me: () => '/auth/me',
+    logout: () => '/auth/logout',
   },
   companies: {
     list: () => '/companies',

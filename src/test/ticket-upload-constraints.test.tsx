@@ -7,7 +7,7 @@ import {
 } from '@/utils/upload-file';
 
 vi.mock('@/hooks/use-auth', () => ({
-  useAuth: () => ({ companyId: 'company-a' }),
+  useAuth: () => ({ companyId: 'company-a', isAuthenticated: true }),
 }));
 
 vi.mock('@/services/upload.service', () => ({

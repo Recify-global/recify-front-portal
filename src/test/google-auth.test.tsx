@@ -59,7 +59,6 @@ const user: AuthUser = {
 };
 
 const successResponse: AuthResponse = {
-  token: 'recify-jwt',
   user,
 };
 
@@ -190,10 +189,9 @@ describe('Google login UI', () => {
     expect(payload).not.toHaveProperty('companies');
     expect(payload).not.toHaveProperty('googleId');
 
-    await waitFor(() => expect(getStoredToken()).toBe('recify-jwt'));
-    expect(getStoredUser()).toEqual(user);
+    await waitFor(() => expect(getStoredUser()).toEqual(user));
     expect(getStoredCompanyId()).toBe('company-a');
-    expect(localStorage.getItem(AUTH_STORAGE_KEYS.token)).toBe('recify-jwt');
+    expect(localStorage.getItem(AUTH_STORAGE_KEYS.token)).toBeNull();
     expect(storageSnapshot()).not.toContain('gis-id-token');
     expect(routerMocks.navigate).toHaveBeenCalledWith('/app/upload', { replace: true });
   });
@@ -230,13 +228,12 @@ describe('Google login UI', () => {
 
   it('routes a Recify user without memberships to the company state', async () => {
     vi.mocked(googleLoginRequest).mockResolvedValueOnce({
-      token: 'recify-jwt',
       user: { ...user, memberships: [] },
     });
     renderAuthPage();
     fireEvent.click(await waitForGoogleButton());
 
-    await waitFor(() => expect(getStoredToken()).toBe('recify-jwt'));
+    await waitFor(() => expect(getStoredUser()?.memberships).toEqual([]));
     expect(getStoredCompanyId()).toBeNull();
     expect(routerMocks.navigate).toHaveBeenCalledWith('/select-company', { replace: true });
     expect(getFormSubmitButton('Iniciar sesión')).toBeInTheDocument();
@@ -293,7 +290,7 @@ describe('Google login UI', () => {
         password: 'password123',
       });
     });
-    await waitFor(() => expect(getStoredToken()).toBe('recify-jwt'));
+    await waitFor(() => expect(getStoredUser()).toEqual(user));
   });
 });
 
@@ -306,7 +303,7 @@ describe('useAuth googleLogin', () => {
       await result.current.googleLogin.mutateAsync({ idToken: 'gis-id-token' });
     });
 
-    expect(getStoredToken()).toBe('recify-jwt');
+    expect(localStorage.getItem(AUTH_STORAGE_KEYS.token)).toBeNull();
     expect(getStoredUser()).toEqual(user);
     expect(getStoredCompanyId()).toBe('company-a');
     expect(storageSnapshot()).not.toContain('gis-id-token');

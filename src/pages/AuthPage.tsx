@@ -16,11 +16,6 @@ import { Receipt, BarChart3, Shield, Zap, Loader2 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { ApiRequestError } from '@/api/http';
 import { GoogleSignInButton } from '@/components/recify/GoogleSignInButton';
-import {
-  getStoredCompanyId,
-  getStoredToken,
-  subscribeAuthChanges,
-} from '@/auth/storage';
 
 type AuthMode = 'login' | 'register';
 
@@ -43,7 +38,7 @@ export default function AuthPage() {
   const [companyName, setCompanyName] = useState('');
   const [rfc, setRfc] = useState('');
   const navigate = useNavigate();
-  const { login, register, googleLogin, googleLink } = useAuth();
+  const { login, register, googleLogin, googleLink, status, companyId } = useAuth();
   const [googleLinkToken, setGoogleLinkToken] = useState<string | null>(null);
   const [googleLinkPassword, setGoogleLinkPassword] = useState('');
 
@@ -51,20 +46,11 @@ export default function AuthPage() {
   const loading =
     login.isPending || register.isPending || googleLogin.isPending || googleLink.isPending;
 
-  // Si el usuario ya tiene sesión válida (token + companyId) y aterriza en /auth
-  // (refresh, back del navegador, deep link), lo mandamos directo a la app.
-  // Esto también cubre el caso de que otra pestaña haya hecho login mientras tanto.
+  // Una sesión ya confirmada por el backend no se queda en la pantalla de acceso.
   useEffect(() => {
-    const maybeRedirect = () => {
-      if (getStoredToken()) {
-        navigate(getStoredCompanyId() ? '/app/upload' : '/select-company', {
-          replace: true,
-        });
-      }
-    };
-    maybeRedirect();
-    return subscribeAuthChanges(maybeRedirect);
-  }, [navigate]);
+    if (status !== 'authenticated') return;
+    navigate(companyId ? '/app/upload' : '/select-company', { replace: true });
+  }, [companyId, navigate, status]);
 
   const extractMessage = (err: unknown, fallback: string) => {
     if (err instanceof ApiRequestError) return err.message || fallback;
