@@ -5,6 +5,7 @@ import { CategoryBadge } from '@/components/recify/CategoryBadge';
 import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
 import { TicketImageDialog } from '@/components/recify/TicketImageDialog';
 import { BatchUploadDialog } from '@/components/recify/BatchUploadDialog';
+import { InvoiceBatchUploadDialog } from '@/components/recify/InvoiceBatchUploadDialog';
 import { UploadHelpDialog } from '@/components/recify/UploadHelpDialog';
 import { TicketScanAnimation } from '@/components/recify/TicketScanAnimation';
 import { InvoiceUploadResult } from '@/components/recify/InvoiceUploadResult';
@@ -115,6 +116,7 @@ export default function UploadPage() {
   const [imageDialogUrl, setImageDialogUrl] = useState<string | null>(null);
   const [hasPersistedTicket, setHasPersistedTicket] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
+  const [invoiceBatchOpen, setInvoiceBatchOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previewUrlRef = useRef<string | undefined>(undefined);
   const companyIdRef = useRef<string | null>(null);
@@ -429,6 +431,12 @@ export default function UploadPage() {
     setBatchOpen(true);
   };
 
+  const openInvoiceBatch = () => {
+    if (isBusy) return;
+    if (!validateSession()) return;
+    setInvoiceBatchOpen(true);
+  };
+
   const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
     const file = input.files?.[0] ?? null;
@@ -720,10 +728,19 @@ export default function UploadPage() {
                 >
                   <Layers size={16} className="mr-2" /> Subir varios tickets
                 </Button>
+                <Button
+                  variant="secondary"
+                  className="w-full h-11 rounded-xl"
+                  onClick={openInvoiceBatch}
+                  disabled={isBusy}
+                >
+                  <Receipt size={16} className="mr-2" /> Subir varias facturas
+                </Button>
               </div>
             )}
 
             <BatchUploadDialog open={batchOpen} onOpenChange={setBatchOpen} />
+            <InvoiceBatchUploadDialog open={invoiceBatchOpen} onOpenChange={setInvoiceBatchOpen} />
 
             {state === 'done' && uploadMode === 'ticket' && (
               <Button

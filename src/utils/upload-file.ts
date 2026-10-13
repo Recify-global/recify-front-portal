@@ -16,6 +16,8 @@ export const TICKET_IMAGE_TRANSPORT_MIME_TYPES: readonly string[] = [
 export const TICKET_IMAGE_ACCEPT = TICKET_IMAGE_MIME_TYPES.join(',');
 export const MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024;
 export const MAX_TICKET_FILES_PER_BATCH = 5;
+/** Mismo tope visual que los tickets. El endpoint de facturas acepta un PDF por request. */
+export const MAX_INVOICE_FILES_PER_BATCH = MAX_TICKET_FILES_PER_BATCH;
 
 export type TicketImageValidationResult =
   | { ok: true }

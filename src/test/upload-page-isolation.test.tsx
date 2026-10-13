@@ -94,6 +94,10 @@ vi.mock('@/components/recify/BatchUploadDialog', () => ({
   BatchUploadDialog: () => null,
 }));
 
+vi.mock('@/components/recify/InvoiceBatchUploadDialog', () => ({
+  InvoiceBatchUploadDialog: () => null,
+}));
+
 vi.mock('@/components/recify/TicketScanAnimation', () => ({
   TicketScanAnimation: () => <span>Analizando imagen</span>,
 }));
