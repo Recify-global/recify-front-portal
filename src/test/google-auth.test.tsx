@@ -209,7 +209,15 @@ describe('Google login UI', () => {
     renderAuthPage();
 
     fireEvent.click(await waitForGoogleButton());
-    expect(await screen.findByText('Confirma tu cuenta de Recify')).toBeInTheDocument();
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'Confirma tu cuenta de Recify' })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent('ingresa tu contraseña actual de Recify.');
+    const brand = within(dialog).getAllByText('Recify');
+    expect(brand).toHaveLength(2);
+    for (const node of brand) {
+      expect(node).toHaveAttribute('translate', 'no');
+      expect(node).toHaveClass('notranslate');
+    }
     fireEvent.change(screen.getByLabelText('Contraseña actual'), {
       target: { value: 'password123' },
     });

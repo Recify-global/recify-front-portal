@@ -352,9 +352,11 @@ export default function AuthPage() {
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Confirma tu cuenta de Recify</DialogTitle>
+            <DialogTitle>
+              Confirma tu cuenta de <span translate="no" className="notranslate">Recify</span>
+            </DialogTitle>
             <DialogDescription>
-              Para enlazar Google por primera vez, ingresa tu contraseña actual de Recify.
+              Para enlazar Google por primera vez, ingresa tu contraseña actual de <span translate="no" className="notranslate">Recify</span>.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleGoogleLink} className="space-y-4">
