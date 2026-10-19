@@ -28,6 +28,7 @@ import {
   setProbeBlocked,
   subscribeAuthChanges,
   updateStoredUser,
+  currentProfileEpoch,
 } from '@/auth/storage';
 import {
   abortInFlightLogout,
@@ -112,7 +113,11 @@ export function useAuth() {
 
   const profile = useQuery({
     queryKey: ['auth', 'me', session.user?._id ?? null],
-    queryFn: getMeRequest,
+    queryFn: async () => {
+      const epoch = currentProfileEpoch();
+      const data = await getMeRequest();
+      return { ...data, epoch };
+    },
     enabled: session.status === 'authenticated' && Boolean(session.user),
     staleTime: 30_000,
     refetchOnWindowFocus: true,
@@ -120,6 +125,7 @@ export function useAuth() {
 
   useEffect(() => {
     if (profile.data?.user && session.status === 'authenticated') {
+      if (profile.data.epoch !== currentProfileEpoch()) return;
       updateStoredUser(profile.data.user);
     }
   }, [profile.data, session.status]);

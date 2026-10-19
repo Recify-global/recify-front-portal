@@ -1,19 +1,31 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Building2, Eye, LogOut, ShieldCheck } from 'lucide-react';
+import { toast } from 'sonner';
+import { ArrowRight, Building2, Eye, LogOut, ShieldCheck, Loader2 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { RecifyLogo } from '@/components/recify/RecifyLogo';
 import type { CompanyMembership } from '@/types/auth';
 import { EmailVerificationNotice } from '@/components/recify/EmailVerificationNotice';
+import { ApiRequestError } from '@/api/http';
+import { createFirstCompanyRequest, getMeRequest } from '@/services/auth.service';
+import { updateStoredUser } from '@/auth/storage';
 
 const roleLabel = (membership: CompanyMembership) =>
   membership.role;
+
+const RFC_REGEX = /^[A-ZÑ&]{3,4}\d{6}[A-Z\d]{3}$/;
+const normalizeRfc = (value: string) => value.toUpperCase().replace(/\s+/g, '');
 
 export default function SelectCompanyPage() {
   const navigate = useNavigate();
   const { user, setActiveCompany, logout } = useAuth();
   const memberships = useMemo(() => user?.memberships ?? [], [user?.memberships]);
+  const [companyName, setCompanyName] = useState('');
+  const [rfc, setRfc] = useState('');
+  const [creatingCompany, setCreatingCompany] = useState(false);
 
   useEffect(() => {
     if (memberships.length !== 1 || memberships[0].companyStatus !== 'active') return;
@@ -24,6 +36,43 @@ export default function SelectCompanyPage() {
   const enter = (companyId: string) => {
     setActiveCompany(companyId);
     navigate('/app/upload', { replace: true });
+  };
+
+  const handleCreateCompany = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (creatingCompany) return;
+    const trimmedName = companyName.trim();
+    const normalizedRfc = normalizeRfc(rfc);
+    if (!trimmedName || !normalizedRfc) {
+      toast.error('Escribe el nombre de la empresa y su RFC.');
+      return;
+    }
+    if (normalizedRfc.length < 12 || normalizedRfc.length > 13 || !RFC_REGEX.test(normalizedRfc)) {
+      toast.error('Ingresa un RFC válido de 12 o 13 caracteres.');
+      return;
+    }
+
+    setCreatingCompany(true);
+    try {
+      const created = await createFirstCompanyRequest({ name: trimmedName, rfc: normalizedRfc });
+      updateStoredUser(created.user);
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.status === 409) {
+        try {
+          const profile = await getMeRequest();
+          updateStoredUser(profile.user);
+          if (profile.user.memberships.length > 0) return;
+        } catch {
+          // The form stays available when the profile cannot be refreshed.
+        }
+      }
+      const message = err instanceof ApiRequestError && /RFC/i.test(err.message)
+        ? 'Ese RFC ya está registrado.'
+        : 'No se pudo crear la empresa.';
+      toast.error(message);
+    } finally {
+      setCreatingCompany(false);
+    }
   };
 
   return (
@@ -52,7 +101,7 @@ export default function SelectCompanyPage() {
               </h1>
               <p className="mt-3 text-sm leading-6 text-muted-foreground sm:text-base">
                 {memberships.length === 0
-                  ? 'Pide a un administrador que te agregue a una empresa para comenzar.'
+                  ? 'Configura tu empresa con su nombre y RFC para empezar. Si ya tienes acceso a otra, aparecerá aquí cuando esté disponible.'
                   : 'Tu rol y permisos se ajustarán a la empresa que selecciones.'}
               </p>
             </div>
@@ -102,11 +151,40 @@ export default function SelectCompanyPage() {
                 })}
               </div>
             ) : (
-              <div className="mx-auto max-w-md rounded-2xl border border-dashed border-border bg-card/70 p-6 text-center">
-                <p className="text-sm text-muted-foreground">
-                  Cuando te asignen una empresa, aparecerá aquí automáticamente al volver a iniciar sesión.
-                </p>
-              </div>
+              <form
+                onSubmit={(event) => void handleCreateCompany(event)}
+                className="mx-auto max-w-md space-y-4 rounded-2xl border border-border/70 bg-card p-6 shadow-sm"
+              >
+                <div className="space-y-2">
+                  <Label htmlFor="onboarding-company-name">Nombre de la empresa</Label>
+                  <Input
+                    id="onboarding-company-name"
+                    value={companyName}
+                    onChange={(event) => setCompanyName(event.target.value)}
+                    placeholder="Mi Empresa S.A. de C.V."
+                    autoComplete="organization"
+                    className="h-11 rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="onboarding-rfc">RFC</Label>
+                  <Input
+                    id="onboarding-rfc"
+                    value={rfc}
+                    onChange={(event) => setRfc(normalizeRfc(event.target.value))}
+                    placeholder="XAXX010101000"
+                    autoComplete="off"
+                    spellCheck={false}
+                    maxLength={13}
+                    className="h-11 rounded-xl uppercase"
+                  />
+                  <p className="text-xs text-muted-foreground">12 o 13 caracteres, como en tu constancia fiscal.</p>
+                </div>
+                <Button type="submit" className="w-full" disabled={creatingCompany}>
+                  {creatingCompany && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {creatingCompany ? 'Configurando empresa…' : 'Crear empresa'}
+                </Button>
+              </form>
             )}
           </div>
         </section>

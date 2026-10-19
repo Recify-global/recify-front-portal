@@ -31,6 +31,7 @@ export interface ClientSession {
 
 let authSessionGeneration = 0;
 let probeBlocked = false;
+let profileEpoch = 0;
 let snapshot: ClientSession = {
   status: 'loading',
   user: null,
@@ -179,8 +180,13 @@ export function setAuthSession(input: SessionInput, options: { signal?: boolean 
   if (options.signal !== false) writeSessionSignal('in');
 }
 
+export function currentProfileEpoch(): number {
+  return profileEpoch;
+}
+
 export function updateStoredUser(user: AuthUser): void {
   if (snapshot.status !== 'authenticated' || !snapshot.user) return;
+  profileEpoch += 1;
   const previousCompanyId = snapshot.companyId;
   const previousStillValid = user.memberships.some(
     (membership) =>

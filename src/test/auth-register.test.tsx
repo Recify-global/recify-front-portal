@@ -168,7 +168,9 @@ describe('Register onboarding UI', () => {
     fireEvent.click(getFormSubmitButton('Crear cuenta y empresa')!);
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('Email already in use');
+      expect(toast.error).toHaveBeenCalledWith(
+        'Ya existe una cuenta con este correo. Inicia sesión o continúa con Google.',
+      );
     });
     expect(getStoredToken()).toBeNull();
     expect(routerMocks.navigate).not.toHaveBeenCalledWith('/app/upload', { replace: true });

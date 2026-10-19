@@ -123,6 +123,10 @@ export default function AuthPage() {
           });
           persistAndEnter(res);
         } catch (err) {
+          if (err instanceof ApiRequestError && err.status === 409) {
+            toast.error('Ya existe una cuenta con este correo. Inicia sesión o continúa con Google.');
+            return;
+          }
           toast.error(extractMessage(err, 'No se pudo crear la cuenta.'));
         }
         return;
@@ -236,6 +240,11 @@ export default function AuthPage() {
           {mode === 'login' && (
             <>
               <GoogleSignInButton disabled={loading} onCredential={handleGoogleCredential} />
+              {googleLogin.isPending && (
+                <p className="mt-3 text-center text-sm text-muted-foreground" role="status">
+                  Conectando con Google…
+                </p>
+              )}
 
               <div className="flex items-center gap-3 my-6">
                 <div className="flex-1 h-px bg-border" />

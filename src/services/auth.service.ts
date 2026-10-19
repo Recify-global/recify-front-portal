@@ -2,10 +2,12 @@ import { apiRequest } from '@/api/http';
 import { endpoints } from '@/api/endpoints';
 import type {
   AuthResponse,
+  AuthUser,
   GoogleLinkRequest,
   GoogleLoginRequest,
   LoginRequest,
   RegisterRequest,
+  RegisterCompanyInput,
 } from '@/types/auth';
 
 export async function loginRequest(payload: LoginRequest): Promise<AuthResponse> {
@@ -38,6 +40,18 @@ export async function googleLinkRequest(payload: GoogleLinkRequest): Promise<Aut
     body: payload,
     auth: false,
   });
+}
+
+export async function createFirstCompanyRequest(
+  payload: RegisterCompanyInput,
+): Promise<{ company: { _id: string; name: string }; user: AuthUser }> {
+  return apiRequest<{ company: { _id: string; name: string }; user: AuthUser }>(
+    endpoints.auth.company(),
+    {
+      method: 'POST',
+      body: payload,
+    },
+  );
 }
 
 export async function getMeRequest(): Promise<{ user: AuthResponse['user'] }> {

@@ -11,6 +11,7 @@ import {
   setAuthSession,
   updateStoredUser,
 } from '@/auth/storage';
+import { createFirstCompanyRequest, getMeRequest } from '@/services/auth.service';
 import type { AuthUser, CompanyMembership } from '@/types/auth';
 
 vi.mock('@/services/auth.service', () => ({
@@ -18,6 +19,7 @@ vi.mock('@/services/auth.service', () => ({
   registerRequest: vi.fn(),
   googleLoginRequest: vi.fn(),
   googleLinkRequest: vi.fn(),
+  createFirstCompanyRequest: vi.fn(),
   getMeRequest: vi.fn(() => new Promise(() => {})),
 }));
 
@@ -62,7 +64,12 @@ const renderSelector = () => {
   );
 };
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  vi.mocked(getMeRequest).mockReset();
+  vi.mocked(getMeRequest).mockImplementation(() => new Promise(() => {}));
+  vi.mocked(createFirstCompanyRequest).mockReset();
+});
 afterEach(cleanup);
 
 describe('multi-company session selection', () => {
@@ -71,6 +78,33 @@ describe('multi-company session selection', () => {
     expect(getStoredCompanyId()).toBeNull();
     renderSelector();
     expect(screen.getByText('Tu cuenta aún no tiene empresa')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Crear empresa' })).toBeInTheDocument();
+    expect(screen.queryByText('Portal upload')).not.toBeInTheDocument();
+  });
+
+  it('creates the first company from the empty state and enters it', async () => {
+    seed([]);
+    vi.mocked(createFirstCompanyRequest).mockResolvedValue({
+      company: { _id: 'nueva', name: 'Empresa Nueva' },
+      user: user([membership('nueva', 'accountant')]),
+    });
+
+    renderSelector();
+    fireEvent.change(screen.getByLabelText('Nombre de la empresa'), {
+      target: { value: 'Empresa Nueva' },
+    });
+    fireEvent.change(screen.getByLabelText('RFC'), {
+      target: { value: 'XAXX010101000' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Crear empresa' }));
+
+    await waitFor(() => expect(screen.getByText('Portal upload')).toBeInTheDocument());
+    expect(createFirstCompanyRequest).toHaveBeenCalledWith({
+      name: 'Empresa Nueva',
+      rfc: 'XAXX010101000',
+    });
+    expect(getStoredCompanyId()).toBe('nueva');
+    expect(localStorage.getItem(AUTH_STORAGE_KEYS.token)).toBeNull();
   });
 
   it('auto-selects the only membership', async () => {

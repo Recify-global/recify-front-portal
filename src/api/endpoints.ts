@@ -8,6 +8,7 @@ export const endpoints = {
     logout: () => '/auth/logout',
     emailVerification: () => '/auth/email-verification',
     verifyEmail: () => '/auth/verify-email',
+    company: () => '/auth/company',
   },
   companies: {
     list: () => '/companies',
