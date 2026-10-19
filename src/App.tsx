@@ -13,6 +13,7 @@ import HistoryPage from "./pages/HistoryPage";
 import InvoicesPage from "./pages/InvoicesPage";
 import BalancesPage from "./pages/BalancesPage";
 import TeamPage from "./pages/TeamPage";
+import SettingsPage from "./pages/SettingsPage";
 import SelectCompanyPage from "./pages/SelectCompanyPage";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute, { AuthenticatedRoute } from "./guards/ProtectedRoute";
@@ -43,6 +44,7 @@ const App = () => (
             <Route path="/app/invoices" element={<InvoicesPage />} />
             <Route path="/app/balances" element={<BalancesPage />} />
             <Route path="/app/team" element={<TeamPage />} />
+            <Route path="/app/settings" element={<SettingsPage />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

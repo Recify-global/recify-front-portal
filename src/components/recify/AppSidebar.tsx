@@ -33,7 +33,7 @@ const mainNav = [
 ];
 
 const secondaryNav = [
-  { title: 'Configuración', url: '#', icon: Settings },
+  { title: 'Configuración', url: '/app/settings', icon: Settings },
   { title: 'Ayuda', url: '#', icon: HelpCircle },
 ];
 
