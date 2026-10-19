@@ -10,6 +10,7 @@ import type {
 import { isTicketPreview } from '@/types/ticket';
 import { useAuth } from './use-auth';
 import { ApiRequestError } from '@/api/http';
+import { getDocumentAnalysisErrorMessage } from '@/utils/invoice-errors';
 import {
   captureAuthMutationContext,
   isAuthMutationContextCurrent,
@@ -76,6 +77,8 @@ function fileKeyOf(file: File): string {
 }
 
 function extractError(err: unknown, fallback: string): string {
+  const providerMessage = getDocumentAnalysisErrorMessage(err);
+  if (providerMessage) return providerMessage;
   if (err instanceof ApiRequestError || err instanceof Error) {
     return err.message || fallback;
   }

@@ -47,7 +47,11 @@ import {
   createIndividualUploadFlow,
   type ActiveUploadContext,
 } from '@/utils/individual-upload-flow';
-import { getInvoiceUploadErrorMessage, isInvoiceAbortError } from '@/utils/invoice-errors';
+import {
+  getDocumentAnalysisErrorMessage,
+  getInvoiceUploadErrorMessage,
+  isInvoiceAbortError,
+} from '@/utils/invoice-errors';
 import {
   INVOICE_PDF_ACCEPT,
   invoicePdfRejectionMessage,
@@ -205,6 +209,8 @@ export default function UploadPage() {
   );
 
   const extractError = (err: unknown, fallback: string) => {
+    const providerMessage = getDocumentAnalysisErrorMessage(err);
+    if (providerMessage) return providerMessage;
     if (err instanceof ApiRequestError) return err.message || fallback;
     if (err instanceof Error) return err.message || fallback;
     return fallback;

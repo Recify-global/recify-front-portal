@@ -23,12 +23,25 @@ function retryAfterHint(err: ApiRequestError): string | null {
   return null;
 }
 
+const DOCUMENT_PROVIDER_MESSAGE =
+  'El análisis del documento no está disponible por ahora. Intenta más tarde.';
+
+/** Proveedor de análisis caído o sin cuota. No reexpone el cuerpo del proveedor. */
+export function getDocumentAnalysisErrorMessage(err: unknown): string | null {
+  if (err instanceof ApiRequestError && err.code === 'DOCUMENT_PROVIDER_UNAVAILABLE') {
+    return DOCUMENT_PROVIDER_MESSAGE;
+  }
+  return null;
+}
+
 /**
  * Mensajes seguros para UI de Facturas.
  * Nunca reexpone stacks, rutas internas ni `error.message` crudo de 5xx.
  */
 export function getInvoiceUserErrorMessage(err: unknown, fallback: string): string {
   if (isInvoiceAbortError(err)) return '';
+  const providerMessage = getDocumentAnalysisErrorMessage(err);
+  if (providerMessage) return providerMessage;
 
   if (err instanceof ApiRequestError) {
     switch (err.status) {
