@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiRequestError } from '@/api/http';
 import TeamPage from '@/pages/TeamPage';
 import type { TeamMember } from '@/types/team';
 
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
       | undefined,
     isLoading: false,
     isError: false,
+    error: undefined as unknown,
     refetch: vi.fn(),
   },
   add: {
@@ -91,6 +93,7 @@ beforeEach(() => {
   };
   mocks.query.isLoading = false;
   mocks.query.isError = false;
+  mocks.query.error = undefined;
   mocks.query.refetch.mockReset();
   mocks.add.isPending = false;
   mocks.add.mutateAsync.mockReset();
@@ -110,7 +113,9 @@ describe('Mi equipo page', () => {
     expect(screen.getByRole('heading', { name: 'Mi equipo' })).toBeInTheDocument();
     expect(screen.getAllByText('accountant').length).toBeGreaterThan(0);
     expect(screen.getAllByText('viewer').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('pending').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Pendiente de verificar identidad').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Activo').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/invitación pendiente/i)).not.toBeInTheDocument();
     expect(screen.getAllByText('Tú').length).toBeGreaterThan(0);
     expect(screen.queryByText('Admin')).not.toBeInTheDocument();
     expect(screen.queryByText('Usuario')).not.toBeInTheDocument();
@@ -140,6 +145,20 @@ describe('Mi equipo page', () => {
 
     mocks.query.data = undefined;
     mocks.query.isError = true;
+    mocks.query.error = new DOMException('aborted', 'AbortError');
+    view.rerender(<TeamPage />);
+    expect(screen.getByLabelText('Cargando equipo')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    mocks.query.error = { status: 403, message: 'forbidden', name: 'ApiRequestError' };
+    Object.setPrototypeOf(mocks.query.error, ApiRequestError.prototype);
+    view.rerender(<TeamPage />);
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'No tienes permiso para ver el equipo de esta empresa.',
+    );
+
+    mocks.query.error = { status: 500, message: 'boom', name: 'ApiRequestError' };
+    Object.setPrototypeOf(mocks.query.error, ApiRequestError.prototype);
     view.rerender(<TeamPage />);
     expect(screen.getByRole('alert')).toHaveTextContent(
       'No se pudo cargar el equipo de esta empresa.',
@@ -153,15 +172,11 @@ describe('Mi equipo page', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Agregar$/ }));
     expect(screen.getByRole('alert')).toHaveTextContent('El nombre es obligatorio.');
 
+    expect(screen.queryByLabelText(/Teléfono/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/RFC/)).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Nombre *'), { target: { value: 'Carlos' } });
     fireEvent.change(screen.getByLabelText('Email *'), {
       target: { value: 'CARLOS@EXAMPLE.COM ' },
-    });
-    fireEvent.change(screen.getByLabelText('Teléfono *'), {
-      target: { value: '+52 55 1234 5678' },
-    });
-    fireEvent.change(screen.getByLabelText('RFC'), {
-      target: { value: 'gode561231gr8' },
     });
     fireEvent.click(screen.getByRole('button', { name: /^Agregar$/ }));
 
@@ -171,8 +186,6 @@ describe('Mi equipo page', () => {
         input: {
           name: 'Carlos',
           email: 'carlos@example.com',
-          phone: '+52 55 1234 5678',
-          rfc: 'GODE561231GR8',
           role: 'viewer',
         },
       }),

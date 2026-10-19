@@ -51,7 +51,7 @@ export default function VerifyEmailPage() {
         : 'Confirmando tu correo…';
 
   const description = state === 'success'
-    ? 'Ya puedes usar esta cuenta para unirte a una empresa que te invite.'
+    ? 'Tu identidad quedó confirmada. Las empresas que te agregaron ya están disponibles al entrar.'
     : state === 'invalid'
       ? 'El enlace expiró o ya se usó. Pide otro desde tu cuenta.'
       : state === 'missing'
@@ -70,7 +70,9 @@ export default function VerifyEmailPage() {
         </div>
         {state !== 'loading' && (
           <Button asChild className="h-11 w-full">
-            <Link to="/auth">Ir a iniciar sesión</Link>
+            <Link to={getClientSession().status === 'authenticated' ? '/select-company' : '/auth'}>
+              {getClientSession().status === 'authenticated' ? 'Continuar' : 'Ir a iniciar sesión'}
+            </Link>
           </Button>
         )}
       </div>

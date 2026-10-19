@@ -28,7 +28,7 @@ export interface TeamMembersParams {
 export interface AddTeamMemberInput {
   name: string;
   email: string;
-  phone: string;
+  phone?: string;
   rfc?: string;
   role: MembershipRole;
 }

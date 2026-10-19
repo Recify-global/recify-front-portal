@@ -75,6 +75,14 @@ export async function apiRequest<T>(path: string, opts: RequestOptions = {}): Pr
       signal: opts.signal,
     });
   } catch (err) {
+    if (
+      opts.signal?.aborted
+      || (err instanceof Error && err.name === 'AbortError')
+    ) {
+      throw err instanceof Error && err.name === 'AbortError'
+        ? err
+        : new DOMException('The operation was aborted.', 'AbortError');
+    }
     throw new ApiRequestError(
       err instanceof Error ? err.message : 'Network error',
       0,

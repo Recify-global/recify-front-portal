@@ -21,6 +21,22 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiRequestError ? error.message : fallback;
 }
 
+function isAbortError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'name' in error
+    && error.name === 'AbortError';
+}
+
+function loadErrorMessage(error: unknown): string {
+  if (error instanceof ApiRequestError && (error.status === 401 || error.status === 403)) {
+    return error.status === 401
+      ? 'Tu sesión ya no está activa.'
+      : 'No tienes permiso para ver el equipo de esta empresa.';
+  }
+  return 'No se pudo cargar el equipo de esta empresa.';
+}
+
 export default function TeamPage() {
   const { companyId, user, canManage } = useAuth();
   const [page, setPage] = useState(1);
@@ -37,7 +53,7 @@ export default function TeamPage() {
       const result = await addMutation.mutateAsync({ companyId, input });
       toast.success(
         result.member.kind === 'pending'
-          ? 'Integrante registrado como pending.'
+          ? 'Quedó pendiente hasta que verifique su identidad.'
           : 'Integrante agregado al equipo.',
       );
     } catch (error) {
@@ -62,7 +78,7 @@ export default function TeamPage() {
       await removeMutation.mutateAsync({ companyId, memberId: member.id });
       toast.success(
         member.kind === 'pending'
-          ? 'Pending removido del equipo.'
+          ? 'Se canceló el pendiente de esta empresa.'
           : 'Acceso removido de esta empresa.',
       );
     } catch (error) {
@@ -92,7 +108,7 @@ export default function TeamPage() {
           ) : null}
         </header>
 
-        {membersQuery.isLoading ? (
+        {membersQuery.isLoading || isAbortError(membersQuery.error) ? (
           <div className="space-y-3" aria-label="Cargando equipo">
             {Array.from({ length: 4 }).map((_, index) => (
               <Skeleton key={index} className="h-20 w-full rounded-2xl" />
@@ -104,7 +120,7 @@ export default function TeamPage() {
             className="rounded-2xl border border-destructive/30 bg-card p-6 text-center"
           >
             <p className="text-sm text-destructive">
-              No se pudo cargar el equipo de esta empresa.
+              {loadErrorMessage(membersQuery.error)}
             </p>
             <Button
               type="button"
