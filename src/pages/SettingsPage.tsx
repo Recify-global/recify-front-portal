@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { CompanyName } from '@/components/recify/CompanyName';
 import { useCompanyProfile, useUpdateCompanyName } from '@/hooks/use-company-settings';
 import { useAuth } from '@/hooks/use-auth';
 
@@ -104,11 +105,15 @@ export default function SettingsPage() {
                   id="company-name"
                   value={name}
                   maxLength={200}
+                  translate="no"
+                  className="notranslate"
                   onChange={(event) => setName(event.target.value)}
                   disabled={updateName.isPending}
                 />
               ) : (
-                <p id="company-name" className="text-sm text-foreground">{profile.data?.name}</p>
+                <CompanyName id="company-name" className="text-sm text-foreground">
+                  {profile.data?.name}
+                </CompanyName>
               )}
             </div>
             <div className="space-y-2">

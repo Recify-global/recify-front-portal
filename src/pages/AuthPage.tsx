@@ -124,7 +124,11 @@ export default function AuthPage() {
           persistAndEnter(res);
         } catch (err) {
           if (err instanceof ApiRequestError && err.status === 409) {
-            toast.error('Ya existe una cuenta con este correo. Inicia sesión o continúa con Google.');
+            toast.error(
+              /RFC/i.test(err.message)
+                ? 'Ese RFC ya está registrado. Usa un RFC distinto.'
+                : 'Ya existe una cuenta con este correo. Inicia sesión o continúa con Google.',
+            );
             return;
           }
           toast.error(extractMessage(err, 'No se pudo crear la cuenta.'));
@@ -306,7 +310,8 @@ export default function AuthPage() {
                     value={companyName}
                     onChange={(e) => setCompanyName(e.target.value)}
                     placeholder="Mi Empresa S.A. de C.V."
-                    className="h-11 rounded-xl bg-background border-border"
+                    translate="no"
+                    className="notranslate h-11 rounded-xl bg-background border-border"
                     autoComplete="organization"
                   />
                 </div>

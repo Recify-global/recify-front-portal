@@ -119,6 +119,14 @@ describe('multi-company session selection', () => {
     expect(getStoredCompanyId()).toBeNull();
     renderSelector();
 
+    for (const name of ['Empresa A', 'Empresa B']) {
+      const companyName = screen.getByRole('heading', { name });
+      expect(companyName).toHaveTextContent(name);
+      expect(companyName.querySelector('.notranslate')).toHaveAttribute('translate', 'no');
+    }
+    expect(screen.getAllByText('Activa')[0]).not.toHaveAttribute('translate', 'no');
+    expect(screen.getByRole('heading', { name: '¿A qué empresa quieres entrar?' })).not.toHaveAttribute('translate', 'no');
+
     fireEvent.click(screen.getByRole('button', { name: /Empresa B/ }));
     await waitFor(() => expect(screen.getByText('Portal upload')).toBeInTheDocument());
     expect(getStoredCompanyId()).toBe('b');

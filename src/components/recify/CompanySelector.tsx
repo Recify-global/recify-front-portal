@@ -14,6 +14,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { CompanyName } from './CompanyName';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -34,12 +35,9 @@ export function CompanySelector({ collapsed = false }: CompanySelectorProps) {
   if (!companyId) return null;
 
   const activeNamed = companies.find((c) => c._id === companyId);
-  const activeLabel = activeNamed?.name?.trim()
-    ? activeNamed.name.trim()
-    : 'Compañía actual';
-  const activeTooltip = activeNamed?.name?.trim()
-    ? activeNamed.name.trim()
-    : shortCompanyId(companyId);
+  const activeName = activeNamed?.name?.trim() ?? '';
+  const activeLabel = activeName || 'Compañía actual';
+  const activeTooltip = activeName || shortCompanyId(companyId);
 
   const activeInList = companies.some((c) => c._id === companyId);
   const canSwitch = hasNames && companies.length > 1 && activeInList && !isError;
@@ -62,7 +60,9 @@ export function CompanySelector({ collapsed = false }: CompanySelectorProps) {
             )}
           </div>
         </TooltipTrigger>
-        <TooltipContent side="right">{activeTooltip}</TooltipContent>
+        <TooltipContent side="right">
+          {activeName ? <CompanyName>{activeName}</CompanyName> : activeTooltip}
+        </TooltipContent>
       </Tooltip>
     );
   }
@@ -79,9 +79,15 @@ export function CompanySelector({ collapsed = false }: CompanySelectorProps) {
           ) : (
             <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           )}
-          <span className="truncate text-sm font-medium text-foreground" title={activeTooltip}>
-            {activeLabel}
-          </span>
+          {activeName ? (
+            <CompanyName className="truncate text-sm font-medium text-foreground" title={activeTooltip}>
+              {activeName}
+            </CompanyName>
+          ) : (
+            <span className="truncate text-sm font-medium text-foreground" title={activeTooltip}>
+              {activeLabel}
+            </span>
+          )}
         </div>
       </div>
     );
@@ -126,7 +132,7 @@ export function CompanySelector({ collapsed = false }: CompanySelectorProps) {
               value={company._id}
               disabled={company.status !== 'active'}
             >
-              {company.name.trim() || shortCompanyId(company._id)}
+              <CompanyName>{company.name.trim() || shortCompanyId(company._id)}</CompanyName>
             </SelectItem>
           ))}
         </SelectContent>

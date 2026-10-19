@@ -59,7 +59,10 @@ describe('company settings', () => {
   it('shows the name and masked RFC without an edit action for a viewer', () => {
     mocks.auth.canManage = false;
     render(<SettingsPage />);
-    expect(screen.getByText('Empresa A')).toBeInTheDocument();
+    const companyName = screen.getByText('Empresa A');
+    expect(companyName).toHaveAttribute('translate', 'no');
+    expect(companyName).toHaveClass('notranslate');
+    expect(screen.getByRole('heading', { name: 'Configuración' })).not.toHaveAttribute('translate', 'no');
     expect(screen.getByText('EMA•010101•AB1')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Editar nombre' })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: 'RFC' })).not.toBeInTheDocument();
@@ -69,6 +72,8 @@ describe('company settings', () => {
     mocks.update.mutateAsync.mockResolvedValue({ name: 'Empresa Norte' });
     render(<SettingsPage />);
     fireEvent.click(screen.getByRole('button', { name: 'Editar nombre' }));
+    expect(screen.getByLabelText('Nombre')).toHaveAttribute('translate', 'no');
+    expect(screen.getByLabelText('Nombre')).toHaveClass('notranslate');
     fireEvent.change(screen.getByLabelText('Nombre'), { target: { value: '   ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
     expect(screen.getByRole('alert')).toHaveTextContent('El nombre es obligatorio.');

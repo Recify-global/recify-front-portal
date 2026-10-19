@@ -6,6 +6,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { CompanyName } from '@/components/recify/CompanyName';
 import { RecifyLogo } from '@/components/recify/RecifyLogo';
 import type { CompanyMembership } from '@/types/auth';
 import { EmailVerificationNotice } from '@/components/recify/EmailVerificationNotice';
@@ -133,8 +134,8 @@ export default function SelectCompanyPage() {
                           {disabled ? 'Suspendida' : 'Activa'}
                         </span>
                       </div>
-                      <h2 className="mt-5 truncate text-lg font-semibold text-foreground">
-                        {membership.companyName}
+                      <h2 className="mt-5 text-lg font-semibold text-foreground">
+                        <CompanyName className="block truncate">{membership.companyName}</CompanyName>
                       </h2>
                       <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
                         <RoleIcon className="h-4 w-4" />
@@ -163,7 +164,8 @@ export default function SelectCompanyPage() {
                     onChange={(event) => setCompanyName(event.target.value)}
                     placeholder="Mi Empresa S.A. de C.V."
                     autoComplete="organization"
-                    className="h-11 rounded-xl"
+                    translate="no"
+                    className="notranslate h-11 rounded-xl"
                   />
                 </div>
                 <div className="space-y-2">
