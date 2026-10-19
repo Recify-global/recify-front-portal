@@ -44,6 +44,18 @@ export async function getMeRequest(): Promise<{ user: AuthResponse['user'] }> {
   return apiRequest<{ user: AuthResponse['user'] }>(endpoints.auth.me());
 }
 
+export async function requestEmailVerification(): Promise<void> {
+  await apiRequest<void>(endpoints.auth.emailVerification(), { method: 'POST' });
+}
+
+export async function confirmEmailVerification(token: string): Promise<void> {
+  await apiRequest<void>(endpoints.auth.verifyEmail(), {
+    method: 'POST',
+    body: { token },
+    auth: false,
+  });
+}
+
 export async function logoutRequest(signal?: AbortSignal): Promise<void> {
   await apiRequest<void>(endpoints.auth.logout(), {
     method: 'POST',

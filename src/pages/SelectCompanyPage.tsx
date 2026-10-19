@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { RecifyLogo } from '@/components/recify/RecifyLogo';
 import type { CompanyMembership } from '@/types/auth';
+import { EmailVerificationNotice } from '@/components/recify/EmailVerificationNotice';
 
 const roleLabel = (membership: CompanyMembership) =>
   membership.role;
@@ -29,7 +30,8 @@ export default function SelectCompanyPage() {
     <main className="relative min-h-screen overflow-hidden bg-background px-5 py-8 sm:px-8">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.12),transparent_40%),radial-gradient(circle_at_bottom_right,hsl(var(--accent)/0.18),transparent_42%)]" />
       <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] max-w-5xl flex-col">
-        <header className="flex items-center justify-between">
+        <EmailVerificationNotice />
+        <header className="mt-4 flex items-center justify-between">
           <RecifyLogo size="md" />
           <Button variant="ghost" onClick={() => void logout()} className="gap-2">
             <LogOut className="h-4 w-4" />

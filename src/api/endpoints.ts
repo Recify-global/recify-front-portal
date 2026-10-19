@@ -6,6 +6,8 @@ export const endpoints = {
     googleLink: () => '/auth/google/link',
     me: () => '/auth/me',
     logout: () => '/auth/logout',
+    emailVerification: () => '/auth/email-verification',
+    verifyEmail: () => '/auth/verify-email',
   },
   companies: {
     list: () => '/companies',
