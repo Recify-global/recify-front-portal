@@ -9,6 +9,8 @@ export const endpoints = {
     emailVerification: () => '/auth/email-verification',
     verifyEmail: () => '/auth/verify-email',
     company: () => '/auth/company',
+    forgotPassword: () => '/auth/forgot-password',
+    resetPassword: () => '/auth/reset-password',
   },
   companies: {
     list: () => '/companies',

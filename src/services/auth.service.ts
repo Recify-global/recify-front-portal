@@ -70,6 +70,22 @@ export async function confirmEmailVerification(token: string): Promise<void> {
   });
 }
 
+export async function forgotPasswordRequest(email: string): Promise<void> {
+  await apiRequest<void>(endpoints.auth.forgotPassword(), {
+    method: 'POST',
+    body: { email },
+    auth: false,
+  });
+}
+
+export async function resetPasswordRequest(payload: { token: string; password: string }): Promise<void> {
+  await apiRequest<void>(endpoints.auth.resetPassword(), {
+    method: 'POST',
+    body: payload,
+    auth: false,
+  });
+}
+
 export async function logoutRequest(signal?: AbortSignal): Promise<void> {
   await apiRequest<void>(endpoints.auth.logout(), {
     method: 'POST',

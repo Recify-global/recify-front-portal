@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { RecifyLogo } from '@/components/recify/RecifyLogo';
 import { Button } from '@/components/ui/button';
@@ -338,7 +338,7 @@ export default function AuthPage() {
 
           {mode === 'login' && (
             <p className="text-center text-xs text-muted-foreground mt-4">
-              <a href="#" className="text-primary hover:underline">¿Olvidaste tu contraseña?</a>
+              <Link to="/auth/forgot-password" className="text-primary hover:underline">¿Olvidaste tu contraseña?</Link>
             </p>
           )}
 
