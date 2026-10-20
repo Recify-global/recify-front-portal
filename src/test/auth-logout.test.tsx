@@ -123,10 +123,10 @@ describe('useAuth session lifecycle', () => {
     await act(async () => {
       logoutPromise = result.current.logout();
     });
-    setAuthSession({ token: 'token-b', user: userB });
-    markAuthSessionActive();
-    releaseCleanup();
     await act(async () => {
+      setAuthSession({ token: 'token-b', user: userB });
+      markAuthSessionActive();
+      releaseCleanup();
       await logoutPromise;
     });
 

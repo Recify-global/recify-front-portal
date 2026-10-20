@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import HistoryPage from '@/pages/HistoryPage';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -174,12 +174,15 @@ describe('HistoryPage Todo el historial preset', () => {
     renderHistory();
     fireEvent.click(await screen.findByRole('button', { name: 'Todo el historial' }));
     await waitFor(() => expect(mocks.listTickets).toHaveBeenCalled());
+    expect(await screen.findByText(formatMxn(10))).toBeInTheDocument();
     mocks.listTickets.mockClear();
     mocks.getDashboardDailyReport.mockClear();
     mocks.getDashboardKpis.mockClear();
 
     fireEvent.click(screen.getByRole('button', { name: 'Todo el historial' }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
 
     expect(mocks.listTickets).not.toHaveBeenCalled();
     expect(mocks.getDashboardDailyReport).not.toHaveBeenCalled();
@@ -239,7 +242,9 @@ describe('HistoryPage Todo el historial preset', () => {
         'true',
       ),
     );
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
 
     expect(mocks.listTickets).toHaveBeenCalledTimes(requestsBeforeReturn);
     expect(client.getQueryData(yearKey)).toBe(cachedYearData);
