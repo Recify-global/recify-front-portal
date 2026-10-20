@@ -23,14 +23,6 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
   AlertDialog,
   AlertDialogCancel,
   AlertDialogContent,
@@ -39,13 +31,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationNext,
-  PaginationPrevious,
-} from '@/components/ui/pagination';
 import { useAuth } from '@/hooks/use-auth';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
@@ -88,7 +73,7 @@ import {
 } from '@/utils/civil-date-input';
 import { getInvoiceUserErrorMessage, isInvoiceAbortError } from '@/utils/invoice-errors';
 import { cn } from '@/lib/utils';
-import { AlertCircle, FileText, Loader2, Search, Trash2, X } from 'lucide-react';
+import { AlertCircle, ChevronLeft, ChevronRight, FileText, Loader2, Search, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 type InvoiceTab = 'all' | InvoiceMatchStatus;
@@ -421,174 +406,196 @@ export default function InvoicesPage() {
 
   return (
     <AppLayout>
-      <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
-        <div>
-          <h1 className="text-xl font-bold text-foreground sm:text-2xl">Facturas</h1>
-          <p className="text-muted-foreground mt-1">
+      <div className="max-w-7xl mx-auto animate-fade-in">
+        <div className="mb-3">
+          <h1 className="text-xl font-bold leading-tight text-foreground sm:text-2xl">Facturas</h1>
+          <p className="text-sm text-muted-foreground">
             CFDI recibidos y emitidos, conciliados con tus tickets
           </p>
         </div>
 
-        <Tabs
-          value={tab}
-          onValueChange={(v) => {
-            setTab(v as InvoiceTab);
-            setPage(1);
-          }}
-        >
-          <TabsList className="rounded-xl w-full max-w-full justify-start overflow-x-auto flex-nowrap h-auto p-1">
-            {TAB_OPTIONS.map((option) => (
-              <TabsTrigger
-                key={option.value}
-                value={option.value}
-                className="rounded-lg shrink-0"
-              >
-                {option.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-
+        <div className="space-y-6">
         <div className="bg-card rounded-2xl border border-border/50 shadow-elegant p-4">
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_12rem]">
-            <div className="space-y-1.5">
-              <Label htmlFor="invoice-search" className="text-xs text-muted-foreground">
-                RFC del emisor
-              </Label>
-              <div className="flex items-center gap-2 bg-secondary rounded-xl px-3 py-2">
-                <Search size={16} className="text-muted-foreground shrink-0" aria-hidden />
-                <input
-                  id="invoice-search"
-                  type="search"
-                  placeholder="RFC completo (12 o 13 caracteres)"
-                  value={searchFilter}
-                  onChange={(e) => {
-                    setSearchFilter(e.target.value);
-                    setPage(1);
-                  }}
-                  className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground"
-                />
-                {searchFilter ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearchFilter('');
-                      setPage(1);
-                    }}
-                    aria-label="Limpiar búsqueda"
-                    className="shrink-0 rounded-md p-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <X size={14} className="text-muted-foreground" aria-hidden />
-                  </button>
-                ) : null}
-              </div>
-              {searchFilter.trim() && !looksLikeIssuerRfc(searchFilter) ? (
-                <p className="text-xs text-muted-foreground">
-                  Ingresa el RFC completo para aplicar la búsqueda.
-                </p>
-              ) : null}
-            </div>
-            <Select
-              value={typeFilter}
+          <div className="flex flex-col gap-3">
+            <Tabs
+              value={tab}
               onValueChange={(v) => {
-                setTypeFilter(v as 'all' | BackendInvoiceType);
+                setTab(v as InvoiceTab);
                 setPage(1);
               }}
             >
-              <SelectTrigger className="w-full h-10 rounded-xl border-border">
-                <SelectValue placeholder="Tipo" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los tipos</SelectItem>
-                <SelectItem value="egreso">{INVOICE_TYPE_LABELS.egreso}</SelectItem>
-                <SelectItem value="ingreso">{INVOICE_TYPE_LABELS.ingreso}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+              <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-xl p-1">
+                {TAB_OPTIONS.map((option) => (
+                  <TabsTrigger
+                    key={option.value}
+                    value={option.value}
+                    className="rounded-lg"
+                  >
+                    {option.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            {DATE_PRESETS.map((preset) => (
-              <Button
-                key={preset.id}
-                type="button"
-                size="sm"
-                variant={activePreset === preset.id ? 'default' : 'outline'}
-                aria-pressed={activePreset === preset.id}
-                onClick={() => applyDatePreset(preset.id)}
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <Label htmlFor="invoice-search" className="sr-only">
+                  RFC del emisor
+                </Label>
+                <div className="flex items-center gap-2 rounded-xl bg-secondary px-3 py-2">
+                  <Search size={16} className="shrink-0 text-muted-foreground" aria-hidden />
+                  <input
+                    id="invoice-search"
+                    type="search"
+                    placeholder="RFC del emisor"
+                    value={searchFilter}
+                    onChange={(e) => {
+                      setSearchFilter(e.target.value);
+                      setPage(1);
+                    }}
+                    className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                  />
+                  {searchFilter ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchFilter('');
+                        setPage(1);
+                      }}
+                      aria-label="Limpiar búsqueda"
+                      className="shrink-0 rounded-md p-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <X size={14} className="text-muted-foreground" aria-hidden />
+                    </button>
+                  ) : null}
+                </div>
+                {searchFilter.trim() && !looksLikeIssuerRfc(searchFilter) ? (
+                  <p className="text-xs text-muted-foreground">
+                    Ingresa el RFC completo para aplicar la búsqueda.
+                  </p>
+                ) : null}
+              </div>
+              <Select
+                value={typeFilter}
+                onValueChange={(v) => {
+                  setTypeFilter(v as 'all' | BackendInvoiceType);
+                  setPage(1);
+                }}
               >
-                {preset.label}
-              </Button>
-            ))}
-          </div>
+                <SelectTrigger className="h-10 w-full rounded-xl border-border sm:w-44" aria-label="Tipo de CFDI">
+                  <SelectValue placeholder="Tipo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los tipos</SelectItem>
+                  <SelectItem value="egreso">{INVOICE_TYPE_LABELS.egreso}</SelectItem>
+                  <SelectItem value="ingreso">{INVOICE_TYPE_LABELS.ingreso}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-            <div className="space-y-1.5 w-full sm:w-40">
-              <Label htmlFor="invoice-date-from" className="text-xs text-muted-foreground">
-                Desde
-              </Label>
-              <Input
-                id="invoice-date-from"
-                inputMode="numeric"
-                placeholder="DD/MM/AAAA"
-                value={dateFromDisplay}
-                onChange={(event) => setDateFromDisplay(event.target.value)}
-                onBlur={commitDateFromDisplay}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') event.currentTarget.blur();
-                }}
-                aria-invalid={dateRangeInvalid}
-                className={cn(
-                  'h-10 rounded-xl border-border',
-                  dateRangeInvalid && 'border-destructive focus-visible:ring-destructive',
-                )}
-              />
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 xl:flex-nowrap">
+                <div className="flex min-w-0 flex-wrap gap-2 xl:flex-nowrap" aria-label="Rangos rápidos de fecha">
+                  {DATE_PRESETS.map((preset) => (
+                    <Button
+                      key={preset.id}
+                      type="button"
+                      variant={activePreset === preset.id ? 'default' : 'outline'}
+                      className="min-h-9 rounded-xl"
+                      aria-pressed={activePreset === preset.id}
+                      onClick={() => applyDatePreset(preset.id)}
+                    >
+                      {preset.label}
+                    </Button>
+                  ))}
+                </div>
+                <div className="flex min-w-0 flex-wrap items-center gap-3 xl:shrink-0 xl:flex-nowrap">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Label htmlFor="invoice-date-from" className="shrink-0 text-xs text-muted-foreground">
+                      Desde
+                    </Label>
+                    <Input
+                      id="invoice-date-from"
+                      inputMode="numeric"
+                      placeholder="DD/MM/AAAA"
+                      value={dateFromDisplay}
+                      onChange={(event) => setDateFromDisplay(event.target.value)}
+                      onBlur={commitDateFromDisplay}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') event.currentTarget.blur();
+                      }}
+                      aria-invalid={dateRangeInvalid}
+                      className={cn(
+                        'h-10 w-[9.5rem] min-w-0 rounded-xl border-border',
+                        dateRangeInvalid && 'border-destructive focus-visible:ring-destructive',
+                      )}
+                    />
+                  </div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Label htmlFor="invoice-date-to" className="shrink-0 text-xs text-muted-foreground">
+                      Hasta
+                    </Label>
+                    <Input
+                      id="invoice-date-to"
+                      inputMode="numeric"
+                      placeholder="DD/MM/AAAA"
+                      value={dateToDisplay}
+                      onChange={(event) => setDateToDisplay(event.target.value)}
+                      onBlur={commitDateToDisplay}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') event.currentTarget.blur();
+                      }}
+                      aria-invalid={dateRangeInvalid}
+                      className={cn(
+                        'h-10 w-[9.5rem] min-w-0 rounded-xl border-border',
+                        dateRangeInvalid && 'border-destructive focus-visible:ring-destructive',
+                      )}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-9 rounded-xl"
+                    onClick={clearFilters}
+                    disabled={!hasFilterInput}
+                  >
+                    Limpiar filtros
+                  </Button>
+                </div>
+              </div>
+              {dateRangeInvalid ? (
+                <p className="text-xs text-destructive" role="alert">
+                  La fecha inicial no puede ser posterior a la fecha final.
+                </p>
+              ) : null}
             </div>
-            <div className="space-y-1.5 w-full sm:w-40">
-              <Label htmlFor="invoice-date-to" className="text-xs text-muted-foreground">
-                Hasta
-              </Label>
-              <Input
-                id="invoice-date-to"
-                inputMode="numeric"
-                placeholder="DD/MM/AAAA"
-                value={dateToDisplay}
-                onChange={(event) => setDateToDisplay(event.target.value)}
-                onBlur={commitDateToDisplay}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') event.currentTarget.blur();
-                }}
-                aria-invalid={dateRangeInvalid}
-                className={cn(
-                  'h-10 rounded-xl border-border',
-                  dateRangeInvalid && 'border-destructive focus-visible:ring-destructive',
-                )}
-              />
-            </div>
-            {hasFilterInput ? (
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-xl h-10"
-                onClick={clearFilters}
-              >
-                Limpiar filtros
-              </Button>
-            ) : null}
           </div>
-          {dateRangeInvalid ? (
-            <p className="mt-2 text-sm text-destructive" role="alert">
-              La fecha inicial no puede ser posterior a la fecha final.
-            </p>
-          ) : null}
         </div>
 
-        <div className="bg-card rounded-2xl border border-border/50 shadow-elegant overflow-hidden">
+        <div className="overflow-hidden rounded-2xl border border-border/50 bg-card shadow-elegant">
+          <div className="flex flex-col gap-3 border-b border-border/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-medium text-foreground">Facturas</p>
+              <p className="text-xs text-muted-foreground">
+                La exportación incluye las facturas de esta página.
+              </p>
+            </div>
+            <TableExportButton
+              rows={invoices}
+              columns={invoiceExportColumns}
+              filename={`facturas_${exportDateStamp()}`}
+              sheetName="Facturas"
+              disabled={invoicesQuery.isPending && !invoicesQuery.data}
+            />
+          </div>
           {invoicesQuery.isPending && !invoicesQuery.data ? (
-            <div className="p-6 space-y-3" aria-busy="true" aria-live="polite">
-              <span className="sr-only">Cargando facturas</span>
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
+            <div
+              className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"
+              aria-busy="true"
+              aria-live="polite"
+            >
+              <Loader2 size={16} className="animate-spin" />
+              Cargando facturas...
             </div>
           ) : invoicesQuery.isError ? (
             <EmptyState
@@ -619,45 +626,33 @@ export default function InvoicesPage() {
                   ? 'No encontramos facturas con estos filtros.'
                   : 'Sube un CFDI en PDF desde la pantalla de Subir ticket.'
               }
-              action={
-                hasFilterInput ? (
-                  <Button variant="outline" className="rounded-xl" onClick={clearFilters}>
-                    Limpiar filtros
-                  </Button>
-                ) : undefined
-              }
             />
           ) : (
             <>
-              <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-3">
-                <p className="text-sm font-medium text-foreground">
-                  Facturas de esta página
-                </p>
-                <TableExportButton
-                  rows={invoices}
-                  columns={invoiceExportColumns}
-                  filename={`facturas_${exportDateStamp()}`}
-                  sheetName="Facturas"
-                />
-              </div>
               {!isMobile && (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Fecha</TableHead>
-                      <TableHead>Emisor</TableHead>
-                      <TableHead>Tipo</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
-                      <TableHead>Conciliación</TableHead>
-                      <TableHead className="text-right">Acciones</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
+              <div className="overflow-x-auto" tabIndex={0} aria-label="Tabla de facturas">
+                <table className="w-full min-w-[760px] border-separate border-spacing-0">
+                  <thead>
+                    <tr className="border-b border-border/50">
+                      {['Fecha', 'Emisor', 'Tipo', 'Total', 'Conciliación', 'Acciones'].map((label) => (
+                        <th
+                          key={label}
+                          scope="col"
+                          className={cn(
+                            'border-b border-border/50 px-3 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground',
+                            label === 'Total' || label === 'Acciones' ? 'text-right' : 'text-left',
+                          )}
+                        >
+                          {label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
                     {invoices.map((invoice) => (
-                      <TableRow
+                      <tr
                         key={invoice._id}
-                        className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                        className="cursor-pointer transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                         tabIndex={0}
                         role="button"
                         aria-label={`Abrir factura de ${invoice.issuerName ?? 'emisor desconocido'}`}
@@ -669,10 +664,10 @@ export default function InvoicesPage() {
                           }
                         }}
                       >
-                        <TableCell className="whitespace-nowrap">
+                        <td className="whitespace-nowrap border-b border-border/30 px-3 py-3 align-middle text-sm text-muted-foreground">
                           {formatInvoiceDate(invoice.date, timeZone)}
-                        </TableCell>
-                        <TableCell>
+                        </td>
+                        <td className="border-b border-border/30 px-3 py-3 align-middle">
                           <div className="min-w-0 max-w-[280px]">
                             <p className="truncate text-sm font-medium text-foreground">
                               {invoice.issuerName ?? 'Sin emisor'}
@@ -681,26 +676,31 @@ export default function InvoicesPage() {
                               {invoice.issuerRfc ?? '—'}
                             </p>
                           </div>
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-sm">
-                          {INVOICE_TYPE_LABELS[invoice.type] ?? invoice.type}
-                        </TableCell>
-                        <TableCell className="text-right whitespace-nowrap font-medium">
-                          {formatMxn(invoice.total)}
-                        </TableCell>
-                        <TableCell>
+                        </td>
+                        <td className="whitespace-nowrap border-b border-border/30 px-3 py-3 align-middle">
+                          <span className="inline-flex items-center whitespace-nowrap rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground">
+                            {INVOICE_TYPE_LABELS[invoice.type] ?? invoice.type}
+                          </span>
+                        </td>
+                        <td className="whitespace-nowrap border-b border-border/30 px-3 py-3 text-right align-middle">
+                          <span className="block text-right text-sm font-semibold tabular-nums text-foreground">
+                            {formatMxn(invoice.total)}
+                          </span>
+                        </td>
+                        <td className="border-b border-border/30 px-3 py-3 align-middle">
                           <InvoiceMatchStatusBadge status={invoice.matchStatus} />
-                        </TableCell>
-                        <TableCell className="text-right">
+                        </td>
+                        <td className="border-b border-border/30 px-3 py-3 text-right align-middle">
                           <div
                             className="flex items-center justify-end gap-1"
                             onClick={(e) => e.stopPropagation()}
                             onKeyDown={(e) => e.stopPropagation()}
                           >
                             <Button
+                              type="button"
                               variant="ghost"
-                              size="sm"
-                              className="h-8 rounded-lg"
+                              size="icon"
+                              className="h-8 w-8"
                               onClick={() => void openPdf(invoice)}
                               disabled={pdfBusyId === invoice._id}
                               aria-label="Abrir PDF"
@@ -712,9 +712,10 @@ export default function InvoicesPage() {
                               )}
                             </Button>
                             <Button
+                              type="button"
                               variant="ghost"
-                              size="sm"
-                              className="h-8 rounded-lg text-destructive hover:text-destructive"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
                               onClick={() => {
                                 if (!companyId) return;
                                 setPendingDelete({ companyId, invoice });
@@ -730,11 +731,11 @@ export default function InvoicesPage() {
                               )}
                             </Button>
                           </div>
-                        </TableCell>
-                      </TableRow>
+                        </td>
+                      </tr>
                     ))}
-                  </TableBody>
-                </Table>
+                  </tbody>
+                </table>
               </div>
               )}
 
@@ -769,20 +770,34 @@ export default function InvoicesPage() {
                           {formatMxn(invoice.total)}
                         </p>
                       </div>
-                      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                        <span className="whitespace-nowrap">{formatInvoiceDate(invoice.date, timeZone)}</span>
-                        <span className="whitespace-nowrap">{INVOICE_TYPE_LABELS[invoice.type] ?? invoice.type}</span>
-                        <InvoiceMatchStatusBadge status={invoice.matchStatus} />
-                      </div>
+                      <dl className="mt-3 grid grid-cols-1 gap-x-3 gap-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <dt className="shrink-0 text-xs font-medium uppercase tracking-wider text-muted-foreground">Fecha</dt>
+                          <dd className="text-sm text-muted-foreground">{formatInvoiceDate(invoice.date, timeZone)}</dd>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <dt className="shrink-0 text-xs font-medium uppercase tracking-wider text-muted-foreground">Tipo</dt>
+                          <dd>
+                            <span className="inline-flex items-center whitespace-nowrap rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground">
+                              {INVOICE_TYPE_LABELS[invoice.type] ?? invoice.type}
+                            </span>
+                          </dd>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <dt className="shrink-0 text-xs font-medium uppercase tracking-wider text-muted-foreground">Conciliación</dt>
+                          <dd><InvoiceMatchStatusBadge status={invoice.matchStatus} /></dd>
+                        </div>
+                      </dl>
                       <div
                         className="mt-3 flex justify-end gap-1 border-t border-border/40 pt-2"
                         onClick={(e) => e.stopPropagation()}
                         onKeyDown={(e) => e.stopPropagation()}
                       >
                         <Button
+                          type="button"
                           variant="ghost"
-                          size="sm"
-                          className="h-9 rounded-lg"
+                          size="icon"
+                          className="h-8 w-8"
                           onClick={() => void openPdf(invoice)}
                           disabled={pdfBusyId === invoice._id}
                           aria-label="Abrir PDF"
@@ -794,9 +809,10 @@ export default function InvoicesPage() {
                           )}
                         </Button>
                         <Button
+                          type="button"
                           variant="ghost"
-                          size="sm"
-                          className="h-9 rounded-lg text-destructive hover:text-destructive"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive"
                           onClick={() => {
                             if (!companyId) return;
                             setPendingDelete({ companyId, invoice });
@@ -818,49 +834,45 @@ export default function InvoicesPage() {
               </ul>
               )}
 
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-border/50">
-                <p className="text-xs text-muted-foreground" aria-live="polite">
-                  {total === 0
-                    ? 'Sin resultados'
-                    : `Página ${page} de ${pages} · ${total} factura${total === 1 ? '' : 's'}`}
+              <div className="flex items-center justify-between gap-3 border-t border-border/50 px-4 py-3">
+                <p className="text-sm text-muted-foreground" aria-live="polite">
+                  {`Página ${page} de ${pages} · ${total} factura${total === 1 ? '' : 's'}`}
                 </p>
-                <Pagination className="mx-0 w-auto">
-                  <PaginationContent>
-                    <PaginationItem>
-                      <PaginationPrevious
-                        href="#"
-                        aria-disabled={page <= 1 || invoicesQuery.isFetching}
-                        className={
-                          page <= 1 || invoicesQuery.isFetching
-                            ? 'pointer-events-none opacity-50'
-                            : undefined
-                        }
-                        onClick={(e) => {
-                          e.preventDefault();
-                          if (page > 1) setPage((p) => p - 1);
-                        }}
-                      />
-                    </PaginationItem>
-                    <PaginationItem>
-                      <PaginationNext
-                        href="#"
-                        aria-disabled={page >= pages || invoicesQuery.isFetching}
-                        className={
-                          page >= pages || invoicesQuery.isFetching
-                            ? 'pointer-events-none opacity-50'
-                            : undefined
-                        }
-                        onClick={(e) => {
-                          e.preventDefault();
-                          if (page < pages) setPage((p) => p + 1);
-                        }}
-                      />
-                    </PaginationItem>
-                  </PaginationContent>
-                </Pagination>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-lg"
+                    aria-label="Página anterior"
+                    onClick={() => {
+                      if (page > 1) setPage((current) => current - 1);
+                    }}
+                    disabled={page <= 1 || invoicesQuery.isFetching}
+                  >
+                    <ChevronLeft size={14} />
+                  </Button>
+                  <span className="text-sm text-muted-foreground">
+                    {page} / {pages}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-lg"
+                    aria-label="Página siguiente"
+                    onClick={() => {
+                      if (page < pages) setPage((current) => current + 1);
+                    }}
+                    disabled={page >= pages || invoicesQuery.isFetching}
+                  >
+                    <ChevronRight size={14} />
+                  </Button>
+                </div>
               </div>
             </>
           )}
+        </div>
         </div>
       </div>
 
@@ -870,7 +882,7 @@ export default function InvoicesPage() {
           if (!open) closeDetail();
         }}
       >
-        <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-h-[85vh] overflow-y-auto rounded-2xl sm:max-w-xl">
           <DialogHeader>
             <DialogTitle className="pr-8">
               {selectedInvoice

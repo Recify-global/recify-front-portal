@@ -176,7 +176,7 @@ describe('InvoicesPage inventory and UUID safety', () => {
   it('requests page 2 with server pagination params', async () => {
     renderPage();
     await screen.findByText('Emisor Uno');
-    fireEvent.click(screen.getByLabelText('Go to next page'));
+    fireEvent.click(screen.getByLabelText('Página siguiente'));
     expect(await screen.findByText('Página Dos')).toBeInTheDocument();
     expect(mocks.listInvoices).toHaveBeenCalledWith(
       'company-a',
@@ -481,7 +481,7 @@ describe('InvoicesPage filters', () => {
       );
     });
 
-    fireEvent.click(screen.getByLabelText('Go to next page'));
+    fireEvent.click(screen.getByLabelText('Página siguiente'));
     await waitFor(() => {
       expect(mocks.listInvoices).toHaveBeenCalledWith(
         'company-a',
@@ -511,7 +511,7 @@ describe('InvoicesPage filters', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '7 días' }));
     await waitFor(() => expect(mocks.listInvoices.mock.calls.length).toBeGreaterThan(1));
-    fireEvent.click(screen.getByLabelText('Go to next page'));
+    fireEvent.click(screen.getByLabelText('Página siguiente'));
     await screen.findByText('Página Dos');
 
     fireEvent.click(screen.getByRole('button', { name: 'Limpiar filtros' }));
