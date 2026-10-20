@@ -327,6 +327,19 @@ describe('InvoicesPage inventory and UUID safety', () => {
   });
 });
 
+async function chooseCivilDate(label: string, wire: string) {
+  const [year, month, day] = wire.split('-');
+  fireEvent.click(screen.getByLabelText(label));
+  const dialog = await screen.findByRole('dialog');
+  const [monthSelect, yearSelect] = within(dialog).getAllByRole('combobox');
+  fireEvent.change(monthSelect, { target: { value: String(Number(month) - 1) } });
+  fireEvent.change(yearSelect, { target: { value: year } });
+  const dayName = String(Number(day));
+  const cells = within(dialog).getAllByRole('gridcell', { name: dayName });
+  const current = cells.find((cell) => !cell.classList.contains('day-outside'));
+  fireEvent.click(current ?? cells[0]);
+}
+
 describe('InvoicesPage filters', () => {
   it('starts with Todo el historial and omits date params', async () => {
     renderPage();
@@ -391,18 +404,16 @@ describe('InvoicesPage filters', () => {
       'aria-pressed',
       'true',
     );
-    expect(screen.getByLabelText('Desde')).toHaveValue('');
-    expect(screen.getByLabelText('Hasta')).toHaveValue('');
+    expect(screen.getByLabelText('Desde')).toHaveTextContent('DD/MM/AAAA');
+    expect(screen.getByLabelText('Hasta')).toHaveTextContent('DD/MM/AAAA');
   });
 
   it('serializes valid custom civil dates and holds the last valid query for invalid ranges', async () => {
     renderPage();
     await screen.findByText('Emisor Uno');
-    const from = screen.getByLabelText('Desde');
-    const to = screen.getByLabelText('Hasta');
+    expect(screen.queryByRole('button', { name: 'Limpiar filtros' })).not.toBeInTheDocument();
 
-    fireEvent.change(from, { target: { value: '10/08/2026' } });
-    fireEvent.blur(from);
+    await chooseCivilDate('Desde', '2026-08-10');
     await waitFor(() => {
       expect(mocks.listInvoices).toHaveBeenCalledWith(
         'company-a',
@@ -410,18 +421,17 @@ describe('InvoicesPage filters', () => {
         expect.any(Object),
       );
     });
+    expect(screen.getByLabelText('Desde')).toHaveTextContent('10/08/2026');
+    expect(screen.getByRole('button', { name: 'Limpiar filtros' })).toBeInTheDocument();
 
     mocks.listInvoices.mockClear();
-    fireEvent.change(to, { target: { value: '01/08/2026' } });
-    fireEvent.blur(to);
+    await chooseCivilDate('Hasta', '2026-08-01');
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'La fecha inicial no puede ser posterior',
     );
-    await new Promise((resolve) => setTimeout(resolve, 30));
     expect(mocks.listInvoices).not.toHaveBeenCalled();
 
-    fireEvent.change(to, { target: { value: '12/08/2026' } });
-    fireEvent.blur(to);
+    await chooseCivilDate('Hasta', '2026-08-12');
     await waitFor(() => {
       expect(mocks.listInvoices).toHaveBeenCalledWith(
         'company-a',
@@ -432,22 +442,6 @@ describe('InvoicesPage filters', () => {
         expect.any(Object),
       );
     });
-  });
-
-  it('rejects an invalid civil date without issuing a request', async () => {
-    renderPage();
-    await screen.findByText('Emisor Uno');
-    mocks.listInvoices.mockClear();
-    const from = screen.getByLabelText('Desde');
-
-    fireEvent.change(from, { target: { value: '31/02/2026' } });
-    fireEvent.blur(from);
-
-    expect(mocks.toastError).toHaveBeenCalledWith(
-      'Ingresa una fecha válida con el formato DD/MM/AAAA.',
-    );
-    expect(mocks.listInvoices).not.toHaveBeenCalled();
-    expect(from).toHaveValue('');
   });
 
   it('combines server filters and preserves them while paginating', async () => {
@@ -519,8 +513,8 @@ describe('InvoicesPage filters', () => {
     expect(await screen.findByText('Emisor Uno')).toBeInTheDocument();
     expect(screen.getByText('Página 1 de 2 · 25 facturas')).toBeInTheDocument();
     expect(screen.getByLabelText('RFC del emisor')).toHaveValue('');
-    expect(screen.getByLabelText('Desde')).toHaveValue('');
-    expect(screen.getByLabelText('Hasta')).toHaveValue('');
+    expect(screen.getByLabelText('Desde')).toHaveTextContent('DD/MM/AAAA');
+    expect(screen.getByLabelText('Hasta')).toHaveTextContent('DD/MM/AAAA');
     expect(screen.getByRole('button', { name: 'Todo el historial' })).toHaveAttribute(
       'aria-pressed',
       'true',

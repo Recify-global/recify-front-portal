@@ -3,8 +3,8 @@ import { AppLayout } from '@/components/recify/AppLayout';
 import { EmptyState } from '@/components/recify/EmptyState';
 import { InvoiceMatchStatusBadge } from '@/components/recify/InvoiceMatchStatusBadge';
 import { InvoiceMatchPanel } from '@/components/recify/InvoiceMatchPanel';
+import { CivilDatePicker } from '@/components/recify/CivilDatePicker';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -67,10 +67,6 @@ import {
   isValidDateRange,
   resolveCompanyTimeZone,
 } from '@/utils/financial-kpis';
-import {
-  formatCivilDateDisplay,
-  parseCivilDateInput,
-} from '@/utils/civil-date-input';
 import { getInvoiceUserErrorMessage, isInvoiceAbortError } from '@/utils/invoice-errors';
 import { cn } from '@/lib/utils';
 import { AlertCircle, ChevronLeft, ChevronRight, FileText, Loader2, Search, Trash2, X } from 'lucide-react';
@@ -105,8 +101,6 @@ export default function InvoicesPage() {
   const [searchFilter, setSearchFilter] = useState('');
   const [dateFromFilter, setDateFromFilter] = useState('');
   const [dateToFilter, setDateToFilter] = useState('');
-  const [dateFromDisplay, setDateFromDisplay] = useState('');
-  const [dateToDisplay, setDateToDisplay] = useState('');
   const [page, setPage] = useState(1);
   const [selection, setSelection] = useState<InvoiceSelection | null>(null);
   const [localDetail, setLocalDetail] = useState<BackendInvoice | null>(null);
@@ -144,8 +138,6 @@ export default function InvoicesPage() {
     setSearchFilter('');
     setDateFromFilter('');
     setDateToFilter('');
-    setDateFromDisplay('');
-    setDateToDisplay('');
     setPage(1);
     setSelection(null);
     setLocalDetail(null);
@@ -191,11 +183,6 @@ export default function InvoicesPage() {
   const invoicesQuery = useInvoices(listParams);
   const detailQuery = useInvoice(selection);
   const deleteMutation = useDeleteInvoice();
-
-  useEffect(() => {
-    setDateFromDisplay(dateFromFilter ? formatCivilDateDisplay(dateFromFilter) : '');
-    setDateToDisplay(dateToFilter ? formatCivilDateDisplay(dateToFilter) : '');
-  }, [dateFromFilter, dateToFilter]);
 
   useEffect(() => {
     setLocalDetail(null);
@@ -255,41 +242,13 @@ export default function InvoicesPage() {
     setPage(1);
   };
 
-  const commitDateFromDisplay = () => {
-    const raw = dateFromDisplay.trim();
-    if (!raw) {
-      setDateFromFilter('');
-      setDateFromDisplay('');
-      setPage(1);
-      return;
-    }
-    const wire = parseCivilDateInput(raw);
-    if (!wire) {
-      setDateFromDisplay(dateFromFilter ? formatCivilDateDisplay(dateFromFilter) : '');
-      toast.error('Ingresa una fecha válida con el formato DD/MM/AAAA.');
-      return;
-    }
+  const selectDateFrom = (wire: string) => {
     setDateFromFilter(wire);
-    setDateFromDisplay(formatCivilDateDisplay(wire));
     setPage(1);
   };
 
-  const commitDateToDisplay = () => {
-    const raw = dateToDisplay.trim();
-    if (!raw) {
-      setDateToFilter('');
-      setDateToDisplay('');
-      setPage(1);
-      return;
-    }
-    const wire = parseCivilDateInput(raw);
-    if (!wire) {
-      setDateToDisplay(dateToFilter ? formatCivilDateDisplay(dateToFilter) : '');
-      toast.error('Ingresa una fecha válida con el formato DD/MM/AAAA.');
-      return;
-    }
+  const selectDateTo = (wire: string) => {
     setDateToFilter(wire);
-    setDateToDisplay(formatCivilDateDisplay(wire));
     setPage(1);
   };
 
@@ -494,79 +453,52 @@ export default function InvoicesPage() {
             </div>
 
             <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 xl:flex-nowrap">
-                <div className="flex min-w-0 flex-wrap gap-2 xl:flex-nowrap" aria-label="Rangos rápidos de fecha">
-                  {DATE_PRESETS.map((preset) => (
-                    <Button
-                      key={preset.id}
-                      type="button"
-                      variant={activePreset === preset.id ? 'default' : 'outline'}
-                      className="min-h-9 rounded-xl"
-                      aria-pressed={activePreset === preset.id}
-                      onClick={() => applyDatePreset(preset.id)}
-                    >
-                      {preset.label}
-                    </Button>
-                  ))}
-                </div>
-                <div className="flex min-w-0 flex-wrap items-center gap-3 xl:shrink-0 xl:flex-nowrap">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <Label htmlFor="invoice-date-from" className="shrink-0 text-xs text-muted-foreground">
-                      Desde
-                    </Label>
-                    <Input
-                      id="invoice-date-from"
-                      inputMode="numeric"
-                      placeholder="DD/MM/AAAA"
-                      value={dateFromDisplay}
-                      onChange={(event) => setDateFromDisplay(event.target.value)}
-                      onBlur={commitDateFromDisplay}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') event.currentTarget.blur();
-                      }}
-                      aria-invalid={dateRangeInvalid}
-                      className={cn(
-                        'h-10 w-[9.5rem] min-w-0 rounded-xl border-border',
-                        dateRangeInvalid && 'border-destructive focus-visible:ring-destructive',
-                      )}
-                    />
-                  </div>
-                  <div className="flex min-w-0 items-center gap-2">
-                    <Label htmlFor="invoice-date-to" className="shrink-0 text-xs text-muted-foreground">
-                      Hasta
-                    </Label>
-                    <Input
-                      id="invoice-date-to"
-                      inputMode="numeric"
-                      placeholder="DD/MM/AAAA"
-                      value={dateToDisplay}
-                      onChange={(event) => setDateToDisplay(event.target.value)}
-                      onBlur={commitDateToDisplay}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') event.currentTarget.blur();
-                      }}
-                      aria-invalid={dateRangeInvalid}
-                      className={cn(
-                        'h-10 w-[9.5rem] min-w-0 rounded-xl border-border',
-                        dateRangeInvalid && 'border-destructive focus-visible:ring-destructive',
-                      )}
-                    />
-                  </div>
+              <div className="flex min-w-0 flex-wrap gap-2" aria-label="Rangos rápidos de fecha">
+                {DATE_PRESETS.map((preset) => (
                   <Button
+                    key={preset.id}
                     type="button"
-                    variant="outline"
+                    variant={activePreset === preset.id ? 'default' : 'outline'}
                     className="min-h-9 rounded-xl"
-                    onClick={clearFilters}
-                    disabled={!hasFilterInput}
+                    aria-pressed={activePreset === preset.id}
+                    onClick={() => applyDatePreset(preset.id)}
                   >
-                    Limpiar filtros
+                    {preset.label}
                   </Button>
-                </div>
+                ))}
+              </div>
+              <div className="flex min-w-0 flex-wrap items-center gap-3">
+                <CivilDatePicker
+                  id="invoice-date-from"
+                  label="Desde"
+                  value={dateFromFilter}
+                  onChange={selectDateFrom}
+                  invalid={dateRangeInvalid}
+                />
+                <CivilDatePicker
+                  id="invoice-date-to"
+                  label="Hasta"
+                  value={dateToFilter}
+                  onChange={selectDateTo}
+                  invalid={dateRangeInvalid}
+                />
               </div>
               {dateRangeInvalid ? (
                 <p className="text-xs text-destructive" role="alert">
                   La fecha inicial no puede ser posterior a la fecha final.
                 </p>
+              ) : null}
+              {hasFilterInput ? (
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-9 rounded-xl"
+                    onClick={clearFilters}
+                  >
+                    Limpiar filtros
+                  </Button>
+                </div>
               ) : null}
             </div>
           </div>

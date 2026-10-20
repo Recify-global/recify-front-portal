@@ -149,6 +149,18 @@ describe('date presets and range', () => {
   it('marks dateTo as inclusive end-of-day in Chihuahua', () => {
     expect(endOfCivilDayIso('2026-07-12')).toBe('2026-07-12T23:59:59.999-06:00');
     expect(startOfCivilDayIso('2026-07-12')).toBe('2026-07-12T00:00:00.000-06:00');
+    expect(startOfCivilDayIso('2026-07-12', 'America/Mexico_City')).toBe(
+      '2026-07-12T00:00:00.000-06:00',
+    );
+  });
+
+  it('uses the company zone offset instead of a fixed -06:00', () => {
+    expect(startOfCivilDayIso('2026-07-12', 'America/Tijuana')).toBe(
+      '2026-07-12T00:00:00.000-07:00',
+    );
+    expect(endOfCivilDayIso('2026-07-12', 'America/Tijuana')).toBe(
+      '2026-07-12T23:59:59.999-07:00',
+    );
   });
 
   it('expands a civil range so the stored midnight of the last day is included', () => {
