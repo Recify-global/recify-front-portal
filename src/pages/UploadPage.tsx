@@ -209,6 +209,12 @@ export default function UploadPage() {
   );
 
   const extractError = (err: unknown, fallback: string) => {
+    if (err instanceof ApiRequestError && err.code === 'UPLOAD_IN_PROGRESS') {
+      return 'La subida sigue en proceso. Vuelve a guardar para recuperar el mismo resultado, sin crear otro ticket.';
+    }
+    if (err instanceof ApiRequestError && err.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH') {
+      return 'Esta subida ya se usó con otro contenido. No se creó un segundo ticket.';
+    }
     const providerMessage = getDocumentAnalysisErrorMessage(err);
     if (providerMessage) return providerMessage;
     if (err instanceof ApiRequestError) return err.message || fallback;
@@ -472,6 +478,7 @@ export default function UploadPage() {
         companyId: context.companyId,
         file: selectedFile as File,
         signal: controller.signal,
+        idempotencyKey: context.operationKey,
       });
       if (!isCurrentFlow(context, controller.signal)) return;
 
@@ -539,7 +546,15 @@ export default function UploadPage() {
         toast.success('Ticket guardado correctamente.');
       }
     } catch (err) {
-      if (!isCurrentFlow(context, controller.signal) || isAbortLike(err)) return;
+      if (!uploadFlowRef.current.isCurrent(context, companyIdRef.current)) return;
+      if (isAbortLike(err)) {
+        if (!controller.signal.aborted) {
+          toast.info(
+            'No se confirmó la respuesta del servidor. Vuelve a guardar para recuperar el mismo ticket.',
+          );
+        }
+        return;
+      }
       toast.error(extractError(err, 'No se pudo guardar el ticket.'));
     } finally {
       uploadFlowRef.current.releaseController(controller);

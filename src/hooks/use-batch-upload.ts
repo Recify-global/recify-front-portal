@@ -57,6 +57,8 @@ export interface BatchItem {
   savedTicket: UiTicket | null;
   error: string | null;
   failedStage: BatchFailedStage | null;
+  /** Identidad de la operación de guardado. No cambia al reintentar. */
+  operationKey: string;
 }
 
 export interface UseBatchUploadOptions {
@@ -77,6 +79,12 @@ function fileKeyOf(file: File): string {
 }
 
 function extractError(err: unknown, fallback: string): string {
+  if (err instanceof ApiRequestError && err.code === 'UPLOAD_IN_PROGRESS') {
+    return 'La subida sigue en proceso. Reintenta para recuperar el mismo resultado, sin crear otro ticket.';
+  }
+  if (err instanceof ApiRequestError && err.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH') {
+    return 'Esta subida ya se usó con otro contenido. No se creó un segundo ticket.';
+  }
   const providerMessage = getDocumentAnalysisErrorMessage(err);
   if (providerMessage) return providerMessage;
   if (err instanceof ApiRequestError || err instanceof Error) {
@@ -366,6 +374,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
           savedTicket: null,
           error: null,
           failedStage: null,
+          operationKey: crypto.randomUUID(),
         });
         existingKeys.add(key);
       }
@@ -465,6 +474,7 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
 
         const response = await uploadTicket(originCompanyId, item.file, {
           signal: controller.signal,
+          idempotencyKey: item.operationKey,
           ...(ticketDraft ? { ticketDraft } : {}),
         });
         const effectsAllowed = isAuthMutationContextCurrent(authContext);
@@ -526,11 +536,24 @@ export function useBatchUpload(options: UseBatchUploadOptions = {}) {
         };
       } catch (err) {
         if (controller.signal.aborted || isAbortLike(err)) {
+          const effectsAllowed = isAuthMutationContextCurrent(authContext);
+          if (
+            effectsAllowed &&
+            !isStale(generation, originCompanyId) &&
+            itemsRef.current.some((it) => it.id === item.id)
+          ) {
+            patchItem(item.id, {
+              status: 'error',
+              failedStage: 'save',
+              error:
+                'No se confirmó la respuesta del servidor. Reintenta para recuperar el mismo ticket, sin crear otro.',
+            });
+          }
           return {
             persisted: false,
             companyId: originCompanyId,
             uiUpdated: false,
-            effectsAllowed: isAuthMutationContextCurrent(authContext),
+            effectsAllowed,
             matchedInvoice: false,
             balance: false,
           };

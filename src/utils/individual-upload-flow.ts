@@ -1,6 +1,8 @@
 export interface ActiveUploadContext {
   companyId: string;
   generation: number;
+  /** Stable for this file flow, including a retry after a lost response. */
+  operationKey: string;
 }
 
 export interface IndividualUploadFlow {
@@ -36,7 +38,7 @@ export function createIndividualUploadFlow(): IndividualUploadFlow {
   return {
     begin(companyId) {
       cancel();
-      active = { companyId, generation };
+      active = { companyId, generation, operationKey: crypto.randomUUID() };
       return active;
     },
     cancel,
