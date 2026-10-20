@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import InvoicesPage from '@/pages/InvoicesPage';
 import type { BackendInvoice } from '@/types/invoice';
 import { ApiRequestError } from '@/api/http';
-import { dateRangeForPreset } from '@/utils/financial-kpis';
+import { dateRangeForPreset, endOfCivilDayIso, startOfCivilDayIso } from '@/utils/financial-kpis';
 
 const mocks = vi.hoisted(() => ({
   companyId: 'company-a' as string | null,
@@ -232,6 +232,49 @@ describe('InvoicesPage inventory and UUID safety', () => {
     );
   });
 
+  it('does not carry company A filters into the company B list query', async () => {
+    const { rerender } = renderPage();
+    await screen.findByText('Emisor Uno');
+    fireEvent.change(screen.getByLabelText('RFC del emisor'), {
+      target: { value: 'XAXX010101000' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '7 días' }));
+    await waitFor(() => {
+      expect(mocks.listInvoices).toHaveBeenCalledWith(
+        'company-a',
+        expect.objectContaining({ issuerRfc: 'XAXX010101000' }),
+        expect.any(Object),
+      );
+    });
+    mocks.listInvoices.mockClear();
+
+    mocks.companyId = 'company-b';
+    rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <InvoicesPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.listInvoices).toHaveBeenCalledWith(
+        'company-b',
+        { page: 1, limit: 20 },
+        expect.any(Object),
+      );
+    });
+    for (const call of mocks.listInvoices.mock.calls) {
+      expect(call[0]).toBe('company-b');
+      expect(call[1]).not.toHaveProperty('issuerRfc');
+      expect(call[1]).not.toHaveProperty('dateFrom');
+      expect(call[1]).not.toHaveProperty('dateTo');
+    }
+    expect(screen.getByRole('button', { name: 'Todo el historial' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByLabelText('RFC del emisor')).toHaveValue('');
+  });
+
   it('shows detail error with retry instead of silent success', async () => {
     mocks.getInvoice.mockRejectedValue(new ApiRequestError('missing', 404));
     renderPage();
@@ -322,8 +365,8 @@ describe('InvoicesPage filters', () => {
         expect.objectContaining({
           page: 1,
           limit: 20,
-          dateFrom: expected.dateFrom,
-          dateTo: expected.dateTo,
+          dateFrom: startOfCivilDayIso(expected.dateFrom),
+          dateTo: endOfCivilDayIso(expected.dateTo),
         }),
         expect.any(Object),
       );
@@ -363,7 +406,7 @@ describe('InvoicesPage filters', () => {
     await waitFor(() => {
       expect(mocks.listInvoices).toHaveBeenCalledWith(
         'company-a',
-        expect.objectContaining({ dateFrom: '2026-08-10' }),
+        expect.objectContaining({ dateFrom: startOfCivilDayIso('2026-08-10') }),
         expect.any(Object),
       );
     });
@@ -383,8 +426,8 @@ describe('InvoicesPage filters', () => {
       expect(mocks.listInvoices).toHaveBeenCalledWith(
         'company-a',
         expect.objectContaining({
-          dateFrom: '2026-08-10',
-          dateTo: '2026-08-12',
+          dateFrom: startOfCivilDayIso('2026-08-10'),
+          dateTo: endOfCivilDayIso('2026-08-12'),
         }),
         expect.any(Object),
       );

@@ -145,6 +145,24 @@ export function endOfCivilDayIso(dateKey: string, timeZone = HISTORY_TIMEZONE): 
   return `${dateKey}T23:59:59.999-06:00`;
 }
 
+/**
+ * Límites inclusivos para consultas que comparan con `$lte` sobre una fecha
+ * guardada a medianoche de la zona. `YYYY-MM-DD` se coerciona a medianoche UTC
+ * y deja fuera el último día civil.
+ */
+export function inclusiveCivilQueryBounds(
+  dateFrom: string,
+  dateTo: string,
+  timeZone = HISTORY_TIMEZONE,
+): { dateFrom?: string; dateTo?: string } {
+  const from = dateFrom.trim();
+  const to = dateTo.trim();
+  return {
+    ...(from ? { dateFrom: startOfCivilDayIso(from, timeZone) } : {}),
+    ...(to ? { dateTo: endOfCivilDayIso(to, timeZone) } : {}),
+  };
+}
+
 export type DatePresetId =
   | 'today'
   | 'yesterday'

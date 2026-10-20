@@ -78,6 +78,7 @@ import {
   dateRangeForPreset,
   detectActivePreset,
   formatMxn,
+  inclusiveCivilQueryBounds,
   isValidDateRange,
   resolveCompanyTimeZone,
 } from '@/utils/financial-kpis';
@@ -149,40 +150,10 @@ export default function InvoicesPage() {
     page: 1,
     limit: PAGE_SIZE,
   });
-
-  const listParams = useMemo((): InvoicesListParams => {
-    const params: InvoicesListParams = {
-      page,
-      limit: PAGE_SIZE,
-    };
-    if (tab !== 'all') params.matchStatus = tab;
-    if (typeFilter !== 'all') params.type = typeFilter;
-    if (dateFromFilter) params.dateFrom = dateFromFilter;
-    if (dateToFilter) params.dateTo = dateToFilter;
-    const search = searchFilter.trim();
-    if (search && looksLikeIssuerRfc(search)) {
-      params.issuerRfc = search.toUpperCase();
-    }
-
-    if (dateRangeInvalid) return lastValidListParamsRef.current;
-    lastValidListParamsRef.current = params;
-    return params;
-  }, [
-    dateFromFilter,
-    dateRangeInvalid,
-    dateToFilter,
-    page,
-    searchFilter,
-    tab,
-    typeFilter,
-  ]);
-
-  const invoicesQuery = useInvoices(listParams);
-  const detailQuery = useInvoice(selection);
-  const deleteMutation = useDeleteInvoice();
-
-  // Reset de filtros/selección al cambiar compañía (sincrónico con el render activo).
-  useEffect(() => {
+  const [filterOwnerId, setFilterOwnerId] = useState(companyId);
+  const filtersBelongToCompany = filterOwnerId === companyId;
+  if (!filtersBelongToCompany) {
+    setFilterOwnerId(companyId);
     setTab('all');
     setTypeFilter('all');
     setSearchFilter('');
@@ -198,7 +169,43 @@ export default function InvoicesPage() {
     pdfClaimRef.current = false;
     setPdfBusyId(null);
     lastValidListParamsRef.current = { page: 1, limit: PAGE_SIZE };
-  }, [companyId]);
+  }
+
+  const listParams = useMemo((): InvoicesListParams => {
+    if (!filtersBelongToCompany) {
+      return { page: 1, limit: PAGE_SIZE };
+    }
+
+    const params: InvoicesListParams = {
+      page,
+      limit: PAGE_SIZE,
+    };
+    if (tab !== 'all') params.matchStatus = tab;
+    if (typeFilter !== 'all') params.type = typeFilter;
+    Object.assign(params, inclusiveCivilQueryBounds(dateFromFilter, dateToFilter, timeZone));
+    const search = searchFilter.trim();
+    if (search && looksLikeIssuerRfc(search)) {
+      params.issuerRfc = search.toUpperCase();
+    }
+
+    if (dateRangeInvalid) return lastValidListParamsRef.current;
+    lastValidListParamsRef.current = params;
+    return params;
+  }, [
+    dateFromFilter,
+    dateRangeInvalid,
+    dateToFilter,
+    filtersBelongToCompany,
+    page,
+    searchFilter,
+    tab,
+    timeZone,
+    typeFilter,
+  ]);
+
+  const invoicesQuery = useInvoices(listParams);
+  const detailQuery = useInvoice(selection);
+  const deleteMutation = useDeleteInvoice();
 
   useEffect(() => {
     setDateFromDisplay(dateFromFilter ? formatCivilDateDisplay(dateFromFilter) : '');

@@ -5,6 +5,7 @@ import {
   dateRangeForPreset,
   detectActivePreset,
   endOfCivilDayIso,
+  inclusiveCivilQueryBounds,
   inclusiveDaysRange,
   isKpiExcludedStatus,
   isValidDateRange,
@@ -148,6 +149,19 @@ describe('date presets and range', () => {
   it('marks dateTo as inclusive end-of-day in Chihuahua', () => {
     expect(endOfCivilDayIso('2026-07-12')).toBe('2026-07-12T23:59:59.999-06:00');
     expect(startOfCivilDayIso('2026-07-12')).toBe('2026-07-12T00:00:00.000-06:00');
+  });
+
+  it('expands a civil range so the stored midnight of the last day is included', () => {
+    expect(inclusiveCivilQueryBounds('', '')).toEqual({});
+    expect(inclusiveCivilQueryBounds('2026-08-10', '2026-08-12')).toEqual({
+      dateFrom: '2026-08-10T00:00:00.000-06:00',
+      dateTo: '2026-08-12T23:59:59.999-06:00',
+    });
+    const storedLastDay = new Date('2026-08-12T06:00:00.000Z').getTime();
+    const from = new Date('2026-08-12T00:00:00.000-06:00').getTime();
+    const to = new Date('2026-08-12T23:59:59.999-06:00').getTime();
+    expect(storedLastDay).toBeGreaterThanOrEqual(from);
+    expect(storedLastDay).toBeLessThanOrEqual(to);
   });
 
   it('rejects inverted ranges', () => {
