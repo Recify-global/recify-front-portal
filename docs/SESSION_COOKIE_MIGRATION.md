@@ -23,7 +23,7 @@ La cookie es `Secure` también en desarrollo. Chrome, Firefox y Safari actuales 
 
 ## Producción
 
-No desplegar esta rama contra el frontend de Vercel y `recify-back-api.onrender.com`. Son sitios distintos. En producción `SESSION_HOSTS` debe listar los hostnames exactos del API y del frontend, por ejemplo `api.example.com,app.example.com`. Un sufijo como `vercel.app`, `onrender.com`, `com` o `com.au` no autoriza a otros hosts. Esos dominios todavía no están confirmados. Si la configuración de producción no cumple eso, el API no arranca.
+El frontend público es `https://app.recify.com.mx` y la API es `https://api.recify.com.mx`. Comparten el sitio `recify.com.mx`, así que `SameSite=Lax` envía la cookie en las solicitudes con credenciales. `SESSION_HOSTS` debe ser exactamente `api.recify.com.mx,app.recify.com.mx`. Un sufijo como `vercel.app`, `onrender.com`, `com` o `com.au` no autoriza a otros hosts. El par `*.vercel.app` y `*.onrender.com` sigue siendo cross-site y el API no arranca con esa configuración.
 
 ## Logout y una sesión nueva
 
