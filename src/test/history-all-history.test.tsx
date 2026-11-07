@@ -1,9 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import HistoryPage from '@/pages/HistoryPage';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { formatMxn, last12MonthsRange } from '@/utils/financial-kpis';
+import {
+  endOfCivilDayIso,
+  formatMxn,
+  last12MonthsRange,
+  startOfCivilDayIso,
+} from '@/utils/financial-kpis';
 import { ticketListQueryKey } from '@/utils/ticket-queries';
 
 const mocks = vi.hoisted(() => ({
@@ -126,8 +131,8 @@ describe('HistoryPage Todo el historial preset', () => {
         expect.objectContaining({
           page: 1,
           limit: 100,
-          dateFrom: expected.dateFrom,
-          dateTo: expected.dateTo,
+          dateFrom: startOfCivilDayIso(expected.dateFrom, 'America/Mexico_City'),
+          dateTo: endOfCivilDayIso(expected.dateTo, 'America/Mexico_City'),
         }),
         { signal: expect.any(AbortSignal) },
       );
@@ -174,12 +179,15 @@ describe('HistoryPage Todo el historial preset', () => {
     renderHistory();
     fireEvent.click(await screen.findByRole('button', { name: 'Todo el historial' }));
     await waitFor(() => expect(mocks.listTickets).toHaveBeenCalled());
+    expect(await screen.findByText(formatMxn(10))).toBeInTheDocument();
     mocks.listTickets.mockClear();
     mocks.getDashboardDailyReport.mockClear();
     mocks.getDashboardKpis.mockClear();
 
     fireEvent.click(screen.getByRole('button', { name: 'Todo el historial' }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
 
     expect(mocks.listTickets).not.toHaveBeenCalled();
     expect(mocks.getDashboardDailyReport).not.toHaveBeenCalled();
@@ -189,18 +197,20 @@ describe('HistoryPage Todo el historial preset', () => {
   it('reuses the fresh Último año query when returning to the same key', async () => {
     const { client } = renderHistory();
     const year = last12MonthsRange();
+    const yearQuery = {
+      page: 1,
+      limit: 100,
+      dateFrom: startOfCivilDayIso(year.dateFrom, 'America/Mexico_City'),
+      dateTo: endOfCivilDayIso(year.dateTo, 'America/Mexico_City'),
+    };
     await waitFor(() =>
       expect(mocks.listTickets).toHaveBeenCalledWith(
         'company-a',
-        expect.objectContaining(year),
+        yearQuery,
         { signal: expect.any(AbortSignal) },
       ),
     );
-    const yearKey = ticketListQueryKey('company-a', {
-      page: 1,
-      limit: 100,
-      ...year,
-    });
+    const yearKey = ticketListQueryKey('company-a', yearQuery);
     const cachedYearData = client.getQueryData(yearKey);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Todo el historial' }));
@@ -219,8 +229,8 @@ describe('HistoryPage Todo el historial preset', () => {
         expect.objectContaining({
           page: 1,
           limit: 100,
-          dateFrom: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
-          dateTo: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+          dateFrom: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T00:00:00\.000-06:00$/),
+          dateTo: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T23:59:59\.999-06:00$/),
         }),
         { signal: expect.any(AbortSignal) },
       );
@@ -229,7 +239,9 @@ describe('HistoryPage Todo el historial preset', () => {
       dateFrom: string;
       dateTo: string;
     };
-    expect(todayCall.dateFrom).toBe(todayCall.dateTo);
+    expect(todayCall.dateFrom.slice(0, 10)).toBe(todayCall.dateTo.slice(0, 10));
+    expect(todayCall.dateFrom).toBe(startOfCivilDayIso(todayCall.dateFrom.slice(0, 10), 'America/Mexico_City'));
+    expect(todayCall.dateTo).toBe(endOfCivilDayIso(todayCall.dateTo.slice(0, 10), 'America/Mexico_City'));
 
     const requestsBeforeReturn = mocks.listTickets.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: 'Último año' }));
@@ -239,7 +251,9 @@ describe('HistoryPage Todo el historial preset', () => {
         'true',
       ),
     );
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
 
     expect(mocks.listTickets).toHaveBeenCalledTimes(requestsBeforeReturn);
     expect(client.getQueryData(yearKey)).toBe(cachedYearData);
@@ -277,6 +291,32 @@ const HISTORY_METRIC_INFO = {
   },
 } as const;
 
+it('applies a custom Desde through the calendar and includes that civil day', async () => {
+  renderHistory();
+  await screen.findByRole('button', { name: 'Último año' });
+  fireEvent.click(screen.getByLabelText('Desde'));
+  const dialog = await screen.findByRole('dialog');
+  const [monthSelect, yearSelect] = within(dialog).getAllByRole('combobox');
+  fireEvent.change(yearSelect, { target: { value: '2026' } });
+  fireEvent.change(monthSelect, { target: { value: '7' } });
+  const cells = within(dialog).getAllByRole('gridcell', { name: '10' });
+  fireEvent.click(cells.find((cell) => !cell.classList.contains('day-outside')) ?? cells[0]);
+
+  await waitFor(() => {
+    expect(mocks.listTickets).toHaveBeenCalledWith(
+      'company-a',
+      expect.objectContaining({
+        dateFrom: startOfCivilDayIso('2026-08-10', 'America/Mexico_City'),
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+  expect(screen.getByLabelText('Desde')).toHaveTextContent('10/08/2026');
+  expect(screen.getByRole('button', { name: 'Último año' })).toHaveAttribute('aria-pressed', 'false');
+  const daily = mocks.getDashboardDailyReport.mock.calls.at(-1)?.[1] as { dateFrom: string };
+  expect(daily.dateFrom).toBe(startOfCivilDayIso('2026-08-10', 'America/Mexico_City'));
+});
+
 describe('HistoryPage metrics UI', () => {
   it('renders tickets, date controls, KPI values and four info triggers', async () => {
     renderHistory();
@@ -305,8 +345,8 @@ describe('HistoryPage metrics UI', () => {
       expect.objectContaining({
         page: 1,
         limit: 100,
-        dateFrom: expected.dateFrom,
-        dateTo: expected.dateTo,
+        dateFrom: startOfCivilDayIso(expected.dateFrom, 'America/Mexico_City'),
+        dateTo: endOfCivilDayIso(expected.dateTo, 'America/Mexico_City'),
       }),
       { signal: expect.any(AbortSignal) },
     );

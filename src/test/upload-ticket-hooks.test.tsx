@@ -108,11 +108,13 @@ describe('upload mutations use explicit origin company', () => {
         companyId: 'company-a',
         file,
         signal: controller.signal,
+        idempotencyKey: '11111111-1111-4111-8111-111111111111',
       });
     });
 
     expect(uploadTicket).toHaveBeenCalledWith('company-a', file, {
       signal: controller.signal,
+      idempotencyKey: '11111111-1111-4111-8111-111111111111',
     });
     await waitFor(() => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['tickets', 'company-a'] });

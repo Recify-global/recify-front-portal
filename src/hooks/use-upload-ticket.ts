@@ -12,6 +12,7 @@ interface UploadMutationInput {
   companyId: string;
   file: File;
   signal?: AbortSignal;
+  idempotencyKey: string;
 }
 
 export function useUploadTicket() {
@@ -19,11 +20,11 @@ export function useUploadTicket() {
 
   return useMutation({
     onMutate: captureAuthMutationContext,
-    mutationFn: ({ companyId, file, signal }: UploadMutationInput) => {
+    mutationFn: ({ companyId, file, signal, idempotencyKey }: UploadMutationInput) => {
       if (!companyId) {
         return Promise.reject(new Error('No hay compañía activa para subir el ticket.'));
       }
-      return uploadTicket(companyId, file, { signal });
+      return uploadTicket(companyId, file, { signal, idempotencyKey });
     },
     onSuccess: async (data, { companyId }, context) => {
       if (!isAuthMutationContextCurrent(context)) return;
@@ -49,7 +50,7 @@ export function useUploadTicket() {
 
 export function usePreprocessTicket() {
   return useMutation({
-    mutationFn: ({ companyId, file, signal }: UploadMutationInput) => {
+    mutationFn: ({ companyId, file, signal }: Omit<UploadMutationInput, 'idempotencyKey'>) => {
       if (!companyId) {
         return Promise.reject(new Error('No hay compañía activa para analizar el ticket.'));
       }

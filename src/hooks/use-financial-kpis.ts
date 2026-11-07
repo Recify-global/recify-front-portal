@@ -17,6 +17,7 @@ export interface FinancialKpiFilters {
   dateFrom: string;
   dateTo: string;
   category: string;
+  timeZone?: string;
 }
 
 export type FinancialKpiAvailability =
@@ -99,17 +100,17 @@ function ticketsLabel(count: number): string {
  */
 export function useFinancialKpis(filters: FinancialKpiFilters): FinancialKpisView {
   const { companyId } = useAuth();
-  const { dateFrom, dateTo, category } = filters;
+  const { dateFrom, dateTo, category, timeZone } = filters;
 
   const rangeValid = isValidDateRange(dateFrom, dateTo);
   const categoryActive = category !== 'all' && category.trim() !== '';
 
   const queryParams = useMemo(() => {
     const params: { dateFrom?: string; dateTo?: string } = {};
-    if (dateFrom.trim()) params.dateFrom = startOfCivilDayIso(dateFrom.trim());
-    if (dateTo.trim()) params.dateTo = endOfCivilDayIso(dateTo.trim());
+    if (dateFrom.trim()) params.dateFrom = startOfCivilDayIso(dateFrom.trim(), timeZone);
+    if (dateTo.trim()) params.dateTo = endOfCivilDayIso(dateTo.trim(), timeZone);
     return params;
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, timeZone]);
 
   const enabled = Boolean(companyId) && rangeValid && !categoryActive;
 

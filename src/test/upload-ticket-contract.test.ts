@@ -33,7 +33,9 @@ describe('upload multipart creation contract', () => {
   it('sends only the image FormData field and no isAccreditable on create', async () => {
     const file = new File(['img'], 'ticket.png', { type: 'image/png' });
 
-    await uploadTicket('company-a', file);
+    await uploadTicket('company-a', file, {
+      idempotencyKey: '11111111-1111-4111-8111-111111111111',
+    });
 
     expect(mocks.apiRequest).toHaveBeenCalledOnce();
     const [path, opts] = mocks.apiRequest.mock.calls[0];
@@ -41,6 +43,9 @@ describe('upload multipart creation contract', () => {
     expect(opts.method).toBe('POST');
     expect(opts.formData).toBeInstanceOf(FormData);
     expect(opts.body).toBeUndefined();
+    expect(opts.headers).toEqual({
+      'Idempotency-Key': '11111111-1111-4111-8111-111111111111',
+    });
 
     const formData = opts.formData as FormData;
     expect(Array.from(formData.keys())).toEqual(['image']);
@@ -52,6 +57,7 @@ describe('upload multipart creation contract', () => {
   it('appends allowlisted ticketDraft JSON next to the image and still does not PATCH', async () => {
     const file = new File(['img'], 'ticket.png', { type: 'image/png' });
     await uploadTicket('company-a', file, {
+      idempotencyKey: '22222222-2222-4222-8222-222222222222',
       ticketDraft: {
         vendor: 'Costco',
         amount: 458.3,
@@ -83,7 +89,9 @@ describe('upload multipart creation contract', () => {
 
   it('does not invent a follow-up PATCH from the upload service', async () => {
     const file = new File(['img'], 'ticket.png', { type: 'image/png' });
-    await uploadTicket('company-a', file);
+    await uploadTicket('company-a', file, {
+      idempotencyKey: '11111111-1111-4111-8111-111111111111',
+    });
     expect(mocks.apiRequest).toHaveBeenCalledTimes(1);
   });
 

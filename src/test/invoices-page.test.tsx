@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import InvoicesPage from '@/pages/InvoicesPage';
 import type { BackendInvoice } from '@/types/invoice';
 import { ApiRequestError } from '@/api/http';
-import { dateRangeForPreset } from '@/utils/financial-kpis';
+import { dateRangeForPreset, endOfCivilDayIso, startOfCivilDayIso } from '@/utils/financial-kpis';
 
 const mocks = vi.hoisted(() => ({
   companyId: 'company-a' as string | null,
@@ -176,7 +176,7 @@ describe('InvoicesPage inventory and UUID safety', () => {
   it('requests page 2 with server pagination params', async () => {
     renderPage();
     await screen.findByText('Emisor Uno');
-    fireEvent.click(screen.getByLabelText('Go to next page'));
+    fireEvent.click(screen.getByLabelText('Página siguiente'));
     expect(await screen.findByText('Página Dos')).toBeInTheDocument();
     expect(mocks.listInvoices).toHaveBeenCalledWith(
       'company-a',
@@ -232,6 +232,49 @@ describe('InvoicesPage inventory and UUID safety', () => {
     );
   });
 
+  it('does not carry company A filters into the company B list query', async () => {
+    const { rerender } = renderPage();
+    await screen.findByText('Emisor Uno');
+    fireEvent.change(screen.getByLabelText('RFC del emisor'), {
+      target: { value: 'XAXX010101000' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '7 días' }));
+    await waitFor(() => {
+      expect(mocks.listInvoices).toHaveBeenCalledWith(
+        'company-a',
+        expect.objectContaining({ issuerRfc: 'XAXX010101000' }),
+        expect.any(Object),
+      );
+    });
+    mocks.listInvoices.mockClear();
+
+    mocks.companyId = 'company-b';
+    rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <InvoicesPage />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.listInvoices).toHaveBeenCalledWith(
+        'company-b',
+        { page: 1, limit: 20 },
+        expect.any(Object),
+      );
+    });
+    for (const call of mocks.listInvoices.mock.calls) {
+      expect(call[0]).toBe('company-b');
+      expect(call[1]).not.toHaveProperty('issuerRfc');
+      expect(call[1]).not.toHaveProperty('dateFrom');
+      expect(call[1]).not.toHaveProperty('dateTo');
+    }
+    expect(screen.getByRole('button', { name: 'Todo el historial' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByLabelText('RFC del emisor')).toHaveValue('');
+  });
+
   it('shows detail error with retry instead of silent success', async () => {
     mocks.getInvoice.mockRejectedValue(new ApiRequestError('missing', 404));
     renderPage();
@@ -284,6 +327,19 @@ describe('InvoicesPage inventory and UUID safety', () => {
   });
 });
 
+async function chooseCivilDate(label: string, wire: string) {
+  const [year, month, day] = wire.split('-');
+  fireEvent.click(screen.getByLabelText(label));
+  const dialog = await screen.findByRole('dialog');
+  const [monthSelect, yearSelect] = within(dialog).getAllByRole('combobox');
+  fireEvent.change(monthSelect, { target: { value: String(Number(month) - 1) } });
+  fireEvent.change(yearSelect, { target: { value: year } });
+  const dayName = String(Number(day));
+  const cells = within(dialog).getAllByRole('gridcell', { name: dayName });
+  const current = cells.find((cell) => !cell.classList.contains('day-outside'));
+  fireEvent.click(current ?? cells[0]);
+}
+
 describe('InvoicesPage filters', () => {
   it('starts with Todo el historial and omits date params', async () => {
     renderPage();
@@ -322,8 +378,8 @@ describe('InvoicesPage filters', () => {
         expect.objectContaining({
           page: 1,
           limit: 20,
-          dateFrom: expected.dateFrom,
-          dateTo: expected.dateTo,
+          dateFrom: startOfCivilDayIso(expected.dateFrom),
+          dateTo: endOfCivilDayIso(expected.dateTo),
         }),
         expect.any(Object),
       );
@@ -348,63 +404,44 @@ describe('InvoicesPage filters', () => {
       'aria-pressed',
       'true',
     );
-    expect(screen.getByLabelText('Desde')).toHaveValue('');
-    expect(screen.getByLabelText('Hasta')).toHaveValue('');
+    expect(screen.getByLabelText('Desde')).toHaveTextContent('DD/MM/AAAA');
+    expect(screen.getByLabelText('Hasta')).toHaveTextContent('DD/MM/AAAA');
   });
 
   it('serializes valid custom civil dates and holds the last valid query for invalid ranges', async () => {
     renderPage();
     await screen.findByText('Emisor Uno');
-    const from = screen.getByLabelText('Desde');
-    const to = screen.getByLabelText('Hasta');
+    expect(screen.queryByRole('button', { name: 'Limpiar filtros' })).not.toBeInTheDocument();
 
-    fireEvent.change(from, { target: { value: '10/08/2026' } });
-    fireEvent.blur(from);
+    await chooseCivilDate('Desde', '2026-08-10');
     await waitFor(() => {
       expect(mocks.listInvoices).toHaveBeenCalledWith(
         'company-a',
-        expect.objectContaining({ dateFrom: '2026-08-10' }),
+        expect.objectContaining({ dateFrom: startOfCivilDayIso('2026-08-10') }),
         expect.any(Object),
       );
     });
+    expect(screen.getByLabelText('Desde')).toHaveTextContent('10/08/2026');
+    expect(screen.getByRole('button', { name: 'Limpiar filtros' })).toBeInTheDocument();
 
     mocks.listInvoices.mockClear();
-    fireEvent.change(to, { target: { value: '01/08/2026' } });
-    fireEvent.blur(to);
+    await chooseCivilDate('Hasta', '2026-08-01');
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'La fecha inicial no puede ser posterior',
     );
-    await new Promise((resolve) => setTimeout(resolve, 30));
     expect(mocks.listInvoices).not.toHaveBeenCalled();
 
-    fireEvent.change(to, { target: { value: '12/08/2026' } });
-    fireEvent.blur(to);
+    await chooseCivilDate('Hasta', '2026-08-12');
     await waitFor(() => {
       expect(mocks.listInvoices).toHaveBeenCalledWith(
         'company-a',
         expect.objectContaining({
-          dateFrom: '2026-08-10',
-          dateTo: '2026-08-12',
+          dateFrom: startOfCivilDayIso('2026-08-10'),
+          dateTo: endOfCivilDayIso('2026-08-12'),
         }),
         expect.any(Object),
       );
     });
-  });
-
-  it('rejects an invalid civil date without issuing a request', async () => {
-    renderPage();
-    await screen.findByText('Emisor Uno');
-    mocks.listInvoices.mockClear();
-    const from = screen.getByLabelText('Desde');
-
-    fireEvent.change(from, { target: { value: '31/02/2026' } });
-    fireEvent.blur(from);
-
-    expect(mocks.toastError).toHaveBeenCalledWith(
-      'Ingresa una fecha válida con el formato DD/MM/AAAA.',
-    );
-    expect(mocks.listInvoices).not.toHaveBeenCalled();
-    expect(from).toHaveValue('');
   });
 
   it('combines server filters and preserves them while paginating', async () => {
@@ -438,7 +475,7 @@ describe('InvoicesPage filters', () => {
       );
     });
 
-    fireEvent.click(screen.getByLabelText('Go to next page'));
+    fireEvent.click(screen.getByLabelText('Página siguiente'));
     await waitFor(() => {
       expect(mocks.listInvoices).toHaveBeenCalledWith(
         'company-a',
@@ -468,7 +505,7 @@ describe('InvoicesPage filters', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '7 días' }));
     await waitFor(() => expect(mocks.listInvoices.mock.calls.length).toBeGreaterThan(1));
-    fireEvent.click(screen.getByLabelText('Go to next page'));
+    fireEvent.click(screen.getByLabelText('Página siguiente'));
     await screen.findByText('Página Dos');
 
     fireEvent.click(screen.getByRole('button', { name: 'Limpiar filtros' }));
@@ -476,8 +513,8 @@ describe('InvoicesPage filters', () => {
     expect(await screen.findByText('Emisor Uno')).toBeInTheDocument();
     expect(screen.getByText('Página 1 de 2 · 25 facturas')).toBeInTheDocument();
     expect(screen.getByLabelText('RFC del emisor')).toHaveValue('');
-    expect(screen.getByLabelText('Desde')).toHaveValue('');
-    expect(screen.getByLabelText('Hasta')).toHaveValue('');
+    expect(screen.getByLabelText('Desde')).toHaveTextContent('DD/MM/AAAA');
+    expect(screen.getByLabelText('Hasta')).toHaveTextContent('DD/MM/AAAA');
     expect(screen.getByRole('button', { name: 'Todo el historial' })).toHaveAttribute(
       'aria-pressed',
       'true',

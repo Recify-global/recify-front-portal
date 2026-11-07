@@ -5,6 +5,7 @@ import { CategoryBadge } from '@/components/recify/CategoryBadge';
 import { TicketImagePreview } from '@/components/recify/TicketImagePreview';
 import { TicketImageDialog } from '@/components/recify/TicketImageDialog';
 import { BatchUploadDialog } from '@/components/recify/BatchUploadDialog';
+import { InvoiceBatchUploadDialog } from '@/components/recify/InvoiceBatchUploadDialog';
 import { UploadHelpDialog } from '@/components/recify/UploadHelpDialog';
 import { TicketScanAnimation } from '@/components/recify/TicketScanAnimation';
 import { InvoiceUploadResult } from '@/components/recify/InvoiceUploadResult';
@@ -46,7 +47,11 @@ import {
   createIndividualUploadFlow,
   type ActiveUploadContext,
 } from '@/utils/individual-upload-flow';
-import { getInvoiceUploadErrorMessage, isInvoiceAbortError } from '@/utils/invoice-errors';
+import {
+  getDocumentAnalysisErrorMessage,
+  getInvoiceUploadErrorMessage,
+  isInvoiceAbortError,
+} from '@/utils/invoice-errors';
 import {
   INVOICE_PDF_ACCEPT,
   invoicePdfRejectionMessage,
@@ -115,6 +120,7 @@ export default function UploadPage() {
   const [imageDialogUrl, setImageDialogUrl] = useState<string | null>(null);
   const [hasPersistedTicket, setHasPersistedTicket] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
+  const [invoiceBatchOpen, setInvoiceBatchOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previewUrlRef = useRef<string | undefined>(undefined);
   const companyIdRef = useRef<string | null>(null);
@@ -123,7 +129,7 @@ export default function UploadPage() {
   const saveClaimRef = useRef(false);
   const invoiceClaimRef = useRef(false);
   const uploadFlowRef = useRef(createIndividualUploadFlow());
-  const { token, companyId } = useAuth();
+  const { isAuthenticated, companyId } = useAuth();
   const preprocessMutation = usePreprocessTicket();
   const uploadMutation = useUploadTicket();
   const updateMutation = useUpdateDashboardTicket();
@@ -203,6 +209,14 @@ export default function UploadPage() {
   );
 
   const extractError = (err: unknown, fallback: string) => {
+    if (err instanceof ApiRequestError && err.code === 'UPLOAD_IN_PROGRESS') {
+      return 'La subida sigue en proceso. Vuelve a guardar para recuperar el mismo resultado, sin crear otro ticket.';
+    }
+    if (err instanceof ApiRequestError && err.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH') {
+      return 'Esta subida ya se usó con otro contenido. No se creó un segundo ticket.';
+    }
+    const providerMessage = getDocumentAnalysisErrorMessage(err);
+    if (providerMessage) return providerMessage;
     if (err instanceof ApiRequestError) return err.message || fallback;
     if (err instanceof Error) return err.message || fallback;
     return fallback;
@@ -219,7 +233,7 @@ export default function UploadPage() {
     uploadFlowRef.current.isCurrent(context, companyIdRef.current);
 
   const validateSession = () => {
-    if (!token) {
+    if (!isAuthenticated) {
       toast.error('Tu sesión expiró. Inicia sesión de nuevo.');
       return false;
     }
@@ -429,6 +443,12 @@ export default function UploadPage() {
     setBatchOpen(true);
   };
 
+  const openInvoiceBatch = () => {
+    if (isBusy) return;
+    if (!validateSession()) return;
+    setInvoiceBatchOpen(true);
+  };
+
   const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
     const file = input.files?.[0] ?? null;
@@ -458,6 +478,7 @@ export default function UploadPage() {
         companyId: context.companyId,
         file: selectedFile as File,
         signal: controller.signal,
+        idempotencyKey: context.operationKey,
       });
       if (!isCurrentFlow(context, controller.signal)) return;
 
@@ -525,7 +546,15 @@ export default function UploadPage() {
         toast.success('Ticket guardado correctamente.');
       }
     } catch (err) {
-      if (!isCurrentFlow(context, controller.signal) || isAbortLike(err)) return;
+      if (!uploadFlowRef.current.isCurrent(context, companyIdRef.current)) return;
+      if (isAbortLike(err)) {
+        if (!controller.signal.aborted) {
+          toast.info(
+            'No se confirmó la respuesta del servidor. Vuelve a guardar para recuperar el mismo ticket.',
+          );
+        }
+        return;
+      }
       toast.error(extractError(err, 'No se pudo guardar el ticket.'));
     } finally {
       uploadFlowRef.current.releaseController(controller);
@@ -720,10 +749,19 @@ export default function UploadPage() {
                 >
                   <Layers size={16} className="mr-2" /> Subir varios tickets
                 </Button>
+                <Button
+                  variant="secondary"
+                  className="w-full h-11 rounded-xl"
+                  onClick={openInvoiceBatch}
+                  disabled={isBusy}
+                >
+                  <Receipt size={16} className="mr-2" /> Subir varias facturas
+                </Button>
               </div>
             )}
 
             <BatchUploadDialog open={batchOpen} onOpenChange={setBatchOpen} />
+            <InvoiceBatchUploadDialog open={invoiceBatchOpen} onOpenChange={setInvoiceBatchOpen} />
 
             {state === 'done' && uploadMode === 'ticket' && (
               <Button

@@ -34,10 +34,11 @@ interface TeamMembersListProps {
   onRemove: (member: TeamMember) => Promise<void>;
 }
 
-function StatusBadge({ status }: { status: TeamMember['status'] }) {
+function StatusBadge({ member }: { member: TeamMember }) {
+  const pendingIdentity = member.kind === 'pending' || member.status === 'pending';
   return (
-    <Badge variant={status === 'active' ? 'secondary' : 'outline'}>
-      {status}
+    <Badge variant={pendingIdentity ? 'outline' : 'secondary'}>
+      {pendingIdentity ? 'Pendiente de verificar identidad' : 'Activo'}
     </Badge>
   );
 }
@@ -159,7 +160,7 @@ export function TeamMembersList({
                   )}
                 </TableCell>
                 <TableCell>
-                  <StatusBadge status={member.status} />
+                  <StatusBadge member={member} />
                 </TableCell>
                 {canManage ? (
                   <TableCell>
@@ -197,7 +198,7 @@ export function TeamMembersList({
           >
             <div className="flex items-start justify-between gap-3">
               <Identity member={member} isSelf={member.userId === currentUserId} />
-              <StatusBadge status={member.status} />
+              <StatusBadge member={member} />
             </div>
             <dl className="grid grid-cols-2 gap-3 text-sm">
               <div>

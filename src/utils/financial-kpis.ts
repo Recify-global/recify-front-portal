@@ -129,20 +129,75 @@ export function civilDateInTimeZone(date: Date, timeZone = HISTORY_TIMEZONE): st
   return `${year}-${month}-${day}`;
 }
 
-/**
- * Inicio del día civil como ISO con offset fijo -06:00 (contrato KPI Histórico).
- * El `timeZone` se resuelve para validar IANA; el offset wire permanece -06:00
- * mientras el contrato FE de KPIs no exponga otro.
- */
-export function startOfCivilDayIso(dateKey: string, timeZone = HISTORY_TIMEZONE): string {
-  resolveCompanyTimeZone(timeZone);
-  return `${dateKey}T00:00:00.000-06:00`;
+function zoneOffsetMs(instant: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(instant);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value);
+  const asUtc = Date.UTC(
+    value('year'),
+    value('month') - 1,
+    value('day'),
+    value('hour') % 24,
+    value('minute'),
+    value('second'),
+  );
+  return asUtc - instant.getTime();
 }
 
-/** Fin del día civil como ISO con offset fijo -06:00. */
+function formatUtcOffset(offsetMs: number): string {
+  const totalMinutes = Math.round(offsetMs / 60000);
+  const sign = totalMinutes >= 0 ? '+' : '-';
+  const absolute = Math.abs(totalMinutes);
+  return `${sign}${pad2(Math.floor(absolute / 60))}:${pad2(absolute % 60)}`;
+}
+
+/** Offset ISO de un reloj civil en la zona IANA. Chihuahua y Ciudad de México siguen en -06:00. */
+function civilClockOffset(dateKey: string, time: string, timeZone: string): string {
+  const zone = resolveCompanyTimeZone(timeZone);
+  const guess = new Date(`${dateKey}T${time}Z`);
+  const first = zoneOffsetMs(guess, zone);
+  const instant = new Date(guess.getTime() - first);
+  return formatUtcOffset(zoneOffsetMs(instant, zone));
+}
+
+/**
+ * Inicio del día civil como ISO. El offset sale de la zona de la compañía,
+ * no de `toISOString()`, para que `$gte` coincida con la medianoche guardada.
+ */
+export function startOfCivilDayIso(dateKey: string, timeZone = HISTORY_TIMEZONE): string {
+  return `${dateKey}T00:00:00.000${civilClockOffset(dateKey, '00:00:00.000', timeZone)}`;
+}
+
+/** Fin del día civil como ISO, inclusive para un `$lte` sobre la medianoche guardada. */
 export function endOfCivilDayIso(dateKey: string, timeZone = HISTORY_TIMEZONE): string {
-  resolveCompanyTimeZone(timeZone);
-  return `${dateKey}T23:59:59.999-06:00`;
+  return `${dateKey}T23:59:59.999${civilClockOffset(dateKey, '23:59:59.999', timeZone)}`;
+}
+
+/**
+ * Límites inclusivos para consultas que comparan con `$lte` sobre una fecha
+ * guardada a medianoche de la zona. `YYYY-MM-DD` se coerciona a medianoche UTC
+ * y deja fuera el último día civil.
+ */
+export function inclusiveCivilQueryBounds(
+  dateFrom: string,
+  dateTo: string,
+  timeZone = HISTORY_TIMEZONE,
+): { dateFrom?: string; dateTo?: string } {
+  const from = dateFrom.trim();
+  const to = dateTo.trim();
+  return {
+    ...(from ? { dateFrom: startOfCivilDayIso(from, timeZone) } : {}),
+    ...(to ? { dateTo: endOfCivilDayIso(to, timeZone) } : {}),
+  };
 }
 
 export type DatePresetId =

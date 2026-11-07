@@ -1,5 +1,5 @@
 import type { ApiEnvelope, ApiValidationIssue } from '@/types/api';
-import { getStoredToken } from '@/auth/storage';
+import { getClientSession } from '@/auth/storage';
 import {
   isAuthSessionClosing,
   terminateAuthSession,
@@ -43,6 +43,7 @@ export interface RequestOptions {
   body?: unknown;
   formData?: FormData;
   auth?: boolean;
+  allowDuringSignOut?: boolean;
   signal?: AbortSignal;
   headers?: Record<string, string>;
 }
@@ -60,14 +61,8 @@ export async function apiRequest<T>(path: string, opts: RequestOptions = {}): Pr
   }
 
   const authEnabled = opts.auth !== false;
-  if (authEnabled && isAuthSessionClosing()) {
+  if (authEnabled && isAuthSessionClosing() && !opts.allowDuringSignOut) {
     throw new ApiRequestError('Tu sesión ya no está activa.', 401);
-  }
-
-  let sentToken: string | null = null;
-  if (authEnabled) {
-    sentToken = getStoredToken();
-    if (sentToken) headers['Authorization'] = `Bearer ${sentToken}`;
   }
 
   let response: Response;
@@ -76,9 +71,18 @@ export async function apiRequest<T>(path: string, opts: RequestOptions = {}): Pr
       method: opts.method ?? 'GET',
       headers,
       body,
+      credentials: 'include',
       signal: opts.signal,
     });
   } catch (err) {
+    if (
+      opts.signal?.aborted
+      || (err instanceof Error && err.name === 'AbortError')
+    ) {
+      throw err instanceof Error && err.name === 'AbortError'
+        ? err
+        : new DOMException('The operation was aborted.', 'AbortError');
+    }
     throw new ApiRequestError(
       err instanceof Error ? err.message : 'Network error',
       0,
@@ -102,7 +106,11 @@ export async function apiRequest<T>(path: string, opts: RequestOptions = {}): Pr
   if (!response.ok) {
     // Un 401 usa el mismo cleanup idempotente que el logout manual.
     // Un 403 conserva la sesión: falta de permisos no equivale a expiración.
-    if (response.status === 401 && authEnabled && sentToken) {
+    if (
+      response.status === 401 &&
+      authEnabled &&
+      getClientSession().status === 'authenticated'
+    ) {
       await terminateAuthSession();
     }
 

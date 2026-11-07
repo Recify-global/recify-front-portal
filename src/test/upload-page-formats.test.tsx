@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({
     token: 'test-token',
+    isAuthenticated: true,
     companyId: 'company-a',
   }),
 }));
@@ -96,6 +97,10 @@ vi.mock('@/components/recify/CameraCaptureDialog', () => ({
 
 vi.mock('@/components/recify/BatchUploadDialog', () => ({
   BatchUploadDialog: () => null,
+}));
+
+vi.mock('@/components/recify/InvoiceBatchUploadDialog', () => ({
+  InvoiceBatchUploadDialog: () => null,
 }));
 
 vi.mock('@/components/recify/TicketScanAnimation', () => ({

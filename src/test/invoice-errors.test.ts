@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiRequestError } from '@/api/http';
 import {
+  getDocumentAnalysisErrorMessage,
   getInvoiceUploadErrorMessage,
   getInvoiceUserErrorMessage,
   isInvoiceAbortError,
@@ -33,6 +34,18 @@ describe('invoice user errors', () => {
     const abort = new DOMException('Aborted', 'AbortError');
     expect(isInvoiceAbortError(abort)).toBe(true);
     expect(getInvoiceUserErrorMessage(abort, 'fallback')).toBe('');
+  });
+
+  it('hides a depleted document provider behind a stable message', () => {
+    const err = new ApiRequestError(
+      'Document analysis is temporarily unavailable. Try again later.',
+      503,
+      [],
+      'DOCUMENT_PROVIDER_UNAVAILABLE',
+    );
+    expect(getDocumentAnalysisErrorMessage(err)).toMatch(/no está disponible/i);
+    expect(getInvoiceUploadErrorMessage(err)).not.toMatch(/gemini|credit|402|structuring/i);
+    expect(getInvoiceUserErrorMessage(err, 'x')).toBe(getDocumentAnalysisErrorMessage(err));
   });
 
   it('upload errors keep known conflict copy without leaking raw message', () => {

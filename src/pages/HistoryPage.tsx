@@ -2,11 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppLayout } from '@/components/recify/AppLayout';
 import { MetricCard } from '@/components/recify/MetricCard';
 import { SkeletonCard } from '@/components/recify/SkeletonCard';
+import { CivilDatePicker } from '@/components/recify/CivilDatePicker';
 import { HistoryTicketTable } from '@/components/recify/HistoryTicketTable';
 import { TicketImageDialog } from '@/components/recify/TicketImageDialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -40,15 +39,12 @@ import {
   dateRangeForPreset,
   detectActivePreset,
   formatMxn,
+  inclusiveCivilQueryBounds,
   isValidDateRange,
   last12MonthsRange,
   resolveCompanyTimeZone,
   type DatePresetId,
 } from '@/utils/financial-kpis';
-import {
-  formatCivilDateDisplay,
-  parseCivilDateInput,
-} from '@/utils/civil-date-input';
 import {
   ticketCompanyQueryKey,
   ticketListQueryKey,
@@ -62,7 +58,6 @@ import {
   type HistoryTicketEditDraft,
 } from '@/utils/ticket-edit';
 import { selectTicketImageUrl, mergeTicketImageUrl } from '@/utils/ticket-image';
-import { cn } from '@/lib/utils';
 import type { UiTicket } from '@/types/ticket';
 
 interface SelectedTicketImage {
@@ -123,12 +118,6 @@ export default function HistoryPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFromFilter, setDateFromFilter] = useState(initialDateRange.dateFrom);
   const [dateToFilter, setDateToFilter] = useState(initialDateRange.dateTo);
-  const [dateFromDisplay, setDateFromDisplay] = useState(() =>
-    formatCivilDateDisplay(initialDateRange.dateFrom),
-  );
-  const [dateToDisplay, setDateToDisplay] = useState(() =>
-    formatCivilDateDisplay(initialDateRange.dateTo),
-  );
   const [isSavingTable, setIsSavingTable] = useState(false);
   const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
   const [savingAccreditableIds, setSavingAccreditableIds] = useState<ReadonlySet<string>>(
@@ -166,12 +155,6 @@ export default function HistoryPage() {
     previousCompanyIdRef.current = companyId;
   }, [cancelEditing, companyId, isEditing]);
 
-  // Mantener displays alineados cuando el wire cambia por presets / limpiar.
-  useEffect(() => {
-    setDateFromDisplay(dateFromFilter ? formatCivilDateDisplay(dateFromFilter) : '');
-    setDateToDisplay(dateToFilter ? formatCivilDateDisplay(dateToFilter) : '');
-  }, [dateFromFilter, dateToFilter]);
-
   const dateRangeInvalid = !isValidDateRange(dateFromFilter, dateToFilter);
 
   const effectiveDateRange = useMemo(
@@ -182,38 +165,49 @@ export default function HistoryPage() {
     [dateFromFilter, dateToFilter],
   );
 
-  const lastValidListParamsRef = useRef<{
-    page: number;
-    limit: number;
-    dateFrom?: string;
-    dateTo?: string;
-  }>({
-    page: 1,
-    limit: 100,
+  const lastValidCivilRef = useRef({
     dateFrom: initialDateRange.dateFrom,
     dateTo: initialDateRange.dateTo,
+  });
+  const lastValidListParamsRef = useRef({
+    page: 1,
+    limit: 100,
+    ...inclusiveCivilQueryBounds(
+      initialDateRange.dateFrom,
+      initialDateRange.dateTo,
+      companyTimeZone,
+    ),
   });
 
   const ticketsListParams = useMemo(() => {
     if (dateRangeInvalid) return lastValidListParamsRef.current;
-    const params: { page: number; limit: number; dateFrom?: string; dateTo?: string } = {
+    lastValidCivilRef.current = {
+      dateFrom: effectiveDateRange.dateFrom,
+      dateTo: effectiveDateRange.dateTo,
+    };
+    const params = {
       page: 1,
       limit: 100,
+      ...inclusiveCivilQueryBounds(
+        effectiveDateRange.dateFrom,
+        effectiveDateRange.dateTo,
+        companyTimeZone,
+      ),
     };
-    if (effectiveDateRange.dateFrom) params.dateFrom = effectiveDateRange.dateFrom;
-    if (effectiveDateRange.dateTo) params.dateTo = effectiveDateRange.dateTo;
     lastValidListParamsRef.current = params;
     return params;
-  }, [effectiveDateRange, dateRangeInvalid]);
+  }, [companyTimeZone, dateRangeInvalid, effectiveDateRange]);
 
   const ticketsQuery = useTickets(ticketsListParams);
   const dailyReportQuery = useDashboardDailyReport(ticketsListParams);
   const updateMutation = useUpdateDashboardTicket();
 
+  const kpiDates = dateRangeInvalid ? lastValidCivilRef.current : effectiveDateRange;
   const financialKpis = useFinancialKpis({
-    dateFrom: ticketsListParams.dateFrom ?? '',
-    dateTo: ticketsListParams.dateTo ?? '',
+    dateFrom: kpiDates.dateFrom,
+    dateTo: kpiDates.dateTo,
     category: categoryFilter,
+    timeZone: companyTimeZone,
   });
   const activePreset = detectActivePreset(
     effectiveDateRange.dateFrom,
@@ -281,40 +275,6 @@ export default function HistoryPage() {
     const range = dateRangeForPreset(preset, periodReference, companyTimeZone);
     setDateFromFilter(range.dateFrom);
     setDateToFilter(range.dateTo);
-  };
-
-  const commitDateFromDisplay = () => {
-    const raw = dateFromDisplay.trim();
-    if (!raw) {
-      setDateFromFilter('');
-      setDateFromDisplay('');
-      return;
-    }
-    const wire = parseCivilDateInput(raw);
-    if (!wire) {
-      setDateFromDisplay(dateFromFilter ? formatCivilDateDisplay(dateFromFilter) : '');
-      toast.error('Ingresa una fecha válida con el formato DD/MM/AAAA.');
-      return;
-    }
-    setDateFromFilter(wire);
-    setDateFromDisplay(formatCivilDateDisplay(wire));
-  };
-
-  const commitDateToDisplay = () => {
-    const raw = dateToDisplay.trim();
-    if (!raw) {
-      setDateToFilter('');
-      setDateToDisplay('');
-      return;
-    }
-    const wire = parseCivilDateInput(raw);
-    if (!wire) {
-      setDateToDisplay(dateToFilter ? formatCivilDateDisplay(dateToFilter) : '');
-      toast.error('Ingresa una fecha válida con el formato DD/MM/AAAA.');
-      return;
-    }
-    setDateToFilter(wire);
-    setDateToDisplay(formatCivilDateDisplay(wire));
   };
 
   const deleteMutation = useMutation({
@@ -795,8 +755,8 @@ export default function HistoryPage() {
               </Select>
             </div>
             <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 xl:flex-nowrap">
-                <div className="flex min-w-0 flex-wrap gap-2 xl:flex-nowrap" aria-label="Rangos rápidos de fecha">
+              <div className="flex flex-col gap-3">
+                <div className="flex min-w-0 flex-wrap gap-2" aria-label="Rangos rápidos de fecha">
                   {DATE_PRESETS.map((preset) => (
                     <Button
                       key={preset.id}
@@ -811,61 +771,27 @@ export default function HistoryPage() {
                     </Button>
                   ))}
                 </div>
-                <div className="flex min-w-0 flex-wrap items-center gap-3 xl:flex-nowrap xl:shrink-0">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <Label htmlFor="history-date-from" className="shrink-0 text-xs text-muted-foreground">
-                      Desde
-                    </Label>
-                    <Input
-                      id="history-date-from"
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="DD/MM/AAAA"
-                      value={dateFromDisplay}
-                      onChange={(e) => setDateFromDisplay(e.target.value)}
-                      onBlur={commitDateFromDisplay}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          commitDateFromDisplay();
-                        }
-                      }}
-                      disabled={tableEditing.isEditing}
-                      className={cn(
-                        'h-10 min-w-0 w-[9.5rem] rounded-xl border-border',
-                        dateRangeInvalid && 'border-destructive',
-                      )}
-                    />
-                  </div>
-                  <div className="flex min-w-0 items-center gap-2">
-                    <Label htmlFor="history-date-to" className="shrink-0 text-xs text-muted-foreground">
-                      Hasta
-                    </Label>
-                    <Input
-                      id="history-date-to"
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="DD/MM/AAAA"
-                      value={dateToDisplay}
-                      onChange={(e) => setDateToDisplay(e.target.value)}
-                      onBlur={commitDateToDisplay}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          commitDateToDisplay();
-                        }
-                      }}
-                      disabled={tableEditing.isEditing}
-                      className={cn(
-                        'h-10 min-w-0 w-[9.5rem] rounded-xl border-border',
-                        dateRangeInvalid && 'border-destructive',
-                      )}
-                    />
-                  </div>
+                <div className="flex min-w-0 flex-wrap items-center gap-3">
+                  <CivilDatePicker
+                    id="history-date-from"
+                    label="Desde"
+                    value={dateFromFilter}
+                    onChange={setDateFromFilter}
+                    disabled={tableEditing.isEditing}
+                    invalid={dateRangeInvalid}
+                  />
+                  <CivilDatePicker
+                    id="history-date-to"
+                    label="Hasta"
+                    value={dateToFilter}
+                    onChange={setDateToFilter}
+                    disabled={tableEditing.isEditing}
+                    invalid={dateRangeInvalid}
+                  />
                 </div>
               </div>
               {dateRangeInvalid && (
-                <p className="text-xs text-destructive">
+                <p className="text-xs text-destructive" role="alert">
                   La fecha inicial no puede ser posterior a la fecha final.
                 </p>
               )}

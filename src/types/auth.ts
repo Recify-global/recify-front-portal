@@ -19,6 +19,7 @@ export interface AuthUser {
   platformRole: PlatformRole;
   memberships: CompanyMembership[];
   status: UserStatus;
+  emailVerified?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -51,5 +52,4 @@ export interface GoogleLinkRequest extends GoogleLoginRequest {
 
 export interface AuthResponse {
   user: AuthUser;
-  token: string;
 }

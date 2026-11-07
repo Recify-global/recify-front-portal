@@ -3,8 +3,10 @@ import { endpoints } from '@/api/endpoints';
 import type { Paginated } from '@/types/api';
 import type { Company } from '@/types/company';
 
-// Listado de compañías accesibles para el usuario autenticado.
-// Útil a futuro para selector de empresa; hoy el companyId se deriva del login (user.companies[0]).
+export interface CompanyProfile extends Company {
+  rfcMasked: string | null;
+}
+
 export async function listMyCompanies(params: { page?: number; limit?: number } = {}) {
   const qs = new URLSearchParams();
   if (params.page) qs.append('page', String(params.page));
@@ -13,6 +15,19 @@ export async function listMyCompanies(params: { page?: number; limit?: number } 
   return apiRequest<Paginated<Company>>(`${endpoints.companies.list()}${suffix}`);
 }
 
-export async function getCompany(id: string) {
-  return apiRequest<Company>(endpoints.companies.byId(id));
+export function getCompany(
+  companyId: string,
+  signal?: AbortSignal,
+): Promise<CompanyProfile> {
+  return apiRequest<CompanyProfile>(endpoints.companies.byId(companyId), { signal });
+}
+
+export function updateCompanyName(
+  companyId: string,
+  name: string,
+): Promise<CompanyProfile> {
+  return apiRequest<CompanyProfile>(endpoints.companies.byId(companyId), {
+    method: 'PATCH',
+    body: { name },
+  });
 }

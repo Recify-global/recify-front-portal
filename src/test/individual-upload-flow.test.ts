@@ -5,7 +5,12 @@ describe('individual upload flow identity', () => {
   it('captures the origin company when a file flow begins', () => {
     const flow = createIndividualUploadFlow();
 
-    expect(flow.begin('company-a')).toEqual({ companyId: 'company-a', generation: 1 });
+    const started = flow.begin('company-a');
+    expect(started.companyId).toBe('company-a');
+    expect(started.generation).toBe(1);
+    expect(started.operationKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
     expect(flow.getActive()?.companyId).toBe('company-a');
   });
 
@@ -24,6 +29,7 @@ describe('individual upload flow identity', () => {
     const second = flow.begin('company-a');
 
     expect(second.generation).toBeGreaterThan(first.generation);
+    expect(second.operationKey).not.toBe(first.operationKey);
     expect(flow.isCurrent(first, 'company-a')).toBe(false);
     expect(flow.isCurrent(second, 'company-a')).toBe(true);
   });

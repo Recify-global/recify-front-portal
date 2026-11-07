@@ -15,13 +15,17 @@ export function RecifyLogo({ size = 'md', showIcon = true }: RecifyLogoProps) {
   return (
     <div className="flex items-center gap-2">
       {showIcon && (
-        <img 
-          src={logo} 
-          alt="Recify Logo" 
-          className={`${sizeClasses[size]} w-auto`}
+        <img
+          src={logo}
+          alt="Recify Logo"
+          translate="no"
+          className={`notranslate ${sizeClasses[size]} w-auto`}
         />
       )}
-      <span className={`${size === 'sm' ? 'text-lg' : size === 'md' ? 'text-2xl' : 'text-4xl'} font-bold tracking-tight text-foreground`}>
+      <span
+        translate="no"
+        className={`notranslate ${size === 'sm' ? 'text-lg' : size === 'md' ? 'text-2xl' : 'text-4xl'} font-bold tracking-tight text-foreground`}
+      >
         Recify
       </span>
     </div>

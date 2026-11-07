@@ -27,7 +27,7 @@ describe('googleLoginRequest', () => {
         JSON.stringify({
           success: true,
           message: 'Success',
-          data: { user, token: 'recify-jwt' },
+          data: { user },
         }),
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -38,6 +38,8 @@ describe('googleLoginRequest', () => {
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/v1/auth/google');
     expect(options.method).toBe('POST');
+    expect(options.credentials).toBe('include');
+    expect(options.headers).not.toHaveProperty('Authorization');
     const body = JSON.parse(String(options.body)) as Record<string, unknown>;
     expect(body).toEqual({ idToken: 'gis-id-token' });
     expect(body).not.toHaveProperty('email');

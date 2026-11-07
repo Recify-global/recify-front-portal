@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { RecifyLogo } from '@/components/recify/RecifyLogo';
 import { Button } from '@/components/ui/button';
@@ -16,11 +16,6 @@ import { Receipt, BarChart3, Shield, Zap, Loader2 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { ApiRequestError } from '@/api/http';
 import { GoogleSignInButton } from '@/components/recify/GoogleSignInButton';
-import {
-  getStoredCompanyId,
-  getStoredToken,
-  subscribeAuthChanges,
-} from '@/auth/storage';
 
 type AuthMode = 'login' | 'register';
 
@@ -43,7 +38,7 @@ export default function AuthPage() {
   const [companyName, setCompanyName] = useState('');
   const [rfc, setRfc] = useState('');
   const navigate = useNavigate();
-  const { login, register, googleLogin, googleLink } = useAuth();
+  const { login, register, googleLogin, googleLink, status, companyId } = useAuth();
   const [googleLinkToken, setGoogleLinkToken] = useState<string | null>(null);
   const [googleLinkPassword, setGoogleLinkPassword] = useState('');
 
@@ -51,20 +46,11 @@ export default function AuthPage() {
   const loading =
     login.isPending || register.isPending || googleLogin.isPending || googleLink.isPending;
 
-  // Si el usuario ya tiene sesión válida (token + companyId) y aterriza en /auth
-  // (refresh, back del navegador, deep link), lo mandamos directo a la app.
-  // Esto también cubre el caso de que otra pestaña haya hecho login mientras tanto.
+  // Una sesión ya confirmada por el backend no se queda en la pantalla de acceso.
   useEffect(() => {
-    const maybeRedirect = () => {
-      if (getStoredToken()) {
-        navigate(getStoredCompanyId() ? '/app/upload' : '/select-company', {
-          replace: true,
-        });
-      }
-    };
-    maybeRedirect();
-    return subscribeAuthChanges(maybeRedirect);
-  }, [navigate]);
+    if (status !== 'authenticated') return;
+    navigate(companyId ? '/app/upload' : '/select-company', { replace: true });
+  }, [companyId, navigate, status]);
 
   const extractMessage = (err: unknown, fallback: string) => {
     if (err instanceof ApiRequestError) return err.message || fallback;
@@ -137,6 +123,14 @@ export default function AuthPage() {
           });
           persistAndEnter(res);
         } catch (err) {
+          if (err instanceof ApiRequestError && err.status === 409) {
+            toast.error(
+              /RFC/i.test(err.message)
+                ? 'Ese RFC ya está registrado. Usa un RFC distinto.'
+                : 'Ya existe una cuenta con este correo. Inicia sesión o continúa con Google.',
+            );
+            return;
+          }
           toast.error(extractMessage(err, 'No se pudo crear la cuenta.'));
         }
         return;
@@ -250,6 +244,11 @@ export default function AuthPage() {
           {mode === 'login' && (
             <>
               <GoogleSignInButton disabled={loading} onCredential={handleGoogleCredential} />
+              {googleLogin.isPending && (
+                <p className="mt-3 text-center text-sm text-muted-foreground" role="status">
+                  Conectando con Google…
+                </p>
+              )}
 
               <div className="flex items-center gap-3 my-6">
                 <div className="flex-1 h-px bg-border" />
@@ -311,7 +310,8 @@ export default function AuthPage() {
                     value={companyName}
                     onChange={(e) => setCompanyName(e.target.value)}
                     placeholder="Mi Empresa S.A. de C.V."
-                    className="h-11 rounded-xl bg-background border-border"
+                    translate="no"
+                    className="notranslate h-11 rounded-xl bg-background border-border"
                     autoComplete="organization"
                   />
                 </div>
@@ -343,7 +343,7 @@ export default function AuthPage() {
 
           {mode === 'login' && (
             <p className="text-center text-xs text-muted-foreground mt-4">
-              <a href="#" className="text-primary hover:underline">¿Olvidaste tu contraseña?</a>
+              <Link to="/auth/forgot-password" className="text-primary hover:underline">¿Olvidaste tu contraseña?</Link>
             </p>
           )}
 
@@ -366,9 +366,11 @@ export default function AuthPage() {
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Confirma tu cuenta de Recify</DialogTitle>
+            <DialogTitle>
+              Confirma tu cuenta de <span translate="no" className="notranslate">Recify</span>
+            </DialogTitle>
             <DialogDescription>
-              Para enlazar Google por primera vez, ingresa tu contraseña actual de Recify.
+              Para enlazar Google por primera vez, ingresa tu contraseña actual de <span translate="no" className="notranslate">Recify</span>.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleGoogleLink} className="space-y-4">

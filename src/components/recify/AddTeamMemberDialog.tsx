@@ -22,9 +22,6 @@ import {
 import type { MembershipRole } from '@/types/auth';
 import type { AddTeamMemberInput } from '@/types/team';
 
-const RFC_REGEX = /^[A-ZÑ&]{3,4}\d{6}[A-Z\d]{3}$/;
-const PHONE_REGEX = /^\+?[0-9 ()-]{7,25}$/;
-
 interface AddTeamMemberDialogProps {
   pending: boolean;
   onAdd: (input: AddTeamMemberInput) => Promise<void>;
@@ -33,8 +30,6 @@ interface AddTeamMemberDialogProps {
 const initialForm = {
   name: '',
   email: '',
-  phone: '',
-  rfc: '',
   role: 'viewer' as MembershipRole,
 };
 
@@ -59,18 +54,10 @@ export function AddTeamMemberDialog({
     event.preventDefault();
     const name = form.name.trim();
     const email = form.email.trim().toLowerCase();
-    const phone = form.phone.trim();
-    const rfc = form.rfc.trim().toUpperCase();
 
     if (!name) return setError('El nombre es obligatorio.');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return setError('Ingresa un email válido.');
-    }
-    if (!PHONE_REGEX.test(phone)) {
-      return setError('Ingresa un teléfono válido.');
-    }
-    if (rfc && !RFC_REGEX.test(rfc)) {
-      return setError('Ingresa un RFC válido de 12 o 13 caracteres.');
     }
 
     setError(null);
@@ -78,8 +65,6 @@ export function AddTeamMemberDialog({
       await onAdd({
         name,
         email,
-        phone,
-        ...(rfc ? { rfc } : {}),
         role: form.role,
       });
       handleOpenChange(false);
@@ -100,8 +85,8 @@ export function AddTeamMemberDialog({
         <DialogHeader>
           <DialogTitle>Agregar integrante</DialogTitle>
           <DialogDescription>
-            Si el email ya tiene una cuenta, recibirá acceso a esta empresa. Si no,
-            quedará como pending.
+            Si el correo ya está verificado, la persona entra a esta empresa. Si no,
+            queda pendiente hasta que demuestre que controla ese correo.
           </DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={handleSubmit} noValidate>
@@ -128,30 +113,6 @@ export function AddTeamMemberDialog({
               maxLength={254}
               disabled={pending}
               required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="team-member-phone">Teléfono *</Label>
-            <Input
-              id="team-member-phone"
-              type="tel"
-              value={form.phone}
-              onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
-              autoComplete="tel"
-              maxLength={25}
-              disabled={pending}
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="team-member-rfc">RFC</Label>
-            <Input
-              id="team-member-rfc"
-              value={form.rfc}
-              onChange={(event) => setForm((current) => ({ ...current, rfc: event.target.value }))}
-              autoCapitalize="characters"
-              maxLength={13}
-              disabled={pending}
             />
           </div>
           <div className="space-y-2">

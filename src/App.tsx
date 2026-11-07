@@ -4,12 +4,16 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import AuthPage from "./pages/AuthPage";
+import VerifyEmailPage from "./pages/VerifyEmailPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 import DashboardPage from "./pages/DashboardPage";
 import UploadPage from "./pages/UploadPage";
 import HistoryPage from "./pages/HistoryPage";
 import InvoicesPage from "./pages/InvoicesPage";
 import BalancesPage from "./pages/BalancesPage";
 import TeamPage from "./pages/TeamPage";
+import SettingsPage from "./pages/SettingsPage";
 import SelectCompanyPage from "./pages/SelectCompanyPage";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute, { AuthenticatedRoute } from "./guards/ProtectedRoute";
@@ -27,6 +31,9 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Navigate to="/auth" replace />} />
           <Route path="/auth" element={<AuthPage />} />
+          <Route path="/auth/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
           <Route element={<AuthenticatedRoute />}>
             <Route path="/select-company" element={<SelectCompanyPage />} />
           </Route>
@@ -37,6 +44,7 @@ const App = () => (
             <Route path="/app/invoices" element={<InvoicesPage />} />
             <Route path="/app/balances" element={<BalancesPage />} />
             <Route path="/app/team" element={<TeamPage />} />
+            <Route path="/app/settings" element={<SettingsPage />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

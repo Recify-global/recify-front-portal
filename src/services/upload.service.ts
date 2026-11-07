@@ -53,7 +53,11 @@ export async function preprocessTicket(
 export async function uploadTicket(
   companyId: string,
   file: File,
-  opts: { signal?: AbortSignal; ticketDraft?: TicketDraftOverrides } = {},
+  opts: {
+    signal?: AbortSignal;
+    ticketDraft?: TicketDraftOverrides;
+    idempotencyKey: string;
+  },
 ): Promise<UploadTicketResponse> {
   const fd = buildFormData(file);
   if (opts.ticketDraft) {
@@ -63,6 +67,7 @@ export async function uploadTicket(
     method: 'POST',
     formData: fd,
     signal: opts.signal,
+    headers: { 'Idempotency-Key': opts.idempotencyKey },
   });
 }
 

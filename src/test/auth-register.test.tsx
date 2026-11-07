@@ -46,7 +46,6 @@ const owner: AuthUser = {
 };
 
 const successResponse: AuthResponse = {
-  token: 'recify-jwt-register',
   user: owner,
 };
 
@@ -150,7 +149,7 @@ describe('Register onboarding UI', () => {
     fireEvent.click(getFormSubmitButton('Crear cuenta y empresa')!);
 
     await waitFor(() => {
-      expect(getStoredToken()).toBe('recify-jwt-register');
+      expect(getStoredUser()?._id).toBe('user-register');
     });
     expect(getStoredUser()?._id).toBe('user-register');
     expect(getStoredCompanyId()).toBe('company-new');
@@ -169,10 +168,37 @@ describe('Register onboarding UI', () => {
     fireEvent.click(getFormSubmitButton('Crear cuenta y empresa')!);
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('Email already in use');
+      expect(toast.error).toHaveBeenCalledWith(
+        'Ya existe una cuenta con este correo. Inicia sesión o continúa con Google.',
+      );
     });
     expect(getStoredToken()).toBeNull();
     expect(routerMocks.navigate).not.toHaveBeenCalledWith('/app/upload', { replace: true });
+  });
+
+  it('shows the duplicate-RFC error instead of an email conflict', async () => {
+    vi.mocked(registerRequest).mockRejectedValueOnce(
+      new ApiRequestError('RFC already registered', 409),
+    );
+
+    renderAuthPage();
+    openRegisterTab();
+    fillRegisterForm();
+    fireEvent.click(getFormSubmitButton('Crear cuenta y empresa')!);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Ese RFC ya está registrado. Usa un RFC distinto.');
+    });
+    expect(routerMocks.navigate).not.toHaveBeenCalledWith('/app/upload', { replace: true });
+  });
+
+  it('keeps the typed company name out of automatic translation', () => {
+    renderAuthPage();
+    openRegisterTab();
+    const companyName = screen.getByLabelText('Nombre de la empresa');
+    expect(companyName).toHaveAttribute('translate', 'no');
+    expect(companyName).toHaveClass('notranslate');
+    expect(screen.getByText('Datos de tu empresa')).not.toHaveAttribute('translate', 'no');
   });
 
   it('validates required fields before calling the API', async () => {
@@ -227,7 +253,7 @@ describe('Register onboarding UI', () => {
 
     resolveRegister(successResponse);
     await waitFor(() => {
-      expect(getStoredToken()).toBe('recify-jwt-register');
+      expect(getStoredUser()?._id).toBe('user-register');
     });
   });
 });
